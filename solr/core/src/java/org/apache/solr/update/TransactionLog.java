@@ -29,9 +29,11 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.lucene.util.BytesRef;
@@ -87,7 +89,7 @@ public class TransactionLog implements Closeable {
   int snapshot_numRecords;
 
   // write a BytesRef as a byte array
-  JavaBinCodec.ObjectResolver resolver = new JavaBinCodec.ObjectResolver() {
+  static final JavaBinCodec.ObjectResolver resolver = new JavaBinCodec.ObjectResolver() {
     @Override
     public Object resolve(Object o, JavaBinCodec codec) throws IOException {
       if (o instanceof BytesRef) {
@@ -342,7 +344,33 @@ public class TransactionLog implements Closeable {
 
   int lastAddSize;
 
+  /**
+   * Writes an add update command to the transaction log. This is not applicable for
+   * in-place updates; use {@link #write(AddUpdateCommand, long, int)}.
+   * (The previous pointer (applicable for in-place updates) is set to -1 while writing
+   * the command to the transaction log.)
+   * @param cmd The add update command to be written
+   * @param flags Options for writing the command to the transaction log
+   * @return Returns the position pointer of the written update command
+   * 
+   * @see #write(AddUpdateCommand, long, int)
+   */
   public long write(AddUpdateCommand cmd, int flags) {
+    return write(cmd, -1, flags);
+  }
+
+  /**
+   * Writes an add update command to the transaction log. This should be called only for
+   * writing in-place updates, or else pass -1 as the prevPointer.
+   * @param cmd The add update command to be written
+   * @param prevPointer The pointer in the transaction log which this update depends 
+   * on (applicable for in-place updates)
+   * @param flags Options for writing the command to the transaction log
+   * @return Returns the position pointer of the written update command
+   */
+  public long write(AddUpdateCommand cmd, long prevPointer, int flags) {
+    assert (-1 <= prevPointer && (cmd.isInPlaceUpdate() || (-1 == prevPointer)));
+    
     LogCodec codec = new LogCodec(resolver);
     SolrInputDocument sdoc = cmd.getSolrInputDocument();
 
@@ -355,10 +383,19 @@ public class TransactionLog implements Closeable {
 
       MemOutputStream out = new MemOutputStream(new byte[bufSize]);
       codec.init(out);
-      codec.writeTag(JavaBinCodec.ARR, 3);
-      codec.writeInt(UpdateLog.ADD | flags);  // should just take one byte
-      codec.writeLong(cmd.getVersion());
-      codec.writeSolrInputDocument(cmd.getSolrInputDocument());
+      if (cmd.isInPlaceUpdate()) {
+        codec.writeTag(JavaBinCodec.ARR, 5);
+        codec.writeInt(UpdateLog.UPDATE_INPLACE | flags);  // should just take one byte
+        codec.writeLong(cmd.getVersion());
+        codec.writeLong(prevPointer);
+        codec.writeLong(cmd.prevVersion);
+        codec.writeSolrInputDocument(cmd.getSolrInputDocument());
+      } else {
+        codec.writeTag(JavaBinCodec.ARR, 3);
+        codec.writeInt(UpdateLog.ADD | flags);  // should just take one byte
+        codec.writeLong(cmd.getVersion());
+        codec.writeSolrInputDocument(cmd.getSolrInputDocument());
+      }
       lastAddSize = (int)out.size();
 
       synchronized (this) {
@@ -520,6 +557,11 @@ public class TransactionLog implements Closeable {
     }
   }
 
+  /** Move to a read-only state, closing and releasing resources while keeping the log available for reads */
+  public void closeOutput() {
+
+  }
+
   public void finish(UpdateLog.SyncLevel syncLevel) {
     if (syncLevel == UpdateLog.SyncLevel.NONE) return;
     try {
@@ -590,6 +632,10 @@ public class TransactionLog implements Closeable {
    * be used from a single thread. */
   public LogReader getReader(long startingPos) {
     return new LogReader(startingPos);
+  }
+
+  public LogReader getSortedReader(long startingPos) {
+    return new SortedLogReader(startingPos);
   }
 
   /** Returns a single threaded reverse reader */
@@ -673,6 +719,50 @@ public class TransactionLog implements Closeable {
       return channel.size();
     }
 
+  }
+
+  public class SortedLogReader extends LogReader {
+    private long startingPos;
+    private boolean inOrder = true;
+    private TreeMap<Long, Long> versionToPos;
+    Iterator<Long> iterator;
+
+    public SortedLogReader(long startingPos) {
+      super(startingPos);
+      this.startingPos = startingPos;
+    }
+
+    @Override
+    public Object next() throws IOException, InterruptedException {
+      if (versionToPos == null) {
+        versionToPos = new TreeMap<>();
+        Object o;
+        long pos = startingPos;
+
+        long lastVersion = Long.MIN_VALUE;
+        while ( (o = super.next()) != null) {
+          List entry = (List) o;
+          long version = (Long) entry.get(UpdateLog.VERSION_IDX);
+          version = Math.abs(version);
+          versionToPos.put(version, pos);
+          pos = currentPos();
+
+          if (version < lastVersion) inOrder = false;
+          lastVersion = version;
+        }
+        fis.seek(startingPos);
+      }
+
+      if (inOrder) {
+        return super.next();
+      } else {
+        if (iterator == null) iterator = versionToPos.values().iterator();
+        if (!iterator.hasNext()) return null;
+        long pos = iterator.next();
+        if (pos != currentPos()) fis.seek(pos);
+        return super.next();
+      }
+    }
   }
 
   public abstract class ReverseReader {

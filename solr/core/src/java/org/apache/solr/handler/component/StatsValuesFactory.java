@@ -63,13 +63,22 @@ public class StatsValuesFactory {
     
     final FieldType fieldType = sf.getType(); // TODO: allow FieldType to provide impl.
     
-    if (TrieDateField.class.isInstance(fieldType)) {
-      return new DateStatsValues(statsField);
-    } else if (TrieField.class.isInstance(fieldType)) {
-      return new NumericStatsValues(statsField);
+    if (TrieDateField.class.isInstance(fieldType) || DatePointField.class.isInstance(fieldType)) {
+      DateStatsValues statsValues = new DateStatsValues(statsField);
+      if (sf.multiValued()) {
+        return new SortedDateStatsValues(statsValues, statsField);
+      }
+      return statsValues;
+    } else if (TrieField.class.isInstance(fieldType) || PointField.class.isInstance(fieldType)) {
+      
+      NumericStatsValues statsValue = new NumericStatsValues(statsField);
+      if (sf.multiValued()) {
+        return new SortedNumericStatsValues(statsValue, statsField);
+      }
+      return statsValue;
     } else if (StrField.class.isInstance(fieldType)) {
       return new StringStatsValues(statsField);
-    } else if (sf.getType().getClass().equals(EnumField.class)) {
+    } else if (AbstractEnumField.class.isInstance(fieldType)) {
       return new EnumStatsValues(statsField);
     } else {
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
@@ -485,7 +494,7 @@ class NumericStatsValues extends AbstractStatsValues<Number> {
   }
   
   @Override
-  public void accumulate(int docID) {
+  public void accumulate(int docID) throws IOException {
     if (values.exists(docID)) {
       Number value = (Number) values.objectVal(docID);
       accumulate(value, 1);
@@ -640,7 +649,7 @@ class EnumStatsValues extends AbstractStatsValues<EnumFieldValue> {
    * {@inheritDoc}
    */
   @Override
-  public void accumulate(int docID) {
+  public void accumulate(int docID) throws IOException {
     if (values.exists(docID)) {
       Integer intValue = (Integer) values.objectVal(docID);
       String stringValue = values.strVal(docID);
@@ -720,7 +729,7 @@ class DateStatsValues extends AbstractStatsValues<Date> {
   }
   
   @Override
-  public void accumulate(int docID) {
+  public void accumulate(int docID) throws IOException {
     if (values.exists(docID)) {
       accumulate((Date) values.objectVal(docID), 1);
     } else {
@@ -824,7 +833,7 @@ class StringStatsValues extends AbstractStatsValues<String> {
   }
   
   @Override
-  public void accumulate(int docID) {
+  public void accumulate(int docID) throws IOException {
     if (values.exists(docID)) {
       String value = values.strVal(docID);
       if (value != null) {

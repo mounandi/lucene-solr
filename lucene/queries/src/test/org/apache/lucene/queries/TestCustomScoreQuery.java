@@ -153,16 +153,23 @@ public class TestCustomScoreQuery extends FunctionTestSetup {
     }
   }
 
-  private final class CustomExternalQuery extends CustomScoreQuery {
+  private static final class CustomExternalQuery extends CustomScoreQuery {
 
     @Override
     protected CustomScoreProvider getCustomScoreProvider(LeafReaderContext context) throws IOException {
       final NumericDocValues values = DocValues.getNumeric(context.reader(), INT_FIELD);
       return new CustomScoreProvider(context) {
         @Override
-        public float customScore(int doc, float subScore, float valSrcScore) {
+        public float customScore(int doc, float subScore, float valSrcScore) throws IOException {
           assertTrue(doc <= context.reader().maxDoc());
-          return values.get(doc);
+          if (values.docID() < doc) {
+            values.advance(doc);
+          }
+          if (doc == values.docID()) {
+            return values.longValue();
+          } else {
+            return 0;
+          }
         }
       };
     }

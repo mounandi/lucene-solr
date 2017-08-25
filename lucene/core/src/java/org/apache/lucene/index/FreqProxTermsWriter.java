@@ -34,11 +34,10 @@ final class FreqProxTermsWriter extends TermsHash {
   }
 
   private void applyDeletes(SegmentWriteState state, Fields fields) throws IOException {
-
     // Process any pending Term deletes for this newly
     // flushed segment:
-    if (state.segUpdates != null && state.segUpdates.terms.size() > 0) {
-      Map<Term,Integer> segDeletes = state.segUpdates.terms;
+    if (state.segUpdates != null && state.segUpdates.deleteTerms.size() > 0) {
+      Map<Term,Integer> segDeletes = state.segUpdates.deleteTerms;
       List<Term> deleteTerms = new ArrayList<>(segDeletes.keySet());
       Collections.sort(deleteTerms);
       String lastField = null;
@@ -79,8 +78,8 @@ final class FreqProxTermsWriter extends TermsHash {
   }
 
   @Override
-  public void flush(Map<String,TermsHashPerField> fieldsToFlush, final SegmentWriteState state) throws IOException {
-    super.flush(fieldsToFlush, state);
+  public void flush(Map<String,TermsHashPerField> fieldsToFlush, final SegmentWriteState state, Sorter.DocMap sortMap) throws IOException {
+    super.flush(fieldsToFlush, state, sortMap);
 
     // Gather all fields that saw any postings:
     List<FreqProxTermsWriterPerField> allFields = new ArrayList<>();
@@ -98,8 +97,10 @@ final class FreqProxTermsWriter extends TermsHash {
     CollectionUtil.introSort(allFields);
 
     Fields fields = new FreqProxFields(allFields);
-
     applyDeletes(state, fields);
+    if (sortMap != null) {
+      fields = new SortingLeafReader.SortingFields(fields, state.fieldInfos, sortMap);
+    }
 
     FieldsConsumer consumer = state.segmentInfo.getCodec().postingsFormat().fieldsConsumer(state);
     boolean success = false;

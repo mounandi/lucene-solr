@@ -36,6 +36,10 @@ public class TestOverriddenPrefixQueryForCustomFieldType extends SolrTestCaseJ4 
 
   @BeforeClass
   public static void beforeClass() throws Exception {
+    System.setProperty("solr.tests.CustomIntFieldType",
+                       (Boolean.getBoolean(NUMERIC_POINTS_SYSPROP)
+                        ? "solr.IntPointPrefixActsAsRangeQueryFieldType"
+                        : "solr.TrieIntPrefixActsAsRangeQueryFieldType"));
     initCore("solrconfig-basic.xml", "schema-customfield.xml");
   }
 
@@ -133,7 +137,7 @@ public class TestOverriddenPrefixQueryForCustomFieldType extends SolrTestCaseJ4 
       SolrQueryResponse rsp = new SolrQueryResponse();
       SolrRequestInfo.setRequestInfo(new SolrRequestInfo(req, rsp));
       for (int i = 0; i < inputs.length; i++) {
-        queries[i] = (QParser.getParser(inputs[i], null, req).getQuery());
+        queries[i] = (QParser.getParser(inputs[i], req).getQuery());
       }
     } finally {
       SolrRequestInfo.clearRequestInfo();

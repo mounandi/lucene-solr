@@ -158,6 +158,15 @@ public class TestScoreJoinQPNoScore extends SolrTestCaseJ4 {
 
   }
 
+  public void testNotEquals() throws SyntaxError, IOException{
+    try (SolrQueryRequest req = req("*:*")) {
+      Query x = QParser.getParser("{!join from=dept_id_s to=dept_ss score=none}text_t:develop", req).getQuery();
+      Query y = QParser.getParser("{!join from=dept_ss to=dept_ss score=none}text_t:develop", req).getQuery();
+      assertFalse("diff from fields produce equal queries",
+                  x.equals(y));
+    }
+  }
+    
   public void testJoinQueryType() throws SyntaxError, IOException{
     SolrQueryRequest req = null;
     try{
@@ -168,17 +177,16 @@ public class TestScoreJoinQPNoScore extends SolrTestCaseJ4 {
       SolrRequestInfo.setRequestInfo(new SolrRequestInfo(req, rsp));
       
       {
-        final Query query = QParser.getParser(req.getParams().get("q"), null, req).getQuery();
+        final Query query = QParser.getParser(req.getParams().get("q"), req).getQuery();
         final Query rewrittenQuery = query.rewrite(req.getSearcher().getIndexReader());
-        assertTrue(
-            rewrittenQuery+" should be Lucene's",
-            rewrittenQuery.getClass().getPackage().getName()
-            .startsWith("org.apache.lucene"));
+        assertEquals(rewrittenQuery+" is expected to be from Solr",
+            ScoreJoinQParserPlugin.class.getPackage().getName(), 
+            rewrittenQuery.getClass().getPackage().getName());
       }
       {
         final Query query = QParser.getParser(
             "{!join from=dept_id_s to=dept_ss}text_t:develop"
-            , null, req).getQuery();
+            , req).getQuery();
         final Query rewrittenQuery = query.rewrite(req.getSearcher().getIndexReader());
         assertEquals(rewrittenQuery+" is expected to be from Solr",
               JoinQParserPlugin.class.getPackage().getName(), 

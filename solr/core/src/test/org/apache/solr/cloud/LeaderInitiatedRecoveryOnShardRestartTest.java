@@ -21,7 +21,7 @@ import java.util.Map;
 
 import org.apache.lucene.util.LuceneTestCase.Nightly;
 import org.apache.lucene.util.LuceneTestCase.Slow;
-import org.apache.solr.SolrTestCaseJ4.SuppressSSL;
+import org.apache.lucene.util.LuceneTestCase.AwaitsFix;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.embedded.JettySolrRunner;
 import org.apache.solr.client.solrj.impl.HttpSolrClient;
@@ -43,8 +43,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Slow
-@SuppressSSL(bugUrl = "https://issues.apache.org/jira/browse/SOLR-5776")
 @Nightly
+@AwaitsFix(bugUrl = "https://issues.apache.org/jira/browse/SOLR-10071")
 public class LeaderInitiatedRecoveryOnShardRestartTest extends AbstractFullDistribZkTestBase {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
   
@@ -86,7 +86,7 @@ public class LeaderInitiatedRecoveryOnShardRestartTest extends AbstractFullDistr
     
     String testCollectionName = "all_in_lir";
     String shardId = "shard1";
-    createCollection(testCollectionName, 1, 3, 1);
+    createCollection(testCollectionName, "conf1", 1, 3, 1);
     
     waitForRecoveriesToFinish(testCollectionName, false);
 

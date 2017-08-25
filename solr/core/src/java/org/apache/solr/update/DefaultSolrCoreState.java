@@ -18,10 +18,12 @@ package org.apache.solr.update;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -63,6 +65,7 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
 
   private SolrIndexWriter indexWriter = null;
   private DirectoryFactory directoryFactory;
+  private final RecoveryStrategy.Builder recoveryStrategyBuilder;
 
   private volatile RecoveryStrategy recoveryStrat;
 
@@ -76,18 +79,32 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   
   protected final ReentrantLock commitLock = new ReentrantLock();
 
+
+  private AtomicBoolean cdcrRunning = new AtomicBoolean();
+
+  private volatile Future<Boolean> cdcrBootstrapFuture;
+
+  private volatile Callable cdcrBootstrapCallable;
+
+  @Deprecated
   public DefaultSolrCoreState(DirectoryFactory directoryFactory) {
+    this(directoryFactory, new RecoveryStrategy.Builder());
+  }
+
+  public DefaultSolrCoreState(DirectoryFactory directoryFactory,
+      RecoveryStrategy.Builder recoveryStrategyBuilder) {
     this.directoryFactory = directoryFactory;
+    this.recoveryStrategyBuilder = recoveryStrategyBuilder;
   }
   
   private void closeIndexWriter(IndexWriterCloser closer) {
     try {
-      log.info("SolrCoreState ref count has reached 0 - closing IndexWriter");
+      log.debug("SolrCoreState ref count has reached 0 - closing IndexWriter");
       if (closer != null) {
-        log.info("closing IndexWriter with IndexWriterCloser");
+        log.debug("closing IndexWriter with IndexWriterCloser");
         closer.closeWriter(indexWriter);
       } else if (indexWriter != null) {
-        log.info("closing IndexWriter...");
+        log.debug("closing IndexWriter...");
         indexWriter.close();
       }
       indexWriter = null;
@@ -184,14 +201,14 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
     if (iw != null) {
       if (!rollback) {
         try {
-          log.info("Closing old IndexWriter... core=" + coreName);
+          log.debug("Closing old IndexWriter... core=" + coreName);
           iw.close();
         } catch (Exception e) {
           SolrException.log(log, "Error closing old IndexWriter. core=" + coreName, e);
         }
       } else {
         try {
-          log.info("Rollback old IndexWriter... core=" + coreName);
+          log.debug("Rollback old IndexWriter... core=" + coreName);
           iw.rollback();
         } catch (Exception e) {
           SolrException.log(log, "Error rolling back old IndexWriter. core=" + coreName, e);
@@ -263,12 +280,17 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   }
 
   @Override
+  public RecoveryStrategy.Builder getRecoveryStrategyBuilder() {
+    return recoveryStrategyBuilder;
+  }
+
+  @Override
   public void doRecovery(CoreContainer cc, CoreDescriptor cd) {
     
-    Thread thread = new Thread() {
+    Runnable recoveryTask = new Runnable() {
       @Override
       public void run() {
-        MDCLoggingContext.setCoreDescriptor(cd);
+        MDCLoggingContext.setCoreDescriptor(cc, cd);
         try {
           if (SKIP_AUTO_RECOVERY) {
             log.warn("Skipping recovery according to sys prop solrcloud.skip.autorecovery");
@@ -310,7 +332,7 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
               recoveryThrottle.minimumWaitBetweenActions();
               recoveryThrottle.markAttemptingAction();
               
-              recoveryStrat = new RecoveryStrategy(cc, cd, DefaultSolrCoreState.this);
+              recoveryStrat = recoveryStrategyBuilder.create(cc, cd, DefaultSolrCoreState.this);
               recoveryStrat.setRecoveringAfterStartup(recoveringAfterStartup);
               Future<?> future = cc.getUpdateShardHandler().getRecoveryExecutor().submit(recoveryStrat);
               try {
@@ -342,7 +364,7 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
       // The recovery executor is not interrupted on shutdown.
       //
       // avoid deadlock: we can't use the recovery executor here
-      cc.getUpdateShardHandler().getUpdateExecutor().submit(thread);
+      cc.getUpdateShardHandler().getUpdateExecutor().submit(recoveryTask);
     } catch (RejectedExecutionException e) {
       // fine, we are shutting down
     }
@@ -362,12 +384,15 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   /** called from recoveryStrat on a successful recovery */
   @Override
   public void recovered() {
+    recoveryStrat = null;
     recoveringAfterStartup = false;  // once we have successfully recovered, we no longer need to act as if we are recovering after startup
   }
 
   /** called from recoveryStrat on a failed recovery */
   @Override
-  public void failed() {}
+  public void failed() {
+    recoveryStrat = null;
+  }
 
   @Override
   public synchronized void close(IndexWriterCloser closer) {
@@ -395,5 +420,39 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   public void setLastReplicateIndexSuccess(boolean success) {
     this.lastReplicationSuccess = success;
   }
-  
+
+  @Override
+  public Lock getRecoveryLock() {
+    return recoveryLock;
+  }
+
+  @Override
+  public boolean getCdcrBootstrapRunning() {
+    return cdcrRunning.get();
+  }
+
+  @Override
+  public void setCdcrBootstrapRunning(boolean cdcrRunning) {
+    this.cdcrRunning.set(cdcrRunning);
+  }
+
+  @Override
+  public Future<Boolean> getCdcrBootstrapFuture() {
+    return cdcrBootstrapFuture;
+  }
+
+  @Override
+  public void setCdcrBootstrapFuture(Future<Boolean> cdcrBootstrapFuture) {
+    this.cdcrBootstrapFuture = cdcrBootstrapFuture;
+  }
+
+  @Override
+  public Callable getCdcrBootstrapCallable() {
+    return cdcrBootstrapCallable;
+  }
+
+  @Override
+  public void setCdcrBootstrapCallable(Callable cdcrBootstrapCallable) {
+    this.cdcrBootstrapCallable = cdcrBootstrapCallable;
+  }
 }

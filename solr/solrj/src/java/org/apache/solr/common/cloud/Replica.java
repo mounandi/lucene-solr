@@ -22,9 +22,6 @@ import java.util.Set;
 
 import org.noggit.JSONUtil;
 
-import static org.apache.solr.common.cloud.ZkStateReader.BASE_URL_PROP;
-import static org.apache.solr.common.cloud.ZkStateReader.CORE_NAME_PROP;
-
 public class Replica extends ZkNodeProps {
   
   /**
@@ -84,9 +81,31 @@ public class Replica extends ZkNodeProps {
     }
   }
 
+  public enum Type {
+    /**
+     * Writes updates to transaction log and indexes locally. Replicas of type {@link Type#NRT} support NRT (soft commits) and RTG. 
+     * Any {@link Type#NRT} replica can become a leader. A shard leader will forward updates to all active {@link Type#NRT} and
+     * {@link Type#TLOG} replicas. 
+     */
+    NRT,
+    /**
+     * Writes to transaction log, but not to index, uses replication. Any {@link Type#TLOG} replica can become leader (by first
+     * applying all local transaction log elements). If a replica is of type {@link Type#TLOG} but is also the leader, it will behave 
+     * as a {@link Type#NRT}. A shard leader will forward updates to all active {@link Type#NRT} and {@link Type#TLOG} replicas.
+     */
+    TLOG,
+    /**
+     * Doesn’t index or writes to transaction log. Just replicates from {@link Type#NRT} or {@link Type#TLOG} replicas. {@link Type#PULL}
+     * replicas can’t become shard leaders (i.e., if there are only pull replicas in the collection at some point, updates will fail
+     * same as if there is no leaders, queries continue to work), so they don’t even participate in elections.
+     */
+    PULL
+  }
+
   private final String name;
   private final String nodeName;
   private final State state;
+  private final Type type;
 
   public Replica(String name, Map<String,Object> propMap) {
     super(propMap);
@@ -98,6 +117,12 @@ public class Replica extends ZkNodeProps {
       this.state = State.ACTIVE;                         //Default to ACTIVE
       propMap.put(ZkStateReader.STATE_PROP, state.toString());
     }
+    String typeString = (String)propMap.get(ZkStateReader.REPLICA_TYPE);
+    if (typeString == null) {
+      this.type = Type.NRT;
+    } else {
+      this.type = Type.valueOf(typeString);
+    }
 
   }
 
@@ -106,11 +131,14 @@ public class Replica extends ZkNodeProps {
   }
 
   public String getCoreUrl() {
-    return ZkCoreNodeProps.getCoreUrl(getStr(BASE_URL_PROP), getStr(CORE_NAME_PROP));
+    return ZkCoreNodeProps.getCoreUrl(getStr(ZkStateReader.BASE_URL_PROP), getStr(ZkStateReader.CORE_NAME_PROP));
+  }
+  public String getBaseUrl(){
+    return getStr(ZkStateReader.BASE_URL_PROP);
   }
 
   public String getCoreName() {
-    return getStr(CORE_NAME_PROP);
+    return getStr(ZkStateReader.CORE_NAME_PROP);
   }
 
   /** The name of the node this replica resides on */
@@ -125,6 +153,21 @@ public class Replica extends ZkNodeProps {
 
   public boolean isActive(Set<String> liveNodes) {
     return liveNodes.contains(this.nodeName) && this.state == State.ACTIVE;
+  }
+  
+  public Type getType() {
+    return this.type;
+  }
+
+  public String getProperty(String propertyName) {
+    final String propertyKey;
+    if (!propertyName.startsWith(ZkStateReader.PROPERTY_PROP_PREFIX)) {
+      propertyKey = ZkStateReader.PROPERTY_PROP_PREFIX+propertyName;
+    } else {
+      propertyKey = propertyName;
+    }
+    final String propertyValue = getStr(propertyKey);
+    return propertyValue;
   }
 
   @Override

@@ -62,6 +62,8 @@ public class StreamExpressionToExpessionTest extends LuceneTestCase {
                     .withFunctionName("avg", MeanMetric.class)
                     .withFunctionName("daemon", DaemonStream.class)
                     .withFunctionName("topic", TopicStream.class)
+                    .withFunctionName("tlogit", TextLogitStream.class)
+                    .withFunctionName("featuresSelection", FeaturesSelectionStream.class)
                     ;
   }
     
@@ -72,12 +74,15 @@ public class StreamExpressionToExpessionTest extends LuceneTestCase {
     String expressionString;
     
     // Basic test
-    stream = new CloudSolrStream(StreamExpressionParser.parse("search(collection1, q=*:*, fl=\"id,a_s,a_i,a_f\", sort=\"a_f asc, a_i asc\")"), factory);
+    stream = new CloudSolrStream(StreamExpressionParser.parse("search(collection1, q=*:*, fl=\"id,a_s,a_i,a_f\", sort=\"a_f asc, a_i asc\", fq=\"a_s:one\", fq=\"a_s:two\")"), factory);
     expressionString = stream.toExpression(factory).toString();
+    System.out.println("ExpressionString: " + expressionString.toString());
     assertTrue(expressionString.contains("search(collection1,"));
     assertTrue(expressionString.contains("q=\"*:*\""));
     assertTrue(expressionString.contains("fl=\"id,a_s,a_i,a_f\""));
     assertTrue(expressionString.contains("sort=\"a_f asc, a_i asc\""));
+    assertTrue(expressionString.contains("fq=\"a_s:one\""));
+    assertTrue(expressionString.contains("fq=\"a_s:two\""));
     
     // Basic w/aliases
     stream = new CloudSolrStream(StreamExpressionParser.parse("search(collection1, q=*:*, fl=\"id,a_s,a_i,a_f\", sort=\"a_f asc, a_i asc\", aliases=\"id=izzy,a_s=kayden\")"), factory);
@@ -138,7 +143,6 @@ public class StreamExpressionToExpessionTest extends LuceneTestCase {
     assertTrue(expressionString.contains("checkpointEvery=1000"));
   }
 
-
   @Test
   public void testStatsStream() throws Exception {
 
@@ -154,7 +158,7 @@ public class StreamExpressionToExpessionTest extends LuceneTestCase {
     assertTrue(expressionString.contains("sort=\"a_f asc, a_i asc\""));
     assertTrue(expressionString.contains("min(a_i)"));
     assertTrue(expressionString.contains("max(a_i)"));
-    assertTrue(expressionString.contains("avg(a_i)"));
+    assertTrue(expressionString.contains("avg(a_i,false)"));
     assertTrue(expressionString.contains("count(*)"));
     assertTrue(expressionString.contains("sum(a_i)"));
     
@@ -273,8 +277,8 @@ public class StreamExpressionToExpessionTest extends LuceneTestCase {
     assertTrue(expressionString.contains("min(a_f)"));
     assertTrue(expressionString.contains("max(a_i)"));
     assertTrue(expressionString.contains("max(a_f)"));
-    assertTrue(expressionString.contains("avg(a_i)"));
-    assertTrue(expressionString.contains("avg(a_f)"));
+    assertTrue(expressionString.contains("avg(a_i,false)"));
+    assertTrue(expressionString.contains("avg(a_f,false)"));
     assertTrue(expressionString.contains("count(*)"));
   }
   
@@ -342,6 +346,40 @@ public class StreamExpressionToExpessionTest extends LuceneTestCase {
     assertTrue(firstExpressionString.contains("q=\"presentTitles:\\\"chief, executive officer\\\" AND age:[36 TO *]\""));
     assertTrue(secondExpressionString.contains("q=\"presentTitles:\\\"chief, executive officer\\\" AND age:[36 TO *]\""));
   }
+
+  @Test
+  public void testFeaturesSelectionStream() throws Exception {
+    String expr = "featuresSelection(collection1, q=\"*:*\", featureSet=\"first\", field=\"tv_text\", outcome=\"out_i\", numTerms=4, positiveLabel=2)";
+    FeaturesSelectionStream stream = new FeaturesSelectionStream(StreamExpressionParser.parse(expr), factory);
+    String expressionString = stream.toExpression(factory).toString();
+    assertTrue(expressionString.contains("q=\"*:*\""));
+    assertTrue(expressionString.contains("featureSet=first"));
+    assertTrue(expressionString.contains("field=tv_text"));
+    assertTrue(expressionString.contains("outcome=out_i"));
+    assertTrue(expressionString.contains("numTerms=4"));
+    assertTrue(expressionString.contains("positiveLabel=2"));
+  }
+
+  @Test
+  public void testTextLogitStreamWithFeaturesSelection() throws Exception {
+    String expr = "tlogit(" +
+        "collection1, " +
+        "q=\"*:*\", " +
+        "name=\"model\", " +
+        "featuresSelection(collection1, q=\"*:*\", featureSet=\"first\", field=\"tv_text\", outcome=\"out_i\", numTerms=4), " +
+        "field=\"tv_text\", " +
+        "outcome=\"out_i\", " +
+        "maxIterations=100)";
+    TextLogitStream logitStream = new TextLogitStream(StreamExpressionParser.parse(expr), factory);
+    String expressionString = logitStream.toExpression(factory).toString();
+    assertTrue(expressionString.contains("q=\"*:*\""));
+    assertTrue(expressionString.contains("name=model"));
+    assertFalse(expressionString.contains("terms="));
+    assertTrue(expressionString.contains("featuresSelection("));
+    assertTrue(expressionString.contains("field=tv_text"));
+    assertTrue(expressionString.contains("outcome=out_i"));
+    assertTrue(expressionString.contains("maxIterations=100"));
+  }
   
   @Test
   public void testCountMetric() throws Exception {
@@ -392,7 +430,7 @@ public class StreamExpressionToExpessionTest extends LuceneTestCase {
     metric = new MeanMetric(StreamExpressionParser.parse("avg(foo)"), factory);
     expressionString = metric.toExpression(factory).toString();
     
-    assertEquals("avg(foo)", expressionString);
+    assertEquals("avg(foo,false)", expressionString);
   }
   
   @Test

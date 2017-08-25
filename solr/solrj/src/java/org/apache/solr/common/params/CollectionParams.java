@@ -31,6 +31,15 @@ public interface CollectionParams {
   String ACTION = "action";
   String NAME = "name";
 
+  /**
+   * @deprecated use {@link #SOURCE_NODE} instead
+   */
+  @Deprecated
+  String FROM_NODE = "fromNode";
+
+  String SOURCE_NODE = "sourceNode";
+  String TARGET_NODE = "targetNode";
+
 
   enum LockLevel {
     CLUSTER(0),
@@ -68,6 +77,7 @@ public interface CollectionParams {
     SYNCSHARD(true, LockLevel.SHARD),
     CREATEALIAS(true, LockLevel.COLLECTION),
     DELETEALIAS(true, LockLevel.COLLECTION),
+    LISTALIASES(false, LockLevel.NONE),
     SPLITSHARD(true, LockLevel.SHARD),
     DELETESHARD(true, LockLevel.SHARD),
     CREATESHARD(true, LockLevel.COLLECTION),
@@ -80,6 +90,7 @@ public interface CollectionParams {
     REQUESTSTATUS(false, LockLevel.NONE),
     DELETESTATUS(false, LockLevel.NONE),
     ADDREPLICA(true, LockLevel.SHARD),
+    MOVEREPLICA(true, LockLevel.SHARD),
     OVERSEERSTATUS(false, LockLevel.NONE),
     LIST(false, LockLevel.NONE),
     CLUSTERSTATUS(false, LockLevel.NONE),
@@ -91,11 +102,17 @@ public interface CollectionParams {
     MIGRATESTATEFORMAT(true, LockLevel.CLUSTER),
     BACKUP(true, LockLevel.COLLECTION),
     RESTORE(true, LockLevel.COLLECTION),
+    CREATESNAPSHOT(true, LockLevel.COLLECTION),
+    DELETESNAPSHOT(true, LockLevel.COLLECTION),
+    LISTSNAPSHOTS(false, LockLevel.NONE),
     //only for testing. it just waits for specified time
     // these are not exposed via collection API commands
     // but the overseer is aware of these tasks
     MOCK_COLL_TASK(false, LockLevel.COLLECTION),
     MOCK_SHARD_TASK(false, LockLevel.SHARD),
+    //TODO when we have a node level lock use it here
+    REPLACENODE(true, LockLevel.NONE),
+    DELETENODE(true, LockLevel.NONE),
     MOCK_REPLICA_TASK(false, LockLevel.REPLICA)
     ;
     public final boolean isWrite;

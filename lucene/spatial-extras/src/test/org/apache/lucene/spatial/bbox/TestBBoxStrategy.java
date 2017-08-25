@@ -21,7 +21,6 @@ import java.io.IOException;
 import com.carrotsearch.randomizedtesting.annotations.Repeat;
 import org.apache.lucene.document.FieldType;
 import org.apache.lucene.index.DocValuesType;
-import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.spatial.SpatialMatchConcern;
 import org.apache.lucene.spatial.prefix.RandomSpatialOpStrategyTestCase;
@@ -92,12 +91,7 @@ public class TestBBoxStrategy extends RandomSpatialOpStrategyTestCase {
       factory.worldBounds = new RectangleImpl(-300, 300, -100, 100, null);
       this.ctx = factory.newSpatialContext();
     }
-    // randomly test legacy (numeric) and point based bbox strategy
-    if (random().nextBoolean()) {
-      this.strategy = BBoxStrategy.newInstance(ctx, "bbox");
-    } else {
-      this.strategy = BBoxStrategy.newLegacyInstance(ctx, "bbox");
-    }
+    this.strategy = BBoxStrategy.newInstance(ctx, "bbox");
     //test we can disable docValues for predicate tests
     if (random().nextBoolean()) {
       FieldType fieldType = new FieldType(((BBoxStrategy)strategy).getFieldType());
@@ -188,11 +182,7 @@ public class TestBBoxStrategy extends RandomSpatialOpStrategyTestCase {
 
   private void setupGeo() {
     this.ctx = SpatialContext.GEO;
-    if (random().nextBoolean()) {
-      this.strategy = BBoxStrategy.newInstance(ctx, "bbox");
-    } else {
-      this.strategy = BBoxStrategy.newLegacyInstance(ctx, "bbox");
-    }
+    this.strategy = BBoxStrategy.newInstance(ctx, "bbox");
   }
 
   // OLD STATIC TESTS (worthless?)
@@ -233,16 +223,9 @@ public class TestBBoxStrategy extends RandomSpatialOpStrategyTestCase {
     FieldType fieldType;
     // random  legacy or not legacy
     String FIELD_PREFIX = "bbox";
+    fieldType = new FieldType(BBoxStrategy.DEFAULT_FIELDTYPE);
     if (random().nextBoolean()) {
-      fieldType = new FieldType(BBoxStrategy.DEFAULT_FIELDTYPE);
-      if (random().nextBoolean()) {
-        fieldType.setDimensions(0, 0);
-      }
-    } else {
-      fieldType = new FieldType(BBoxStrategy.LEGACY_FIELDTYPE);
-      if (random().nextBoolean()) {
-        fieldType.setIndexOptions(IndexOptions.NONE);
-      }
+      fieldType.setDimensions(0, 0);
     }
 
     strategy = new BBoxStrategy(ctx, FIELD_PREFIX, fieldType);

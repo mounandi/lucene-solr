@@ -15,7 +15,10 @@
  * limitations under the License.
  */
 package org.apache.lucene.spatial3d.geom;
-    
+
+import java.io.InputStream;
+import java.io.IOException;
+
 /**
  * This class represents a degenerate point bounding box.
  * It is not a simple GeoPoint because we must have the latitude and longitude.
@@ -37,6 +40,21 @@ class GeoDegeneratePoint extends GeoPoint implements GeoBBox, GeoCircle {
     super(planetModel, lat, lon);
     this.planetModel = planetModel;
     this.edgePoints = new GeoPoint[]{this};
+  }
+
+  /** Constructor for deserialization.
+   *@param planetModel is the planet model to use.
+   *@param inputStream is the input stream.
+   */
+  public GeoDegeneratePoint(final PlanetModel planetModel, final InputStream inputStream) throws IOException {
+    super(planetModel, inputStream);
+    this.planetModel = planetModel;
+    this.edgePoints = new GeoPoint[]{this};
+  }
+  
+  @Override
+  public PlanetModel getPlanetModel() {
+    return planetModel;
   }
 
   @Override
@@ -64,6 +82,11 @@ class GeoDegeneratePoint extends GeoPoint implements GeoBBox, GeoCircle {
         return false;
     }
     return true;
+  }
+
+  @Override
+  public boolean intersects(GeoShape geoShape) {
+    return false;
   }
 
   @Override

@@ -22,7 +22,6 @@ import java.io.Closeable;
 import java.lang.reflect.Modifier;
 
 import org.apache.lucene.analysis.tokenattributes.PackedTokenAttributeImpl;
-import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexWriter;
@@ -41,12 +40,7 @@ import org.apache.lucene.util.AttributeSource;
  * <li>{@link TokenFilter}, a <code>TokenStream</code> whose input is another
  * <code>TokenStream</code>.
  * </ul>
- * A new <code>TokenStream</code> API has been introduced with Lucene 2.9. This API
- * has moved from being {@link Token}-based to {@link Attribute}-based. While
- * {@link Token} still exists in 2.9 as a convenience class, the preferred way
- * to store the information of a {@link Token} is to use {@link AttributeImpl}s.
- * <p>
- * <code>TokenStream</code> now extends {@link AttributeSource}, which provides
+ * <code>TokenStream</code> extends {@link AttributeSource}, which provides
  * access to all of the token {@link Attribute}s for the <code>TokenStream</code>.
  * Note that only one instance per {@link AttributeImpl} is created and reused
  * for every token. This approach reduces object creation and allows local
@@ -176,11 +170,7 @@ public abstract class TokenStream extends AttributeSource implements Closeable {
    * @throws IOException If an I/O error occurs
    */
   public void end() throws IOException {
-    clearAttributes(); // LUCENE-3849: don't consume dirty atts
-    PositionIncrementAttribute posIncAtt = getAttribute(PositionIncrementAttribute.class);
-    if (posIncAtt != null) {
-      posIncAtt.setPositionIncrement(0);
-    }
+    endAttributes(); // LUCENE-3849: don't consume dirty atts
   }
 
   /**

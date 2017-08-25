@@ -55,6 +55,12 @@ import static org.apache.solr.common.cloud.ZkStateReader.CORE_NAME_PROP;
 
 public class ForceLeaderTest extends HttpPartitionTest {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+  private final boolean onlyLeaderIndexes = random().nextBoolean();
+
+  @Override
+  protected boolean useTlogReplicas() {
+    return onlyLeaderIndexes;
+  }
 
   @Test
   @Override
@@ -74,7 +80,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
     handle.put("timestamp", SKIPVAL);
 
     String testCollectionName = "forceleader_test_collection";
-    createCollection(testCollectionName, 1, 3, 1);
+    createCollection(testCollectionName, "conf1", 1, 3, 1);
     cloudClient.setDefaultCollection(testCollectionName);
 
     try {
@@ -96,7 +102,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
           "; clusterState: " + printClusterStateInfo(), 0, numActiveReplicas);
 
       int numReplicasOnLiveNodes = 0;
-      for (Replica rep : clusterState.getSlice(testCollectionName, SHARD1).getReplicas()) {
+      for (Replica rep : clusterState.getCollection(testCollectionName).getSlice(SHARD1).getReplicas()) {
         if (clusterState.getLiveNodes().contains(rep.getNodeName())) {
           numReplicasOnLiveNodes++;
         }
@@ -104,8 +110,8 @@ public class ForceLeaderTest extends HttpPartitionTest {
       assertEquals(2, numReplicasOnLiveNodes);
       log.info("Before forcing leader: " + printClusterStateInfo());
       // Assert there is no leader yet
-      assertNull("Expected no leader right now. State: " + clusterState.getSlice(testCollectionName, SHARD1),
-          clusterState.getSlice(testCollectionName, SHARD1).getLeader());
+      assertNull("Expected no leader right now. State: " + clusterState.getCollection(testCollectionName).getSlice(SHARD1),
+          clusterState.getCollection(testCollectionName).getSlice(SHARD1).getLeader());
 
       assertSendDocFails(3);
 
@@ -116,9 +122,9 @@ public class ForceLeaderTest extends HttpPartitionTest {
 
       cloudClient.getZkStateReader().forceUpdateCollection(testCollectionName);
       clusterState = cloudClient.getZkStateReader().getClusterState();
-      log.info("After forcing leader: " + clusterState.getSlice(testCollectionName, SHARD1));
+      log.info("After forcing leader: " + clusterState.getCollection(testCollectionName).getSlice(SHARD1));
       // we have a leader
-      Replica newLeader = clusterState.getSlice(testCollectionName, SHARD1).getLeader();
+      Replica newLeader = clusterState.getCollectionOrNull(testCollectionName).getSlice(SHARD1).getLeader();
       assertNotNull(newLeader);
       // leader is active
       assertEquals(State.ACTIVE, newLeader.getState());
@@ -146,14 +152,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
     } finally {
       log.info("Cleaning up after the test.");
       // try to clean up
-      try {
-        CollectionAdminRequest.Delete req = new CollectionAdminRequest.Delete();
-        req.setCollectionName(testCollectionName);
-        req.process(cloudClient);
-      } catch (Exception e) {
-        // don't fail the test
-        log.warn("Could not delete collection {} after test completed", testCollectionName);
-      }
+      attemptCollectionDelete(cloudClient, testCollectionName);
     }
   }
 
@@ -167,7 +166,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
     handle.put("timestamp", SKIPVAL);
 
     String testCollectionName = "forceleader_last_published";
-    createCollection(testCollectionName, 1, 3, 1);
+    createCollection(testCollectionName, "conf1", 1, 3, 1);
     cloudClient.setDefaultCollection(testCollectionName);
     log.info("Collection created: " + testCollectionName);
 
@@ -200,15 +199,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
       }
     } finally {
       log.info("Cleaning up after the test.");
-      // try to clean up
-      try {
-        CollectionAdminRequest.Delete req = new CollectionAdminRequest.Delete();
-        req.setCollectionName(testCollectionName);
-        req.process(cloudClient);
-      } catch (Exception e) {
-        // don't fail the test
-        log.warn("Could not delete collection {} after test completed", testCollectionName);
-      }
+      attemptCollectionDelete(cloudClient, testCollectionName);
     }
   }
 
@@ -225,7 +216,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
     boolean transition = false;
     for (int counter = 10; counter > 0; counter--) {
       clusterState = zkStateReader.getClusterState();
-      Replica newLeader = clusterState.getSlice(collection, slice).getLeader();
+      Replica newLeader = clusterState.getCollection(collection).getSlice(slice).getLeader();
       if (newLeader == null) {
         transition = true;
         break;
@@ -259,7 +250,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
     Replica.State replicaState = null;
     for (int counter = 10; counter > 0; counter--) {
       ClusterState clusterState = zkStateReader.getClusterState();
-      replicaState = clusterState.getSlice(collection, slice).getReplica(replica.getName()).getState();
+      replicaState = clusterState.getCollection(collection).getSlice(slice).getReplica(replica.getName()).getState();
       if (replicaState == state) {
         transition = true;
         break;
@@ -358,7 +349,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
       for (State lirState : lirStates)
         if (Replica.State.DOWN.equals(lirState) == false)
           allDown = false;
-      if (allDown && clusterState.getSlice(collectionName, shard).getLeader() == null) {
+      if (allDown && clusterState.getCollection(collectionName).getSlice(shard).getLeader() == null) {
         break;
       }
       log.warn("Attempt " + i + ", waiting on for 1 sec to settle down in the steady state. State: " +
@@ -390,7 +381,7 @@ public class ForceLeaderTest extends HttpPartitionTest {
     waitForRecoveriesToFinish(collection, cloudClient.getZkStateReader(), true);
     cloudClient.getZkStateReader().forceUpdateCollection(collection);
     ClusterState clusterState = cloudClient.getZkStateReader().getClusterState();
-    log.info("After bringing back leader: " + clusterState.getSlice(collection, SHARD1));
+    log.info("After bringing back leader: " + clusterState.getCollection(collection).getSlice(SHARD1));
     int numActiveReplicas = getNumberOfActiveReplicas(clusterState, collection, SHARD1);
     assertEquals(1+notLeaders.size(), numActiveReplicas);
     log.info("Sending doc "+docid+"...");
@@ -425,16 +416,14 @@ public class ForceLeaderTest extends HttpPartitionTest {
   }
 
   private void doForceLeader(SolrClient client, String collectionName, String shard) throws IOException, SolrServerException {
-      CollectionAdminRequest.ForceLeader forceLeader = new CollectionAdminRequest.ForceLeader();
-      forceLeader.setCollectionName(collectionName);
-      forceLeader.setShardName(shard);
-      client.request(forceLeader);
+    CollectionAdminRequest.ForceLeader forceLeader = CollectionAdminRequest.forceLeaderElection(collectionName, shard);
+    client.request(forceLeader);
   }
 
   protected int getNumberOfActiveReplicas(ClusterState clusterState, String collection, String sliceId) {
     int numActiveReplicas = 0;
     // Assert all replicas are active
-    for (Replica rep : clusterState.getSlice(collection, sliceId).getReplicas()) {
+    for (Replica rep : clusterState.getCollection(collection).getSlice(sliceId).getReplicas()) {
       if (rep.getState().equals(State.ACTIVE)) {
         numActiveReplicas++;
       }

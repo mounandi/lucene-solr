@@ -53,6 +53,7 @@ import org.apache.solr.cloud.ZkSolrResourceLoader;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.common.cloud.ClusterState;
+import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.SolrZkClient;
@@ -109,8 +110,11 @@ public final class ManagedIndexSchema extends IndexSchema {
   }
   
   
-  /** Persist the schema to local storage or to ZooKeeper */
-  boolean persistManagedSchema(boolean createOnly) {
+  /**
+   * Persist the schema to local storage or to ZooKeeper
+   * @param createOnly set to false to allow update of existing schema
+   */
+  public boolean persistManagedSchema(boolean createOnly) {
     if (loader instanceof ZkSolrResourceLoader) {
       return persistManagedSchemaToZooKeeper(createOnly);
     }
@@ -284,8 +288,9 @@ public final class ManagedIndexSchema extends IndexSchema {
     ZkStateReader zkStateReader = zkController.getZkStateReader();
     ClusterState clusterState = zkStateReader.getClusterState();
     Set<String> liveNodes = clusterState.getLiveNodes();
-    Collection<Slice> activeSlices = clusterState.getActiveSlices(collection);
-    if (activeSlices != null && activeSlices.size() > 0) {
+    final DocCollection docCollection = clusterState.getCollectionOrNull(collection);
+    if (docCollection != null && docCollection.getActiveSlices() != null && docCollection.getActiveSlices().size() > 0) {
+      final Collection<Slice> activeSlices = docCollection.getActiveSlices();
       for (Slice next : activeSlices) {
         Map<String, Replica> replicasMap = next.getReplicasMap();
         if (replicasMap != null) {
@@ -368,13 +373,13 @@ public final class ManagedIndexSchema extends IndexSchema {
   }
 
 
-  public class FieldExistsException extends SolrException {
+  public static class FieldExistsException extends SolrException {
     public FieldExistsException(ErrorCode code, String msg) {
       super(code, msg);
     }
   }
 
-  public class SchemaChangedInZkException extends SolrException {
+  public static class SchemaChangedInZkException extends SolrException {
     public SchemaChangedInZkException(ErrorCode code, String msg) {
       super(code, msg);
     }
@@ -1357,9 +1362,6 @@ public final class ManagedIndexSchema extends IndexSchema {
     
     newSchema.name = name;
     newSchema.version = version;
-    newSchema.defaultSearchFieldName = defaultSearchFieldName;
-    newSchema.queryParserDefaultOperator = queryParserDefaultOperator;
-    newSchema.isExplicitQueryParserDefaultOperator = isExplicitQueryParserDefaultOperator;
     newSchema.similarity = similarity;
     newSchema.similarityFactory = similarityFactory;
     newSchema.isExplicitSimilarity = isExplicitSimilarity;

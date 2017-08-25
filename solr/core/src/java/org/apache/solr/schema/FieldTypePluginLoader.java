@@ -110,31 +110,46 @@ public final class FieldTypePluginLoader
     if (null != simFactory) {
       ft.setSimilarity(simFactory);
     }
-    
-    if (null == queryAnalyzer) {
-      queryAnalyzer = analyzer;
-      ft.setIsExplicitQueryAnalyzer(false);
-    } else {
-      ft.setIsExplicitQueryAnalyzer(true);
-    }
-    if (null == analyzer) {
-      analyzer = queryAnalyzer;
-      ft.setIsExplicitAnalyzer(false);
-    } else {
-      ft.setIsExplicitAnalyzer(true);
-    }
 
-    if (null != analyzer) {
-      ft.setIndexAnalyzer(analyzer);
-      ft.setQueryAnalyzer(queryAnalyzer);
-      if (ft instanceof TextField) {
-        if (null == multiAnalyzer) {
-          multiAnalyzer = constructMultiTermAnalyzer(queryAnalyzer);
-          ((TextField)ft).setIsExplicitMultiTermAnalyzer(false);
-        } else {
-          ((TextField)ft).setIsExplicitMultiTermAnalyzer(true);
+    if (ft instanceof HasImplicitIndexAnalyzer) {
+      ft.setIsExplicitAnalyzer(false);
+      if (null != queryAnalyzer && null != analyzer) {
+        if (log.isWarnEnabled()) {
+          log.warn("Ignoring index-time analyzer for field: " + name);
         }
-        ((TextField)ft).setMultiTermAnalyzer(multiAnalyzer);
+      } else if (null == queryAnalyzer) { // Accept non-query-time analyzer as a query-time analyzer 
+        queryAnalyzer = analyzer;
+      }
+      if (null != queryAnalyzer) {
+        ft.setIsExplicitQueryAnalyzer(true);
+        ft.setQueryAnalyzer(queryAnalyzer);
+      }
+    } else {
+      if (null == queryAnalyzer) {
+        queryAnalyzer = analyzer;
+        ft.setIsExplicitQueryAnalyzer(false);
+      } else {
+        ft.setIsExplicitQueryAnalyzer(true);
+      }
+      if (null == analyzer) {
+        analyzer = queryAnalyzer;
+        ft.setIsExplicitAnalyzer(false);
+      } else {
+        ft.setIsExplicitAnalyzer(true);
+      }
+  
+      if (null != analyzer) {
+        ft.setIndexAnalyzer(analyzer);
+        ft.setQueryAnalyzer(queryAnalyzer);
+        if (ft instanceof TextField) {
+          if (null == multiAnalyzer) {
+            multiAnalyzer = constructMultiTermAnalyzer(queryAnalyzer);
+            ((TextField)ft).setIsExplicitMultiTermAnalyzer(false);
+          } else {
+            ((TextField)ft).setIsExplicitMultiTermAnalyzer(true);
+          }
+          ((TextField)ft).setMultiTermAnalyzer(multiAnalyzer);
+        }
       }
     }
     if (ft instanceof SchemaAware){
@@ -406,10 +421,10 @@ public final class FieldTypePluginLoader
     Version version = (configuredVersion != null) ?
             Config.parseLuceneVersionString(configuredVersion) : schema.getDefaultLuceneMatchVersion();
 
-    if (!version.onOrAfter(Version.LUCENE_6_0_0)) {
+    if (!version.onOrAfter(Version.LUCENE_7_0_0)) {
       log.warn(pluginClassName + " is using deprecated " + version +
-        " emulation. You should at some point declare and reindex to at least 6.0, because " +
-        "5.x emulation is deprecated and will be removed in 7.0");
+        " emulation. You should at some point declare and reindex to at least 7.0, because " +
+        "6.x emulation is deprecated and will be removed in 8.0");
     }
     return version;
   }

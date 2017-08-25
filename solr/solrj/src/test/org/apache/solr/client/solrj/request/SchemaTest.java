@@ -54,8 +54,8 @@ import static org.hamcrest.CoreMatchers.is;
  */
 public class SchemaTest extends RestTestBase {
   private static void assertValidSchemaResponse(SolrResponseBase schemaResponse) {
-    assertEquals(0, schemaResponse.getStatus());
-    assertNull(schemaResponse.getResponse().get("errors"));
+    assertEquals("Response contained errors: " + schemaResponse.toString(), 0, schemaResponse.getStatus());
+    assertNull("Response contained errors: " + schemaResponse.toString(), schemaResponse.getResponse().get("errors"));
   }
 
   private static void createStoredStringField(String fieldName, SolrClient solrClient) throws Exception {
@@ -243,16 +243,6 @@ public class SchemaTest extends RestTestBase {
   }
 
   @Test
-  public void testGetDefaultQueryOperatorAccuracy() throws Exception {
-    SchemaRequest.DefaultQueryOperator defaultQueryOperatorRequest =
-        new SchemaRequest.DefaultQueryOperator();
-    SchemaResponse.DefaultQueryOperatorResponse defaultQueryOperatorResponse =
-        defaultQueryOperatorRequest.process(getSolrClient());
-    assertValidSchemaResponse(defaultQueryOperatorResponse);
-    assertEquals("OR", defaultQueryOperatorResponse.getDefaultOperator());
-  }
-
-  @Test
   public void testAddFieldAccuracy() throws Exception {
     SchemaRequest.Fields fieldsSchemaRequest = new SchemaRequest.Fields();
     SchemaResponse.FieldsResponse initialFieldsResponse = fieldsSchemaRequest.process(getSolrClient());
@@ -391,8 +381,7 @@ public class SchemaTest extends RestTestBase {
     fieldAttributes.put("type", "string");
     fieldAttributes.put("stored", false);
     fieldAttributes.put("indexed", true);
-    fieldAttributes.put("default", "accuracy");
-    fieldAttributes.put("required", true);
+    // Dynamic fields cannot be required or have a default value
     SchemaRequest.AddDynamicField addFieldUpdateSchemaRequest =
         new SchemaRequest.AddDynamicField(fieldAttributes);
     SchemaResponse.UpdateResponse addFieldResponse = addFieldUpdateSchemaRequest.process(getSolrClient());
@@ -412,8 +401,6 @@ public class SchemaTest extends RestTestBase {
     assertThat("string", is(equalTo(newFieldAttributes.get("type"))));
     assertThat(false, is(equalTo(newFieldAttributes.get("stored"))));
     assertThat(true, is(equalTo(newFieldAttributes.get("indexed"))));
-    assertThat("accuracy", is(equalTo(newFieldAttributes.get("default"))));
-    assertThat(true, is(equalTo(newFieldAttributes.get("required"))));
   }
 
   @Test
@@ -481,7 +468,6 @@ public class SchemaTest extends RestTestBase {
     fieldAttributes.put("type", "string");
     fieldAttributes.put("stored", false);
     fieldAttributes.put("indexed", true);
-    fieldAttributes.put("required", true);
     SchemaRequest.AddDynamicField addDFieldUpdateSchemaRequest =
         new SchemaRequest.AddDynamicField(fieldAttributes);
     SchemaResponse.UpdateResponse addFieldResponse = addDFieldUpdateSchemaRequest.process(getSolrClient());
@@ -506,7 +492,6 @@ public class SchemaTest extends RestTestBase {
     assertThat("string", is(equalTo(newFieldAttributes.get("type"))));
     assertThat(true, is(equalTo(newFieldAttributes.get("stored"))));
     assertThat(false, is(equalTo(newFieldAttributes.get("indexed"))));
-    assertThat(true, is(equalTo(newFieldAttributes.get("required"))));
   }
 
   @Test
@@ -534,7 +519,7 @@ public class SchemaTest extends RestTestBase {
     tokenizerAttributes.put("class", "solr.WhitespaceTokenizerFactory");
     analyzerDefinition.setTokenizer(tokenizerAttributes);
     Map<String, Object> filterAttributes = new LinkedHashMap<>();
-    filterAttributes.put("class", "solr.WordDelimiterFilterFactory");
+    filterAttributes.put("class", "solr.WordDelimiterGraphFilterFactory");
     filterAttributes.put("preserveOriginal", "0");
     analyzerDefinition.setFilters(Collections.singletonList(filterAttributes));
     fieldTypeDefinition.setAnalyzer(analyzerDefinition);
@@ -651,8 +636,7 @@ public class SchemaTest extends RestTestBase {
   public void addFieldTypeShouldntBeCalledTwiceWithTheSameName() throws Exception {
     Map<String, Object> fieldTypeAttributes = new LinkedHashMap<>();
     fieldTypeAttributes.put("name", "failureInt");
-    fieldTypeAttributes.put("class", "solr.TrieIntField");
-    fieldTypeAttributes.put("precisionStep", 0);
+    fieldTypeAttributes.put("class",  RANDOMIZED_NUMERIC_FIELDTYPES.get(Integer.class));
     fieldTypeAttributes.put("omitNorms", true);
     fieldTypeAttributes.put("positionIncrementGap", 0);
     FieldTypeDefinition fieldTypeDefinition = new FieldTypeDefinition();
@@ -672,8 +656,7 @@ public class SchemaTest extends RestTestBase {
     Map<String, Object> fieldTypeAttributes = new LinkedHashMap<>();
     String fieldTypeName = "delInt";
     fieldTypeAttributes.put("name", fieldTypeName);
-    fieldTypeAttributes.put("class", "solr.TrieIntField");
-    fieldTypeAttributes.put("precisionStep", 0);
+    fieldTypeAttributes.put("class",  RANDOMIZED_NUMERIC_FIELDTYPES.get(Integer.class));
     fieldTypeAttributes.put("omitNorms", true);
     fieldTypeAttributes.put("positionIncrementGap", 0);
     FieldTypeDefinition fieldTypeDefinition = new FieldTypeDefinition();
@@ -714,12 +697,15 @@ public class SchemaTest extends RestTestBase {
 
   @Test
   public void testReplaceFieldTypeAccuracy() throws Exception {
+    // a fixed value for comparison after update, be contraian from the randomized 'default'
+    final boolean useDv = Boolean.getBoolean(NUMERIC_DOCVALUES_SYSPROP);
+    
     // Given
     Map<String, Object> fieldTypeAttributes = new LinkedHashMap<>();
     String fieldTypeName = "replaceInt";
     fieldTypeAttributes.put("name", fieldTypeName);
-    fieldTypeAttributes.put("class", "solr.TrieIntField");
-    fieldTypeAttributes.put("precisionStep", 0);
+    fieldTypeAttributes.put("class",  RANDOMIZED_NUMERIC_FIELDTYPES.get(Integer.class));
+    fieldTypeAttributes.put("docValues", useDv);
     fieldTypeAttributes.put("omitNorms", true);
     fieldTypeAttributes.put("positionIncrementGap", 0);
     FieldTypeDefinition fieldTypeDefinition = new FieldTypeDefinition();
@@ -730,7 +716,7 @@ public class SchemaTest extends RestTestBase {
     assertValidSchemaResponse(addFieldTypeResponse);
 
     // When : update the field definition
-    fieldTypeAttributes.put("precisionStep", 1);
+    fieldTypeAttributes.put("positionIncrementGap", 42);
     fieldTypeAttributes.put("omitNorms", false);
     FieldTypeDefinition replaceFieldTypeDefinition = new FieldTypeDefinition();
     replaceFieldTypeDefinition.setAttributes(fieldTypeAttributes);
@@ -746,10 +732,12 @@ public class SchemaTest extends RestTestBase {
     FieldTypeRepresentation replacedFieldTypeRepresentation = newFieldTypeResponse.getFieldType();
     Map<String, Object> replacedFieldTypeAttributes = replacedFieldTypeRepresentation.getAttributes();
     assertThat(fieldTypeName, is(equalTo(replacedFieldTypeAttributes.get("name"))));
-    assertThat("solr.TrieIntField", is(equalTo(replacedFieldTypeAttributes.get("class"))));
+    assertThat( RANDOMIZED_NUMERIC_FIELDTYPES.get(Integer.class),
+                is(equalTo(replacedFieldTypeAttributes.get("class"))));
     assertThat(false, is(equalTo(replacedFieldTypeAttributes.get("omitNorms"))));
-    assertThat("1", is(equalTo(replacedFieldTypeAttributes.get("precisionStep"))));
-    assertThat("0", is(equalTo(replacedFieldTypeAttributes.get("positionIncrementGap"))));
+    assertThat("42", is(equalTo(replacedFieldTypeAttributes.get("positionIncrementGap"))));
+    // should be unchanged...
+    assertThat(useDv, is(equalTo(replacedFieldTypeAttributes.get("docValues"))));
   }
 
   @Test

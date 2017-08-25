@@ -16,6 +16,14 @@
  */
 package org.apache.solr.client.solrj;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.OutputStreamWriter;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Properties;
+
 import org.apache.commons.io.FileUtils;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
@@ -32,14 +40,6 @@ import org.apache.solr.util.ExternalPaths;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.OutputStreamWriter;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Properties;
-
 public class SolrSchemalessExampleTest extends SolrExampleTestsBase {
 
   @BeforeClass
@@ -51,7 +51,7 @@ public class SolrSchemalessExampleTest extends SolrExampleTestsBase {
     FileUtils.copyFileToDirectory(new File(ExternalPaths.SERVER_HOME, "solr.xml"), tempSolrHome);
     File collection1Dir = new File(tempSolrHome, "collection1");
     FileUtils.forceMkdir(collection1Dir);
-    FileUtils.copyDirectoryToDirectory(new File(ExternalPaths.SCHEMALESS_CONFIGSET), collection1Dir);
+    FileUtils.copyDirectoryToDirectory(new File(ExternalPaths.DEFAULT_CONFIGSET), collection1Dir);
     Properties props = new Properties();
     props.setProperty("name","collection1");
     OutputStreamWriter writer = null;
@@ -133,8 +133,7 @@ public class SolrSchemalessExampleTest extends SolrExampleTestsBase {
     try {
       // setup the server...
       String url = jetty.getBaseUrl().toString() + "/collection1";
-      HttpSolrClient client = getHttpSolrClient(url);
-      client.setConnectionTimeout(DEFAULT_CONNECTION_TIMEOUT);
+      HttpSolrClient client = getHttpSolrClient(url, DEFAULT_CONNECTION_TIMEOUT);
       client.setUseMultiPartPost(random().nextBoolean());
       
       if (random().nextBoolean()) {

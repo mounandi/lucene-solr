@@ -43,7 +43,7 @@ import org.junit.Test;
 @Slow
 @SuppressTempFileChecks(bugUrl = "https://issues.apache.org/jira/browse/SOLR-1877 Spellcheck IndexReader leak bug?")
 public class SpellCheckComponentTest extends SolrTestCaseJ4 {
-  static String rh = "spellCheckCompRH";
+  static String rh = "/spellCheckCompRH";
 
 
   @BeforeClass
@@ -184,6 +184,42 @@ public class SpellCheckComponentTest extends SolrTestCaseJ4 {
   
 
   @Test
+  public void testCollateExtendedResultsWithJsonNl() throws Exception {
+    final String q = "documemtsss broens";
+    final String jsonNl = "map";
+    final boolean collateExtendedResults = random().nextBoolean();
+    final List<String> testsList = new ArrayList<String>();
+    if (collateExtendedResults) {
+      testsList.add("/spellcheck/collations/collation/collationQuery=='document brown'");
+      testsList.add("/spellcheck/collations/collation/hits==0");
+      switch (jsonNl) {
+        case "map":
+          testsList.add("/spellcheck/collations/collation/misspellingsAndCorrections/documemtsss=='document'");
+          testsList.add("/spellcheck/collations/collation/misspellingsAndCorrections/broens=='brown'");
+          break;
+        default:
+          fail("unexpected json.nl choice: "+jsonNl);
+          break;
+      }
+    } else {
+      testsList.add("/spellcheck/collations/collation=='document brown'");
+    }
+    final String[] testsArray = new String[testsList.size()];
+    implTestCollateExtendedResultsWithJsonNl(q, jsonNl, collateExtendedResults, testsList.toArray(testsArray));
+  }
+
+  private void implTestCollateExtendedResultsWithJsonNl(String q, String jsonNl, boolean collateExtendedResults, String ... tests) throws Exception {
+    final SolrQueryRequest solrQueryRequest = req(
+        CommonParams.QT, rh,
+        CommonParams.Q, q,
+        "json.nl", jsonNl,
+        SpellCheckComponent.COMPONENT_NAME, "true",
+        SpellingParams.SPELLCHECK_COLLATE_EXTENDED_RESULTS, Boolean.toString(collateExtendedResults),
+        SpellingParams.SPELLCHECK_COLLATE, "true");
+    assertJQ(solrQueryRequest, tests);
+  }
+
+  @Test
   public void testCorrectSpelling() throws Exception {
     // Make sure correct spellings are signaled in the response
     assertJQ(req("json.nl","map", "qt",rh, SpellCheckComponent.COMPONENT_NAME, "true",
@@ -218,7 +254,7 @@ public class SpellCheckComponentTest extends SolrTestCaseJ4 {
   public void testReloadOnStart() throws Exception {
     assertU(adoc("id", "0", "lowerfilt", "This is a title"));
     assertU(commit());
-    SolrQueryRequest request = req("qt", "spellCheckCompRH", "q", "*:*",
+    SolrQueryRequest request = req("qt", "/spellCheckCompRH", "q", "*:*",
         "spellcheck.q", "ttle", "spellcheck", "true", "spellcheck.dictionary",
         "default", "spellcheck.build", "true");
     assertQ(request, "//arr[@name='suggestion'][.='title']");
@@ -235,7 +271,7 @@ public class SpellCheckComponentTest extends SolrTestCaseJ4 {
     checker.init(args);
     checker.inform(h.getCore());
 
-    request = req("qt", "spellCheckCompRH", "q", "*:*", "spellcheck.q", "ttle",
+    request = req("qt", "/spellCheckCompRH", "q", "*:*", "spellcheck.q", "ttle",
         "spellcheck", "true", "spellcheck.dictionary", "default",
         "spellcheck.reload", "true");
     List<SearchComponent> components = new ArrayList<>();
@@ -257,7 +293,7 @@ public class SpellCheckComponentTest extends SolrTestCaseJ4 {
     @SuppressWarnings("unchecked")
     @Test
   public void testRebuildOnCommit() throws Exception {
-    SolrQueryRequest req = req("q", "lowerfilt:lucenejavt", "qt", "spellCheckCompRH", "spellcheck", "true");
+    SolrQueryRequest req = req("q", "lowerfilt:lucenejavt", "qt", "/spellCheckCompRH", "spellcheck", "true");
     String response = h.query(req);
     assertFalse("No suggestions should be returned", response.contains("lucenejava"));
     
@@ -294,7 +330,7 @@ public class SpellCheckComponentTest extends SolrTestCaseJ4 {
         params.add(SpellingParams.SPELLCHECK_EXTENDED_RESULTS,"true");
         params.add(CommonParams.Q, "anotheq");
 
-        SolrRequestHandler handler = core.getRequestHandler("spellCheckCompRH");
+        SolrRequestHandler handler = core.getRequestHandler("/spellCheckCompRH");
         SolrQueryResponse rsp = new SolrQueryResponse();
         rsp.addResponseHeader(new SimpleOrderedMap());
         SolrQueryRequest req = new LocalSolrQueryRequest(core, params);

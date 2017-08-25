@@ -110,8 +110,6 @@ abstract public class SolrJettyTestBase extends SolrTestCaseJ4
     nodeProps.setProperty("coreRootDirectory", coresDir.toString());
     nodeProps.setProperty("configSetBaseDir", solrHome);
 
-    ignoreException("maxWarmingSearchers");
-
     jetty = new JettySolrRunner(solrHome, nodeProps, jettyConfig);
     jetty.start();
     port = jetty.getLocalPort();
@@ -154,8 +152,7 @@ abstract public class SolrJettyTestBase extends SolrTestCaseJ4
       try {
         // setup the client...
         String url = jetty.getBaseUrl().toString() + "/" + "collection1";
-        HttpSolrClient client = getHttpSolrClient(url);
-        client.setConnectionTimeout(DEFAULT_CONNECTION_TIMEOUT);
+        HttpSolrClient client = getHttpSolrClient(url, DEFAULT_CONNECTION_TIMEOUT);
         return client;
       }
       catch( Exception ex ) {

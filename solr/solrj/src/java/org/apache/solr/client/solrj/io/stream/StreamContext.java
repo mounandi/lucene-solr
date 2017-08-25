@@ -19,6 +19,8 @@ package org.apache.solr.client.solrj.io.stream;
 import java.io.Serializable;
 import java.util.Map;
 import java.util.HashMap;
+
+import org.apache.solr.client.solrj.io.ModelCache;
 import org.apache.solr.client.solrj.io.SolrClientCache;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 
@@ -34,10 +36,17 @@ import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 public class StreamContext implements Serializable{
 
   private Map entries = new HashMap();
+  private Map tupleContext = new HashMap();
+  private Map<String, Object> lets = new HashMap();
   public int workerID;
   public int numWorkers;
   private SolrClientCache clientCache;
+  private ModelCache modelCache;
   private StreamFactory streamFactory;
+
+  public Map<String, Object> getLets(){
+    return lets;
+  }
 
   public Object get(Object key) {
     return entries.get(key);
@@ -45,6 +54,10 @@ public class StreamContext implements Serializable{
 
   public void put(Object key, Object value) {
     this.entries.put(key, value);
+  }
+
+  public boolean containsKey(Object key) {
+    return entries.containsKey(key);
   }
 
   public Map getEntries() {
@@ -55,12 +68,24 @@ public class StreamContext implements Serializable{
     this.clientCache = clientCache;
   }
 
+  public void setModelCache(ModelCache modelCache) {
+    this.modelCache = modelCache;
+  }
+
   public SolrClientCache getSolrClientCache() {
     return this.clientCache;
   }
 
+  public ModelCache getModelCache() {
+    return this.modelCache;
+  }
+
   public void setStreamFactory(StreamFactory streamFactory) {
     this.streamFactory = streamFactory;
+  }
+
+  public Map getTupleContext() {
+    return tupleContext;
   }
 
   public StreamFactory getStreamFactory() {

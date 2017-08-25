@@ -16,23 +16,28 @@
  */
 package org.apache.lucene.queries.function.valuesource;
 
-import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.NumericDocValues;
-import org.apache.lucene.queries.function.FunctionValues;
-import org.apache.lucene.queries.function.ValueSource;
-import org.apache.lucene.queries.function.docvalues.FloatDocValues;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.similarities.TFIDFSimilarity;
-
 import java.io.IOException;
 import java.util.Map;
 
+import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.queries.function.FunctionValues;
+import org.apache.lucene.queries.function.ValueSource;
+import org.apache.lucene.queries.function.docvalues.FloatDocValues;
+import org.apache.lucene.search.CollectionStatistics;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.TermStatistics;
+import org.apache.lucene.search.similarities.TFIDFSimilarity;
+import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.search.similarities.Similarity.SimScorer;
+import org.apache.lucene.search.similarities.Similarity.SimWeight;
+
 /** 
- * Function that returns {@link TFIDFSimilarity#decodeNormValue(long)}
- * for every document.
+ * Function that returns the decoded norm for every document.
  * <p>
  * Note that the configured Similarity for the field must be
- * a subclass of {@link TFIDFSimilarity}
+ * a subclass of {@link TFIDFSimilarity} and the contribution of
+ * the TF needs to be 1 when the freq is 1 and the contribution
+ * of the IDF needs to be 1 when docFreq == docCount == 1.
  * @lucene.internal */
 public class NormValueSource extends ValueSource {
   protected final String field;
@@ -61,16 +66,22 @@ public class NormValueSource extends ValueSource {
     if (similarity == null) {
       throw new UnsupportedOperationException("requires a TFIDFSimilarity (such as ClassicSimilarity)");
     }
-    final NumericDocValues norms = readerContext.reader().getNormValues(field);
-
-    if (norms == null) {
-      return new ConstDoubleDocValues(0.0, this);
-    }
+    // Only works if the contribution of the tf is 1 when the freq is 1 and contribution of the idf
+    // is 1 when docCount == docFreq == 1
+    final SimWeight simWeight = similarity.computeWeight(1f,
+        new CollectionStatistics(field, 1, 1, 1, 1),
+        new TermStatistics(new BytesRef("bogus"), 1, 1));
+    final SimScorer simScorer = similarity.simScorer(simWeight, readerContext);
     
     return new FloatDocValues(this) {
+      int lastDocID = -1;
       @Override
-      public float floatVal(int doc) {
-        return similarity.decodeNormValue(norms.get(doc));
+      public float floatVal(int docID) throws IOException {
+        if (docID < lastDocID) {
+          throw new AssertionError("docs out of order: lastDocID=" + lastDocID + " docID=" + docID);
+        }
+        lastDocID = docID;
+        return simScorer.score(docID, 1f);
       }
     };
   }

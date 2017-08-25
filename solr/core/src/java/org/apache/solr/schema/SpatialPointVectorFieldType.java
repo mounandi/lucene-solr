@@ -20,12 +20,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.lucene.spatial.vector.PointVectorStrategy;
+import org.apache.solr.legacy.LegacyFieldType;
+import org.apache.solr.legacy.PointVectorStrategy;
 
 /**
  * @see PointVectorStrategy
- * @lucene.experimental
+ * @deprecated use {@link LatLonPointSpatialField} instead
  */
+@Deprecated
 public class SpatialPointVectorFieldType extends AbstractSpatialFieldType<PointVectorStrategy> implements SchemaAware {
 
   protected String numberFieldName = "tdouble";//in example schema defaults to non-zero precision step -- a good choice
@@ -78,18 +80,17 @@ public class SpatialPointVectorFieldType extends AbstractSpatialFieldType<PointV
   }
 
   @Override
-  public org.apache.lucene.document.FieldType.LegacyNumericType getNumericType() {
-    return org.apache.lucene.document.FieldType.LegacyNumericType.DOUBLE;
+  public NumberType getNumberType() {
+    return NumberType.DOUBLE;
   }
 
   @Override
   protected PointVectorStrategy newSpatialStrategy(String fieldName) {
     // TODO update to how BBoxField does things
-    if (this.getNumericType() != null) {
+    if (this.getNumberType() != null) {
       // create strategy based on legacy numerics
       // todo remove in 7.0
-      org.apache.lucene.document.FieldType fieldType =
-          new org.apache.lucene.document.FieldType(PointVectorStrategy.LEGACY_FIELDTYPE);
+      LegacyFieldType fieldType = new LegacyFieldType(PointVectorStrategy.LEGACY_FIELDTYPE);
       fieldType.setNumericPrecisionStep(precisionStep);
       return new PointVectorStrategy(ctx, fieldName, fieldType);
     } else {

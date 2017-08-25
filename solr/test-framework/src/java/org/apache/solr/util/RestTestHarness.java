@@ -15,6 +15,13 @@
  * limitations under the License.
  */
 package org.apache.solr.util;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpressionException;
+import java.io.Closeable;
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+
 import org.apache.http.HttpEntity;
 import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpGet;
@@ -27,13 +34,6 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.util.EntityUtils;
 import org.apache.solr.client.solrj.impl.HttpClientUtil;
 import org.apache.solr.common.params.ModifiableSolrParams;
-
-import javax.xml.xpath.XPathConstants;
-import javax.xml.xpath.XPathExpressionException;
-import java.io.Closeable;
-import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 
 /**
  * Facilitates testing Solr's REST API via a provided embedded Jetty
@@ -49,6 +49,14 @@ public class RestTestHarness extends BaseTestHarness implements Closeable {
   
   public String getBaseURL() {
     return serverProvider.getBaseURL();
+  }
+
+  public void setServerProvider(RESTfulServerProvider serverProvider) {
+    this.serverProvider = serverProvider;
+  }
+
+  public RESTfulServerProvider getServerProvider() {
+    return this.serverProvider;
   }
 
   public String getAdminURL() {
@@ -89,7 +97,7 @@ public class RestTestHarness extends BaseTestHarness implements Closeable {
 
   /**
    * Processes a "query" using a URL path (with no context path) + optional query params,
-   * e.g. "/schema/fields?indent=on"
+   * e.g. "/schema/fields?indent=off"
    *
    * @param request the URL path and optional query params
    * @return The response to the query
@@ -173,10 +181,10 @@ public class RestTestHarness extends BaseTestHarness implements Closeable {
   @Override
   public void reload() throws Exception {
     String coreName = (String)evaluateXPath
-        (adminQuery("/admin/cores?action=STATUS"),
+        (adminQuery("/admin/cores?wt=xml&action=STATUS"),
          "//lst[@name='status']/lst[1]/str[@name='name']",
          XPathConstants.STRING);
-    String xml = checkAdminResponseStatus("/admin/cores?action=RELOAD&core=" + coreName, "0");
+    String xml = checkAdminResponseStatus("/admin/cores?wt=xml&action=RELOAD&core=" + coreName, "0");
     if (null != xml) {
       throw new RuntimeException("RELOAD failed:\n" + xml);
     }

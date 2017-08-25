@@ -39,6 +39,7 @@ import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.cloud.BasicDistributedZkTest;
 import org.apache.solr.cloud.StoppableIndexingThread;
 import org.apache.solr.core.CoreContainer;
+import org.apache.solr.core.DirectoryFactory;
 import org.apache.solr.core.HdfsDirectoryFactory;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.store.blockcache.BlockCache;
@@ -94,7 +95,7 @@ public class HdfsWriteToMultipleCollectionsTest extends BasicDistributedZkTest {
     int docCount = random().nextInt(1313) + 1;
     int cnt = random().nextInt(4) + 1;
     for (int i = 0; i < cnt; i++) {
-      createCollection(ACOLLECTION + i, 2, 2, 9);
+      createCollection(ACOLLECTION + i, "conf1", 2, 2, 9);
     }
     for (int i = 0; i < cnt; i++) {
       waitForRecoveriesToFinish(ACOLLECTION + i, false);
@@ -134,10 +135,11 @@ public class HdfsWriteToMultipleCollectionsTest extends BasicDistributedZkTest {
       for (SolrCore core : solrCores) {
         if (core.getCoreDescriptor().getCloudDescriptor().getCollectionName()
             .startsWith(ACOLLECTION)) {
-          assertTrue(core.getDirectoryFactory() instanceof HdfsDirectoryFactory);
-          Directory dir = core.getDirectoryFactory().get(core.getDataDir(), null, null);
+          DirectoryFactory factory = core.getDirectoryFactory();
+          assertTrue("Found: " + core.getDirectoryFactory().getClass().getName(), factory instanceof HdfsDirectoryFactory);
+          Directory dir = factory.get(core.getDataDir(), null, null);
           try {
-            long dataDirSize = core.getDirectoryFactory().size(dir);
+            long dataDirSize = factory.size(dir);
             FileSystem fileSystem = null;
             
             fileSystem = FileSystem.newInstance(
@@ -153,8 +155,7 @@ public class HdfsWriteToMultipleCollectionsTest extends BasicDistributedZkTest {
               .getSolrCoreState().getIndexWriter(core);
           try {
             IndexWriter iw = iwRef.get();
-            NRTCachingDirectory directory = (NRTCachingDirectory) iw
-                .getDirectory();
+            NRTCachingDirectory directory = (NRTCachingDirectory) iw.getDirectory();
             BlockDirectory blockDirectory = (BlockDirectory) directory
                 .getDelegate();
             assertTrue(blockDirectory.isBlockCacheReadEnabled());

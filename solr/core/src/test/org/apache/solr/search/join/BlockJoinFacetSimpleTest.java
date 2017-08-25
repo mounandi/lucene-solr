@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.List;
 
 import org.apache.solr.SolrTestCaseJ4;
+import org.apache.solr.request.SolrQueryRequest;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -31,7 +32,7 @@ public class BlockJoinFacetSimpleTest extends SolrTestCaseJ4 {
   @BeforeClass
   public static void beforeClass() throws Exception {
     initCore("solrconfig-blockjoinfacetcomponent.xml", "schema-blockjoinfacetcomponent.xml");
-    handler = random().nextBoolean() ? "blockJoinDocSetFacetRH":"blockJoinFacetRH";
+    handler = random().nextBoolean() ? "/blockJoinDocSetFacetRH":"/blockJoinFacetRH";
     createIndex();
   }
 
@@ -94,4 +95,27 @@ public class BlockJoinFacetSimpleTest extends SolrTestCaseJ4 {
     }
   }
 
+  @Test
+  public void testParentLevelFQExclusion() {
+    SolrQueryRequest req = req(
+        "qt", handler,
+        "q", "{!parent which=type_s:parent}+SIZE_s:XL",
+        "fq", "{!term f=BRAND_s tag=rbrand}Nike",
+        "facet", "true",
+        "facet.field", "BRAND_s",
+        "child.facet.field", "COLOR_s");
+    assertQ("no exclusion, brand facet got only one Nike",req, "//*[@numFound='" + 1 + "']",
+        "count(//lst[@name='BRAND_s']/int[.='1'])=1");
+  
+    assertQ("nike filter is excluded, expecting both brand in facet",req(
+        "qt", handler,
+        "q", "{!parent which=type_s:parent}+SIZE_s:XL",
+        "fq", "{!term f=BRAND_s tag=rbrand}Nike",
+        "facet", "true",
+        "facet.field", "{!ex=rbrand}BRAND_s",
+        "child.facet.field", "COLOR_s"),
+     "//*[@numFound='" + 1 + "']",
+        "count(//lst[@name='BRAND_s']/int[.='1'])=2");
+  
+  }
 }

@@ -17,8 +17,10 @@
 package org.apache.lucene.index;
 
 import java.io.IOException;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -33,6 +35,7 @@ import org.apache.lucene.codecs.asserting.AssertingDocValuesFormat;
 import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field.Store;
+import org.apache.lucene.document.Field;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.SortedSetDocValuesField;
@@ -50,7 +53,6 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
-import org.junit.Test;
 
 import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 
@@ -83,9 +85,14 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     writer.updateDocument       (new Term("id","doc-2"), doc(2, 2000000000L ));
     writer.updateDocument       (new Term("id","doc-2"), doc(2, 2222222222L ));
     writer.updateNumericDocValue(new Term("id","doc-1"), "val", 1111111111L );
-    writer.commit();
-    
-    final DirectoryReader reader = DirectoryReader.open(dir);
+
+    final DirectoryReader reader;
+    if (random().nextBoolean()) {
+      writer.commit();
+      reader = DirectoryReader.open(dir);
+    } else {
+      reader = DirectoryReader.open(writer);
+    }
     final IndexSearcher searcher = new IndexSearcher(reader);
     TopFieldDocs td;
     
@@ -128,14 +135,11 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     int numDocUpdates = 0;
     int numValueUpdates = 0;
 
-    //System.out.println("TEST: numOperations=" + numOperations + " ADD_CUTOFF=" + ADD_CUTOFF + " UPD_CUTOFF=" + UPD_CUTOFF);
-
     for (int i = 0; i < numOperations; i++) {
       final int op = TestUtil.nextInt(random(), 1, 100);
       final long val = random().nextLong();
       if (op <= ADD_CUTOFF) {
         final int id = expected.size();
-        //System.out.println("TEST i=" + i + ": addDocument id=" + id + " val=" + val);
         expected.put(id, val);
         writer.addDocument(doc(id, val));
       } else {
@@ -143,11 +147,9 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
         expected.put(id, val);
         if (op <= UPD_CUTOFF) {
           numDocUpdates++;
-          //System.out.println("TEST i=" + i + ": updateDocument id=" + id + " val=" + val);
           writer.updateDocument(new Term("id","doc-" + id), doc(id, val));
         } else {
           numValueUpdates++;
-          //System.out.println("TEST i=" + i + ": updateDV id=" + id + " val=" + val);
           writer.updateNumericDocValue(new Term("id","doc-" + id), "val", val);
         }
       }
@@ -171,7 +173,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
   }
 
   
-  @Test
   public void testUpdatesAreFlushed() throws IOException {
     Directory dir = newDirectory();
     IndexWriter writer = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random(), MockTokenizer.WHITESPACE, false))
@@ -194,7 +195,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testSimple() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -221,14 +221,15 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     assertEquals(1, reader.leaves().size());
     LeafReader r = reader.leaves().get(0).reader();
     NumericDocValues ndv = r.getNumericDocValues("val");
-    assertEquals(2, ndv.get(0));
-    assertEquals(2, ndv.get(1));
+    assertEquals(0, ndv.nextDoc());
+    assertEquals(2, ndv.longValue());
+    assertEquals(1, ndv.nextDoc());
+    assertEquals(2, ndv.longValue());
     reader.close();
     
     dir.close();
   }
   
-  @Test
   public void testUpdateFewSegments() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -267,7 +268,8 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       assertNotNull(ndv);
       for (int i = 0; i < r.maxDoc(); i++) {
         long expected = expectedValues[i + context.docBase];
-        long actual = ndv.get(i);
+        assertEquals(i, ndv.nextDoc());
+        long actual = ndv.longValue();
         assertEquals(expected, actual);
       }
     }
@@ -276,7 +278,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testReopen() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -292,6 +293,9 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       writer.commit();
       reader1 = DirectoryReader.open(dir);
     }
+    if (VERBOSE) {
+      System.out.println("TEST: isNRT=" + isNRT);
+    }
 
     // update doc
     writer.updateNumericDocValue(new Term("id", "doc-0"), "val", 10L); // update doc-0's value to 10
@@ -300,18 +304,24 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     }
     
     // reopen reader and assert only it sees the update
+    if (VERBOSE) {
+      System.out.println("TEST: openIfChanged");
+    }
     final DirectoryReader reader2 = DirectoryReader.openIfChanged(reader1);
     assertNotNull(reader2);
     assertTrue(reader1 != reader2);
+    NumericDocValues dvs1 = reader1.leaves().get(0).reader().getNumericDocValues("val");
+    assertEquals(0, dvs1.nextDoc());
+    assertEquals(1, dvs1.longValue());
 
-    assertEquals(1, reader1.leaves().get(0).reader().getNumericDocValues("val").get(0));
-    assertEquals(10, reader2.leaves().get(0).reader().getNumericDocValues("val").get(0));
+    NumericDocValues dvs2 = reader2.leaves().get(0).reader().getNumericDocValues("val");
+    assertEquals(0, dvs2.nextDoc());
+    assertEquals(10, dvs2.longValue());
 
     writer.close();
     IOUtils.close(reader1, reader2, dir);
   }
   
-  @Test
   public void testUpdatesAndDeletes() throws Exception {
     // create an index with a segment with only deletes, a segment with both
     // deletes and updates and a segment with only updates
@@ -353,14 +363,14 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     long[] expectedValues = new long[] { 1, 2, 3, 17, 5, 17};
     NumericDocValues ndv = MultiDocValues.getNumericValues(reader, "val");
     for (int i = 0; i < expectedValues.length; i++) {
-      assertEquals(expectedValues[i], ndv.get(i));
+      assertEquals(i, ndv.nextDoc());
+      assertEquals(expectedValues[i], ndv.longValue());
     }
     
     reader.close();
     dir.close();
   }
   
-  @Test
   public void testUpdatesWithDeletes() throws Exception {
     // update and delete different documents in the same commit session
     Directory dir = newDirectory();
@@ -389,13 +399,14 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     
     LeafReader r = reader.leaves().get(0).reader();
     assertFalse(r.getLiveDocs().get(0));
-    assertEquals(17, r.getNumericDocValues("val").get(1));
+    NumericDocValues values = r.getNumericDocValues("val");
+    assertEquals(1, values.advance(1));
+    assertEquals(17, values.longValue());
     
     reader.close();
     dir.close();
   }
 
-  @Test
   public void testMultipleDocValuesTypes() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -425,12 +436,16 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     SortedDocValues sdv = r.getSortedDocValues("sdv");
     SortedSetDocValues ssdv = r.getSortedSetDocValues("ssdv");
     for (int i = 0; i < r.maxDoc(); i++) {
-      assertEquals(17, ndv.get(i));
-      BytesRef term = bdv.get(i);
+      assertEquals(i, ndv.nextDoc());
+      assertEquals(17, ndv.longValue());
+      assertEquals(i, bdv.nextDoc());
+      BytesRef term = bdv.binaryValue();
       assertEquals(new BytesRef(Integer.toString(i)), term);
-      term = sdv.get(i);
+      assertEquals(i, sdv.nextDoc());
+      term = sdv.binaryValue();
       assertEquals(new BytesRef(Integer.toString(i)), term);
-      ssdv.setDocument(i);
+      assertEquals(i, ssdv.nextDoc());
+
       long ord = ssdv.nextOrd();
       term = ssdv.lookupOrd(ord);
       assertEquals(i, Integer.parseInt(term.utf8ToString()));
@@ -446,7 +461,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testMultipleNumericDocValues() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -471,15 +485,16 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     NumericDocValues ndv1 = r.getNumericDocValues("ndv1");
     NumericDocValues ndv2 = r.getNumericDocValues("ndv2");
     for (int i = 0; i < r.maxDoc(); i++) {
-      assertEquals(17, ndv1.get(i));
-      assertEquals(i, ndv2.get(i));
+      assertEquals(i, ndv1.nextDoc());
+      assertEquals(17, ndv1.longValue());
+      assertEquals(i, ndv2.nextDoc());
+      assertEquals(i, ndv2.longValue());
     }
     
     reader.close();
     dir.close();
   }
   
-  @Test
   public void testDocumentWithNoValue() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -494,23 +509,35 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       writer.addDocument(doc);
     }
     writer.commit();
+    if (VERBOSE) {
+      System.out.println("TEST: first commit");
+    }
     
     // update all docs' ndv field
     writer.updateNumericDocValue(new Term("dvUpdateKey", "dv"), "ndv", 17L);
+    if (VERBOSE) {
+      System.out.println("TEST: first close");
+    }
     writer.close();
+    if (VERBOSE) {
+      System.out.println("TEST: done close");
+    }
     
     final DirectoryReader reader = DirectoryReader.open(dir);
+    if (VERBOSE) {
+      System.out.println("TEST: got reader=reader");
+    }
     LeafReader r = reader.leaves().get(0).reader();
     NumericDocValues ndv = r.getNumericDocValues("ndv");
     for (int i = 0; i < r.maxDoc(); i++) {
-      assertEquals(17, ndv.get(i));
+      assertEquals(i, ndv.nextDoc());
+      assertEquals("doc=" + i + " has wrong numeric doc value", 17, ndv.longValue());
     }
     
     reader.close();
     dir.close();
   }
   
-  @Test
   public void testUpdateNonNumericDocValuesField() throws Exception {
     // we don't support adding new fields or updating existing non-numeric-dv
     // fields through numeric updates
@@ -537,7 +564,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testDifferentDVFormatPerField() throws Exception {
     // test relies on separate instances of the "same thing"
     assert TestUtil.getDefaultDocValuesFormat() != TestUtil.getDefaultDocValuesFormat();
@@ -567,8 +593,10 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     NumericDocValues ndv = MultiDocValues.getNumericValues(reader, "ndv");
     SortedDocValues sdv = MultiDocValues.getSortedValues(reader, "sorted");
     for (int i = 0; i < reader.maxDoc(); i++) {
-      assertEquals(17, ndv.get(i));
-      final BytesRef term = sdv.get(i);
+      assertEquals(i, ndv.nextDoc());
+      assertEquals(17, ndv.longValue());
+      assertEquals(i, sdv.nextDoc());
+      final BytesRef term = sdv.binaryValue();
       assertEquals(new BytesRef("value"), term);
     }
     
@@ -576,7 +604,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testUpdateSameDocMultipleTimes() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -596,13 +623,13 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     final DirectoryReader reader = DirectoryReader.open(dir);
     NumericDocValues ndv = MultiDocValues.getNumericValues(reader, "ndv");
     for (int i = 0; i < reader.maxDoc(); i++) {
-      assertEquals(3, ndv.get(i));
+      assertEquals(i, ndv.nextDoc());
+      assertEquals(3, ndv.longValue());
     }
     reader.close();
     dir.close();
   }
   
-  @Test
   public void testSegmentMerges() throws Exception {
     Directory dir = newDirectory();
     Random random = random();
@@ -611,28 +638,54 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     
     int docid = 0;
     int numRounds = atLeast(10);
+    if (VERBOSE) {
+      System.out.println("TEST: " + numRounds + " rounds");
+    }
     for (int rnd = 0; rnd < numRounds; rnd++) {
+      if (VERBOSE) {
+        System.out.println("\nTEST: round=" + rnd);
+      }
       Document doc = new Document();
       doc.add(new StringField("key", "doc", Store.NO));
       doc.add(new NumericDocValuesField("ndv", -1));
       int numDocs = atLeast(30);
+      if (VERBOSE) {
+        System.out.println("TEST: " + numDocs + " docs");
+      }
       for (int i = 0; i < numDocs; i++) {
         doc.removeField("id");
-        doc.add(new StringField("id", Integer.toString(docid++), Store.NO));
+        doc.add(new StringField("id", Integer.toString(docid), Store.YES));
+        if (VERBOSE) {
+          System.out.println("TEST: add doc id=" + docid);
+        }
         writer.addDocument(doc);
+        docid++;
       }
       
       long value = rnd + 1;
+      if (VERBOSE) {
+        System.out.println("TEST: update all ndv values to " + value);
+      }
       writer.updateNumericDocValue(new Term("key", "doc"), "ndv", value);
       
-      if (random.nextDouble() < 0.2) { // randomly delete some docs
-        writer.deleteDocuments(new Term("id", Integer.toString(random.nextInt(docid))));
+      if (random.nextDouble() < 0.2) { // randomly delete one doc
+        int delID = random.nextInt(docid);
+        if (VERBOSE) {
+          System.out.println("TEST: delete random doc id=" + delID);
+        }
+        writer.deleteDocuments(new Term("id", Integer.toString(delID)));
       }
       
       // randomly commit or reopen-IW (or nothing), before forceMerge
       if (random.nextDouble() < 0.4) {
+        if (VERBOSE) {
+          System.out.println("\nTEST: commit writer");
+        }
         writer.commit();
       } else if (random.nextDouble() < 0.1) {
+        if (VERBOSE) {
+          System.out.println("\nTEST: close writer");
+        }
         writer.close();
         conf = newIndexWriterConfig(new MockAnalyzer(random));
         writer = new IndexWriter(dir, conf);
@@ -645,18 +698,35 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       // and some MPs might now merge it, thereby invalidating test's
       // assumption that the reader has no deletes).
       doc = new Document();
-      doc.add(new StringField("id", Integer.toString(docid++), Store.NO));
+      doc.add(new StringField("id", Integer.toString(docid), Store.YES));
       doc.add(new StringField("key", "doc", Store.NO));
       doc.add(new NumericDocValuesField("ndv", value));
+      if (VERBOSE) {
+        System.out.println("\nTEST: add one more doc id=" + docid);
+      }
       writer.addDocument(doc);
+      docid++;
 
+      if (VERBOSE) {
+        System.out.println("\nTEST: force merge");
+      }
       writer.forceMerge(1, true);
+      
       final DirectoryReader reader;
       if (random.nextBoolean()) {
+        if (VERBOSE) {
+          System.out.println("\nTEST: commit and open non-NRT reader");
+        }
         writer.commit();
         reader = DirectoryReader.open(dir);
       } else {
+        if (VERBOSE) {
+          System.out.println("\nTEST: open NRT reader");
+        }
         reader = DirectoryReader.open(writer);
+      }
+      if (VERBOSE) {
+        System.out.println("TEST: got reader=" + reader);
       }
       
       assertEquals(1, reader.leaves().size());
@@ -664,8 +734,13 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       assertNull("index should have no deletes after forceMerge", r.getLiveDocs());
       NumericDocValues ndv = r.getNumericDocValues("ndv");
       assertNotNull(ndv);
+      if (VERBOSE) {
+        System.out.println("TEST: maxDoc=" + r.maxDoc());
+      }
       for (int i = 0; i < r.maxDoc(); i++) {
-        assertEquals(value, ndv.get(i));
+        Document rdoc = r.document(i);
+        assertEquals(i, ndv.nextDoc());
+        assertEquals("docid=" + i + " has wrong ndv value; doc=" + rdoc, value, ndv.longValue());
       }
       reader.close();
     }
@@ -674,7 +749,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testUpdateDocumentByMultipleTerms() throws Exception {
     // make sure the order of updates is respected, even when multiple terms affect same document
     Directory dir = newDirectory();
@@ -696,13 +770,147 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     final DirectoryReader reader = DirectoryReader.open(dir);
     NumericDocValues ndv = MultiDocValues.getNumericValues(reader, "ndv");
     for (int i = 0; i < reader.maxDoc(); i++) {
-      assertEquals(3, ndv.get(i));
+      assertEquals(i, ndv.nextDoc());
+      assertEquals(3, ndv.longValue());
     }
     reader.close();
     dir.close();
   }
+
+  static class OneSortDoc implements Comparable<OneSortDoc> {
+    public long value;
+    public final long sortValue;
+    public final int id;
+    public boolean deleted;
+
+    public OneSortDoc(int id, long value, long sortValue) {
+      this.value = value;
+      this.sortValue = sortValue;
+      this.id = id;
+    }
+
+    @Override
+    public int compareTo(OneSortDoc other) {
+      int cmp = Long.compare(sortValue, other.sortValue);
+      if (cmp == 0) {
+        cmp = Integer.compare(id, other.id);
+        assert cmp != 0;
+      }
+      return cmp;
+    }
+  }
+
+  public void testSortedIndex() throws Exception {
+    Directory dir = newDirectory();
+    IndexWriterConfig iwc = newIndexWriterConfig();
+    iwc.setIndexSort(new Sort(new SortField("sort", SortField.Type.LONG)));
+    RandomIndexWriter w = new RandomIndexWriter(random(), dir, iwc);
+
+    int valueRange = TestUtil.nextInt(random(), 1, 1000);
+    int sortValueRange = TestUtil.nextInt(random(), 1, 1000);
+
+    int refreshChance = TestUtil.nextInt(random(), 5, 200);
+    int deleteChance = TestUtil.nextInt(random(), 2, 100);
+
+    int idUpto = 0;
+    int deletedCount = 0;
+    
+    List<OneSortDoc> docs = new ArrayList<>();
+    DirectoryReader r = w.getReader();
+
+    int numIters = atLeast(1000);
+    for(int iter=0;iter<numIters;iter++) {
+      int value = random().nextInt(valueRange);
+      if (docs.isEmpty() || random().nextInt(3) == 1) {
+        int id = docs.size();
+        // add new doc
+        Document doc = new Document();
+        doc.add(newStringField("id", Integer.toString(id), Field.Store.YES));
+        doc.add(new NumericDocValuesField("number", value));
+        int sortValue = random().nextInt(sortValueRange);
+        doc.add(new NumericDocValuesField("sort", sortValue));
+        if (VERBOSE) {
+          System.out.println("TEST: iter=" + iter + " add doc id=" + id + " sortValue=" + sortValue + " value=" + value);
+        }
+        w.addDocument(doc);
+
+        docs.add(new OneSortDoc(id, value, sortValue));
+      } else {
+        // update existing doc value
+        int idToUpdate = random().nextInt(docs.size());
+        if (VERBOSE) {
+          System.out.println("TEST: iter=" + iter + " update doc id=" + idToUpdate + " new value=" + value);
+        }
+        w.updateNumericDocValue(new Term("id", Integer.toString(idToUpdate)), "number", (long) value);
+
+        docs.get(idToUpdate).value = value;
+      }
+
+      if (random().nextInt(deleteChance) == 0) {
+        int idToDelete = random().nextInt(docs.size());
+        if (VERBOSE) {
+          System.out.println("TEST: delete doc id=" + idToDelete);
+        }
+        w.deleteDocuments(new Term("id", Integer.toString(idToDelete)));
+        if (docs.get(idToDelete).deleted == false) {
+          docs.get(idToDelete).deleted = true;
+          deletedCount++;
+        }
+      }
+
+      if (random().nextInt(refreshChance) == 0) {
+        if (VERBOSE) {
+          System.out.println("TEST: now get reader; old reader=" + r);
+        }
+        DirectoryReader r2 = w.getReader();
+        r.close();
+        r = r2;
+
+        if (VERBOSE) {
+          System.out.println("TEST: got reader=" + r);
+        }
+
+        int liveCount = 0;
+
+        for (LeafReaderContext ctx : r.leaves()) {
+          LeafReader leafReader = ctx.reader();
+          NumericDocValues values = leafReader.getNumericDocValues("number");
+          NumericDocValues sortValues = leafReader.getNumericDocValues("sort");
+          Bits liveDocs = leafReader.getLiveDocs();
+
+          long lastSortValue = Long.MIN_VALUE;
+          for (int i=0;i<leafReader.maxDoc();i++) {
+
+            Document doc = leafReader.document(i);
+            OneSortDoc sortDoc = docs.get(Integer.parseInt(doc.get("id")));
+
+            assertEquals(i, values.nextDoc());
+            assertEquals(i, sortValues.nextDoc());
+
+            if (liveDocs != null && liveDocs.get(i) == false) {
+              assertTrue(sortDoc.deleted);
+              continue;
+            }
+            assertFalse(sortDoc.deleted);
+        
+            assertEquals(sortDoc.value, values.longValue());
+
+            long sortValue = sortValues.longValue();
+            assertEquals(sortDoc.sortValue, sortValue);
+            
+            assertTrue(sortValue >= lastSortValue);
+            lastSortValue = sortValue;
+            liveCount++;
+          }
+        }
+
+        assertEquals(docs.size() - deletedCount, liveCount);
+      }
+    }
+
+    IOUtils.close(r, w, dir);
+  }
   
-  @Test
   public void testManyReopensAndFields() throws Exception {
     Directory dir = newDirectory();
     final Random random = random();
@@ -713,6 +921,9 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     IndexWriter writer = new IndexWriter(dir, conf);
     
     final boolean isNRT = random.nextBoolean();
+    if (VERBOSE) {
+      System.out.println("TEST: isNRT=" + isNRT);
+    }
     DirectoryReader reader;
     if (isNRT) {
       reader = DirectoryReader.open(writer);
@@ -731,69 +942,78 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     int docID = 0;
     for (int i = 0; i < numRounds; i++) {
       int numDocs = atLeast(5);
-//      System.out.println("[" + Thread.currentThread().getName() + "]: round=" + i + ", numDocs=" + numDocs);
+      if (VERBOSE) {
+        System.out.println("TEST: round=" + i + ", numDocs=" + numDocs);
+      }
       for (int j = 0; j < numDocs; j++) {
         Document doc = new Document();
-        doc.add(new StringField("id", "doc-" + docID, Store.NO));
+        doc.add(new StringField("id", "doc-" + docID, Store.YES));
         doc.add(new StringField("key", "all", Store.NO)); // update key
         // add all fields with their current value
         for (int f = 0; f < fieldValues.length; f++) {
           doc.add(new NumericDocValuesField("f" + f, fieldValues[f]));
         }
         writer.addDocument(doc);
+        if (VERBOSE) {
+          System.out.println("TEST add doc id=" + docID);
+        }
         ++docID;
       }
       
       int fieldIdx = random.nextInt(fieldValues.length);
+
       String updateField = "f" + fieldIdx;
+      if (VERBOSE) {
+        System.out.println("TEST: update field=" + updateField + " for all docs to value=" + (fieldValues[fieldIdx]+1));
+      }
       writer.updateNumericDocValue(new Term("key", "all"), updateField, ++fieldValues[fieldIdx]);
-//      System.out.println("[" + Thread.currentThread().getName() + "]: updated field '" + updateField + "' to value " + fieldValues[fieldIdx]);
       
       if (random.nextDouble() < 0.2) {
-        int deleteDoc = random.nextInt(docID); // might also delete an already deleted document, ok!
+        int deleteDoc = random.nextInt(numDocs); // might also delete an already deleted document, ok!
+        if (VERBOSE) {
+          System.out.println("TEST: delete doc id=" + deleteDoc);
+        }
         writer.deleteDocuments(new Term("id", "doc-" + deleteDoc));
-//        System.out.println("[" + Thread.currentThread().getName() + "]: deleted document: doc-" + deleteDoc);
       }
       
       // verify reader
-      if (!isNRT) {
+      if (isNRT == false) {
+        if (VERBOSE) {
+          System.out.println("TEST: now commit");
+        }
         writer.commit();
       }
       
-//      System.out.println("[" + Thread.currentThread().getName() + "]: reopen reader: " + reader);
       DirectoryReader newReader = DirectoryReader.openIfChanged(reader);
       assertNotNull(newReader);
       reader.close();
       reader = newReader;
-//      System.out.println("[" + Thread.currentThread().getName() + "]: reopened reader: " + reader);
+      if (VERBOSE) {
+        System.out.println("TEST: got reader maxDoc=" + reader.maxDoc() + " " + reader);
+      }
       assertTrue(reader.numDocs() > 0); // we delete at most one document per round
       for (LeafReaderContext context : reader.leaves()) {
         LeafReader r = context.reader();
-//        System.out.println(((SegmentReader) r).getSegmentName());
         Bits liveDocs = r.getLiveDocs();
         for (int field = 0; field < fieldValues.length; field++) {
           String f = "f" + field;
           NumericDocValues ndv = r.getNumericDocValues(f);
-          Bits docsWithField = r.getDocsWithField(f);
           assertNotNull(ndv);
           int maxDoc = r.maxDoc();
           for (int doc = 0; doc < maxDoc; doc++) {
             if (liveDocs == null || liveDocs.get(doc)) {
-//              System.out.println("doc=" + (doc + context.docBase) + " f='" + f + "' vslue=" + ndv.get(doc));
-              assertTrue(docsWithField.get(doc));
-              assertEquals("invalid value for doc=" + doc + ", field=" + f + ", reader=" + r, fieldValues[field], ndv.get(doc));
+              assertEquals("advanced to wrong doc in seg=" + r, doc, ndv.advance(doc));
+              assertEquals("invalid value for docID=" + doc + " id=" + r.document(doc).get("id") + ", field=" + f + ", reader=" + r + " doc=" + r.document(doc), fieldValues[field], ndv.longValue());
             }
           }
         }
       }
-//      System.out.println();
     }
 
     writer.close();
     IOUtils.close(reader, dir);
   }
   
-  @Test
   public void testUpdateSegmentWithNoDocValues() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -835,19 +1055,16 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     for (LeafReaderContext context : reader.leaves()) {
       LeafReader r = context.reader();
       NumericDocValues ndv = r.getNumericDocValues("ndv");
-      Bits docsWithField = r.getDocsWithField("ndv");
-      assertNotNull(docsWithField);
-      assertTrue(docsWithField.get(0));
-      assertEquals(5L, ndv.get(0));
-      assertFalse(docsWithField.get(1));
-      assertEquals(0L, ndv.get(1));
+      assertEquals(0, ndv.nextDoc());
+      assertEquals(5L, ndv.longValue());
+      // docID 1 has no ndv value
+      assertTrue(ndv.nextDoc() > 1);
     }
     reader.close();
 
     dir.close();
   }
   
-  @Test
   public void testUpdateSegmentWithNoDocValues2() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -890,12 +1107,9 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     for (LeafReaderContext context : reader.leaves()) {
       LeafReader r = context.reader();
       NumericDocValues ndv = r.getNumericDocValues("ndv");
-      Bits docsWithField = r.getDocsWithField("ndv");
-      assertNotNull(docsWithField);
-      assertTrue(docsWithField.get(0));
-      assertEquals(5L, ndv.get(0));
-      assertFalse(docsWithField.get(1));
-      assertEquals(0L, ndv.get(1));
+      assertEquals(0, ndv.nextDoc());
+      assertEquals(5L, ndv.longValue());
+      assertTrue(ndv.nextDoc() > 1);
     }
     reader.close();
     
@@ -933,7 +1147,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testUpdateSegmentWithPostingButNoDocValues() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -967,7 +1180,8 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       LeafReader r = context.reader();
       NumericDocValues ndv = r.getNumericDocValues("ndv");
       for (int i = 0; i < r.maxDoc(); i++) {
-        assertEquals(5L, ndv.get(i));
+        assertEquals(i, ndv.nextDoc());
+        assertEquals(5L, ndv.longValue());
       }
     }
     reader.close();
@@ -975,7 +1189,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testUpdateNumericDVFieldWithSameNameAsPostingField() throws Exception {
     // this used to fail because FieldInfos.Builder neglected to update
     // globalFieldMaps.docValuesTypes map
@@ -993,13 +1206,13 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     
     DirectoryReader r = DirectoryReader.open(dir);
     NumericDocValues ndv = r.leaves().get(0).reader().getNumericDocValues("f");
-    assertEquals(17, ndv.get(0));
+    assertEquals(0, ndv.nextDoc());
+    assertEquals(17, ndv.longValue());
     r.close();
     
     dir.close();
   }
   
-  @Test
   public void testStressMultiThreading() throws Exception {
     final Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -1051,28 +1264,23 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
               final int field = random().nextInt(numFields);
               final String f = "f" + field;
               final String cf = "cf" + field;
-//              System.out.println("[" + Thread.currentThread().getName() + "] numUpdates=" + numUpdates + " updateTerm=" + t + " field=" + field);
               long updValue = random.nextInt();
               writer.updateDocValues(t, new NumericDocValuesField(f, updValue), new NumericDocValuesField(cf, updValue*2));
               
               if (random.nextDouble() < 0.2) {
                 // delete a random document
                 int doc = random.nextInt(numDocs);
-//                System.out.println("[" + Thread.currentThread().getName() + "] deleteDoc=doc" + doc);
                 writer.deleteDocuments(new Term("id", "doc" + doc));
               }
   
               if (random.nextDouble() < 0.05) { // commit every 20 updates on average
-//                  System.out.println("[" + Thread.currentThread().getName() + "] commit");
                 writer.commit();
               }
               
               if (random.nextDouble() < 0.1) { // reopen NRT reader (apply updates), on average once every 10 updates
                 if (reader == null) {
-//                  System.out.println("[" + Thread.currentThread().getName() + "] open NRT");
                   reader = DirectoryReader.open(writer);
                 } else {
-//                  System.out.println("[" + Thread.currentThread().getName() + "] reopen NRT");
                   DirectoryReader r2 = DirectoryReader.openIfChanged(reader, writer);
                   if (r2 != null) {
                     reader.close();
@@ -1081,7 +1289,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
                 }
               }
             }
-//            System.out.println("[" + Thread.currentThread().getName() + "] DONE");
             success = true;
           } catch (IOException e) {
             throw new RuntimeException(e);
@@ -1111,14 +1318,12 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       for (int i = 0; i < numFields; i++) {
         NumericDocValues ndv = r.getNumericDocValues("f" + i);
         NumericDocValues control = r.getNumericDocValues("cf" + i);
-        Bits docsWithNdv = r.getDocsWithField("f" + i);
-        Bits docsWithControl = r.getDocsWithField("cf" + i);
         Bits liveDocs = r.getLiveDocs();
         for (int j = 0; j < r.maxDoc(); j++) {
           if (liveDocs == null || liveDocs.get(j)) {
-            assertTrue(docsWithNdv.get(j));
-            assertTrue(docsWithControl.get(j));
-            assertEquals(control.get(j), ndv.get(j) * 2);
+            assertEquals(j, ndv.advance(j));
+            assertEquals(j, control.advance(j));
+            assertEquals(control.longValue(), ndv.longValue() * 2);
           }
         }
       }
@@ -1128,7 +1333,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
 
-  @Test
   public void testUpdateDifferentDocsInDifferentGens() throws Exception {
     // update same document multiple times across generations
     Directory dir = newDirectory();
@@ -1157,7 +1361,9 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
         NumericDocValues fndv = r.getNumericDocValues("f");
         NumericDocValues cfndv = r.getNumericDocValues("cf");
         for (int j = 0; j < r.maxDoc(); j++) {
-          assertEquals(cfndv.get(j), fndv.get(j) * 2);
+          assertEquals(j, fndv.nextDoc());
+          assertEquals(j, cfndv.nextDoc());
+          assertEquals(cfndv.longValue(), fndv.longValue() * 2);
         }
       }
       reader.close();
@@ -1166,7 +1372,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
 
-  @Test
   public void testChangeCodec() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -1206,15 +1411,18 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     DirectoryReader reader = DirectoryReader.open(dir);
     NumericDocValues f1 = MultiDocValues.getNumericValues(reader, "f1");
     NumericDocValues f2 = MultiDocValues.getNumericValues(reader, "f2");
-    assertEquals(12L, f1.get(0));
-    assertEquals(13L, f2.get(0));
-    assertEquals(17L, f1.get(1));
-    assertEquals(2L, f2.get(1));
+    assertEquals(0, f1.nextDoc());
+    assertEquals(12L, f1.longValue());
+    assertEquals(0, f2.nextDoc());
+    assertEquals(13L, f2.longValue());
+    assertEquals(1, f1.nextDoc());
+    assertEquals(17L, f1.longValue());
+    assertEquals(1, f2.nextDoc());
+    assertEquals(2L, f2.longValue());
     reader.close();
     dir.close();
   }
 
-  @Test
   public void testAddIndexes() throws Exception {
     Directory dir1 = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -1264,7 +1472,9 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       NumericDocValues ndv = r.getNumericDocValues("ndv");
       NumericDocValues control = r.getNumericDocValues("control");
       for (int i = 0; i < r.maxDoc(); i++) {
-        assertEquals(ndv.get(i)*2, control.get(i));
+        assertEquals(i, ndv.nextDoc());
+        assertEquals(i, control.nextDoc());
+        assertEquals(ndv.longValue()*2, control.longValue());
       }
     }
     reader.close();
@@ -1272,7 +1482,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     IOUtils.close(dir1, dir2);
   }
 
-  @Test
   public void testDeleteUnusedUpdatesFiles() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -1302,7 +1511,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
 
-  @Test @Nightly
   public void testTonsOfUpdates() throws Exception {
     // LUCENE-5248: make sure that when there are many updates, we don't use too much RAM
     Directory dir = newDirectory();
@@ -1321,8 +1529,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
       updateTerms.add(TestUtil.randomSimpleString(random));
     }
 
-//    System.out.println("numDocs=" + numDocs + " numNumericFields=" + numNumericFields + " numTerms=" + numTerms);
-    
     // build a large index with many NDV fields and update terms
     for (int i = 0; i < numDocs; i++) {
       Document doc = new Document();
@@ -1344,7 +1550,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     // many flushes during numeric updates
     writer.getConfig().setRAMBufferSizeMB(2048.0 / 1024 / 1024);
     final int numUpdates = atLeast(100);
-//    System.out.println("numUpdates=" + numUpdates);
     for (int i = 0; i < numUpdates; i++) {
       int field = random.nextInt(numNumericFields);
       Term updateTerm = new Term("upd", RandomPicks.randomFrom(random, updateTerms));
@@ -1361,7 +1566,9 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
         NumericDocValues f = r.getNumericDocValues("f" + i);
         NumericDocValues cf = r.getNumericDocValues("cf" + i);
         for (int j = 0; j < r.maxDoc(); j++) {
-          assertEquals("reader=" + r + ", field=f" + i + ", doc=" + j, cf.get(j), f.get(j) * 2);
+          assertEquals(j, f.nextDoc());
+          assertEquals(j, cf.nextDoc());
+          assertEquals("reader=" + r + ", field=f" + i + ", doc=" + j, cf.longValue(), f.longValue() * 2);
         }
       }
     }
@@ -1370,7 +1577,6 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     dir.close();
   }
   
-  @Test
   public void testUpdatesOrder() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -1387,17 +1593,23 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     writer.updateNumericDocValue(new Term("upd", "t2"), "f1", 3L); // update f1 to 3
     writer.updateNumericDocValue(new Term("upd", "t2"), "f2", 3L); // update f2 to 3
     writer.updateNumericDocValue(new Term("upd", "t1"), "f1", 4L); // update f1 to 4 (but not f2)
+    if (VERBOSE) {
+      System.out.println("TEST: now close");
+    }
     writer.close();
     
     DirectoryReader reader = DirectoryReader.open(dir);
-    assertEquals(4, reader.leaves().get(0).reader().getNumericDocValues("f1").get(0));
-    assertEquals(3, reader.leaves().get(0).reader().getNumericDocValues("f2").get(0));
+    NumericDocValues dvs = reader.leaves().get(0).reader().getNumericDocValues("f1");
+    assertEquals(0, dvs.nextDoc());
+    assertEquals(4, dvs.longValue());
+    dvs = reader.leaves().get(0).reader().getNumericDocValues("f2");
+    assertEquals(0, dvs.nextDoc());
+    assertEquals(3, dvs.longValue());
     reader.close();
     
     dir.close();
   }
   
-  @Test
   public void testUpdateAllDeletedSegment() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -1416,13 +1628,15 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     
     DirectoryReader reader = DirectoryReader.open(dir);
     assertEquals(1, reader.leaves().size());
-    assertEquals(2L, reader.leaves().get(0).reader().getNumericDocValues("f1").get(0));
+    NumericDocValues dvs = reader.leaves().get(0).reader().getNumericDocValues("f1");
+    assertEquals(0, dvs.nextDoc());
+    assertEquals(2, dvs.longValue());
+    
     reader.close();
     
     dir.close();
   }
 
-  @Test
   public void testUpdateTwoNonexistingTerms() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
@@ -1439,13 +1653,14 @@ public class TestNumericDocValuesUpdates extends LuceneTestCase {
     
     DirectoryReader reader = DirectoryReader.open(dir);
     assertEquals(1, reader.leaves().size());
-    assertEquals(1L, reader.leaves().get(0).reader().getNumericDocValues("f1").get(0));
+    NumericDocValues dvs = reader.leaves().get(0).reader().getNumericDocValues("f1");
+    assertEquals(0, dvs.nextDoc());
+    assertEquals(1, dvs.longValue());
     reader.close();
     
     dir.close();
   }
 
-  @Test
   public void testIOContext() throws Exception {
     // LUCENE-5591: make sure we pass an IOContext with an approximate
     // segmentSize in FlushInfo

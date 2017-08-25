@@ -118,6 +118,21 @@ public abstract class CoreAdminParams
    */
   public static final String BACKUP_LOCATION = "location";
 
+  /**
+   * A parameter to specify the name of the commit to be stored during the backup operation.
+   */
+  public static final String COMMIT_NAME = "commitName";
+
+  /**
+   * A boolean parameter specifying if a core is being created as part of a new collection
+   */
+  public static final String NEW_COLLECTION = "newCollection";
+
+  /**
+   * Tells the CoreAdminHandler that the new Core will be a replica of a particular {@link org.apache.solr.common.cloud.Replica.Type}
+   */
+  public static final String REPLICA_TYPE = "replicaType";
+
   public enum CoreAdminAction {
     STATUS(true),
     UNLOAD,
@@ -141,7 +156,10 @@ public abstract class CoreAdminParams
     INVOKE,
     //Internal APIs to backup and restore a core
     BACKUPCORE,
-    RESTORECORE;
+    RESTORECORE,
+    CREATESNAPSHOT,
+    DELETESNAPSHOT,
+    LISTSNAPSHOTS;
 
     public final boolean isRead;
 

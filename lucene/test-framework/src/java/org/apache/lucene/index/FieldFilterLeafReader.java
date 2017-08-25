@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.Set;
 
-import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FilterIterator;
 
 /**
@@ -109,16 +108,8 @@ public final class FieldFilterLeafReader extends FilterLeafReader {
   }
 
   @Override
-  public Fields fields() throws IOException {
-    final Fields f = super.fields();
-    return (f == null) ? null : new FieldFilterFields(f);
-  }
-  
-  
-
-  @Override
-  public NumericDocValues getNumericDocValues(String field) throws IOException {
-    return hasField(field) ? super.getNumericDocValues(field) : null;
+  public Terms terms(String field) throws IOException {
+    return hasField(field) ? super.terms(field) : null;
   }
 
   @Override
@@ -147,18 +138,13 @@ public final class FieldFilterLeafReader extends FilterLeafReader {
   }
 
   @Override
-  public Bits getDocsWithField(String field) throws IOException {
-    return hasField(field) ? super.getDocsWithField(field) : null;
-  }
-
-  @Override
   public String toString() {
     final StringBuilder sb = new StringBuilder("FieldFilterLeafReader(reader=");
     sb.append(in).append(", fields=");
     if (negate) sb.append('!');
     return sb.append(fields).append(')').toString();
   }
-  
+
   private class FieldFilterFields extends FilterFields {
 
     public FieldFilterFields(Fields in) {
@@ -187,5 +173,15 @@ public final class FieldFilterLeafReader extends FilterLeafReader {
     }
     
   }
-  
+
+  @Override
+  public CacheHelper getCoreCacheHelper() {
+    return null;
+  }
+
+  @Override
+  public CacheHelper getReaderCacheHelper() {
+    return null;
+  }
+
 }

@@ -26,11 +26,12 @@
     <mergePolicyFactory class="org.apache.solr.index.SortingMergePolicyFactory">
       <str name="wrapped.prefix">in</str>
       <str name="in.class">org.apache.solr.util.RandomForceMergePolicyFactory</str>
-      <str name="sort">timestamp desc</str>
+      <str name="sort">timestamp_i_dvo desc</str>
     </mergePolicyFactory>
+    <lockType>${solr.tests.lockType:single}</lockType>
   </indexConfig>
 
-  <requestHandler name="standard" class="solr.StandardRequestHandler"></requestHandler>
+  <requestHandler name="/select" class="solr.SearchHandler" />
 
   <updateHandler class="solr.DirectUpdateHandler2">
     <updateLog>
@@ -46,5 +47,10 @@
       <maxTime>${solr.autoSoftCommit.maxTime:-1}</maxTime>
     </autoSoftCommit>
   </updateHandler>
+  <initParams path="/select">
+    <lst name="defaults">
+      <str name="df">text</str>
+    </lst>
+  </initParams>
 
 </config>

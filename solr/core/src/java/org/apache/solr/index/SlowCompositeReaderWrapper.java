@@ -20,31 +20,11 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.lucene.index.BinaryDocValues;
-import org.apache.lucene.index.CompositeReader;
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.DocValues;
-import org.apache.lucene.index.DocValuesType;
-import org.apache.lucene.index.FieldInfo;
-import org.apache.lucene.index.FieldInfos;
-import org.apache.lucene.index.Fields;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.LeafReader;
-import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.*;
 import org.apache.lucene.index.MultiDocValues.MultiSortedDocValues;
-import org.apache.lucene.index.MultiDocValues.MultiSortedSetDocValues;
-import org.apache.lucene.index.MultiDocValues.OrdinalMap;
-import org.apache.lucene.index.MultiDocValues;
-import org.apache.lucene.index.MultiFields;
-import org.apache.lucene.index.MultiReader;
-import org.apache.lucene.index.NumericDocValues;
-import org.apache.lucene.index.PointValues;
-import org.apache.lucene.index.SortedDocValues;
-import org.apache.lucene.index.SortedNumericDocValues;
-import org.apache.lucene.index.SortedSetDocValues;
-import org.apache.lucene.index.StoredFieldVisitor;
-import org.apache.lucene.search.Sort;
+import org.apache.lucene.index.OrdinalMap;
 import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.Version;
 
 /**
  * This class forces a composite reader (eg a {@link
@@ -66,7 +46,7 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
 
   private final CompositeReader in;
   private final Fields fields;
-  private final boolean merging;
+  private final LeafMetaData metaData;
   
   /** This method is sugar for getting an {@link LeafReader} from
    * an {@link IndexReader} of any kind. If the reader is already atomic,
@@ -74,22 +54,29 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
    */
   public static LeafReader wrap(IndexReader reader) throws IOException {
     if (reader instanceof CompositeReader) {
-      return new SlowCompositeReaderWrapper((CompositeReader) reader, false);
+      return new SlowCompositeReaderWrapper((CompositeReader) reader);
     } else {
       assert reader instanceof LeafReader;
       return (LeafReader) reader;
     }
   }
 
-  SlowCompositeReaderWrapper(CompositeReader reader, boolean merging) throws IOException {
+  SlowCompositeReaderWrapper(CompositeReader reader) throws IOException {
     super();
     in = reader;
-    if (getFieldInfos().hasPointValues()) {
-      throw new IllegalArgumentException("cannot wrap points");
-    }
     fields = MultiFields.getFields(in);
     in.registerParentReader(this);
-    this.merging = merging;
+    if (reader.leaves().isEmpty()) {
+      metaData = new LeafMetaData(Version.LATEST.major, Version.LATEST, null);
+    } else {
+      Version minVersion = reader.leaves().stream()
+          .map(LeafReaderContext::reader)
+          .map(LeafReader::getMetaData)
+          .map(LeafMetaData::getMinVersion)
+          .reduce((v1, v2) -> v1 == null ? null : v2 == null ? null : v2.onOrAfter(v1) ? v1 : v2)
+          .get();
+      metaData = new LeafMetaData(reader.leaves().get(0).reader().getMetaData().getCreatedVersionMajor(), minVersion, null);
+    }
   }
 
   @Override
@@ -98,31 +85,28 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
   }
 
   @Override
-  public void addCoreClosedListener(CoreClosedListener listener) {
-    addCoreClosedListenerAsReaderClosedListener(in, listener);
+  public CacheHelper getReaderCacheHelper() {
+    return in.getReaderCacheHelper();
   }
 
   @Override
-  public void removeCoreClosedListener(CoreClosedListener listener) {
-    removeCoreClosedListenerAsReaderClosedListener(in, listener);
+  public CacheHelper getCoreCacheHelper() {
+    // TODO: this is trappy as the expectation is that core keys live for a long
+    // time, but here we need to bound it to the lifetime of the wrapped
+    // composite reader? Unfortunately some features seem to rely on this...
+    return in.getReaderCacheHelper();
   }
 
   @Override
-  public Fields fields() {
+  public Terms terms(String field) throws IOException {
     ensureOpen();
-    return fields;
+    return fields.terms(field);
   }
 
   @Override
   public NumericDocValues getNumericDocValues(String field) throws IOException {
     ensureOpen();
     return MultiDocValues.getNumericValues(in, field);
-  }
-
-  @Override
-  public Bits getDocsWithField(String field) throws IOException {
-    ensureOpen();
-    return MultiDocValues.getDocsWithField(in, field);
   }
 
   @Override
@@ -148,7 +132,8 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
         SortedDocValues dv = MultiDocValues.getSortedValues(in, field);
         if (dv instanceof MultiSortedDocValues) {
           map = ((MultiSortedDocValues)dv).mapping;
-          if (map.owner == getCoreCacheKey() && merging == false) {
+          IndexReader.CacheHelper cacheHelper = getReaderCacheHelper();
+          if (cacheHelper != null && map.owner == cacheHelper.getKey()) {
             cachedOrdMaps.put(field, map);
           }
         }
@@ -158,6 +143,7 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
     int size = in.leaves().size();
     final SortedDocValues[] values = new SortedDocValues[size];
     final int[] starts = new int[size+1];
+    long totalCost = 0;
     for (int i = 0; i < size; i++) {
       LeafReaderContext context = in.leaves().get(i);
       final LeafReader reader = context.reader();
@@ -169,11 +155,12 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
       if (v == null) {
         v = DocValues.emptySorted();
       }
+      totalCost += v.cost();
       values[i] = v;
       starts[i] = context.docBase;
     }
     starts[size] = maxDoc();
-    return new MultiSortedDocValues(values, starts, map);
+    return new MultiSortedDocValues(values, starts, map, totalCost);
   }
   
   @Override
@@ -185,9 +172,10 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
       if (map == null) {
         // uncached, or not a multi dv
         SortedSetDocValues dv = MultiDocValues.getSortedSetValues(in, field);
-        if (dv instanceof MultiSortedSetDocValues) {
-          map = ((MultiSortedSetDocValues)dv).mapping;
-          if (map.owner == getCoreCacheKey() && merging == false) {
+        if (dv instanceof MultiDocValues.MultiSortedSetDocValues) {
+          map = ((MultiDocValues.MultiSortedSetDocValues)dv).mapping;
+          IndexReader.CacheHelper cacheHelper = getReaderCacheHelper();
+          if (cacheHelper != null && map.owner == cacheHelper.getKey()) {
             cachedOrdMaps.put(field, map);
           }
         }
@@ -199,6 +187,7 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
     int size = in.leaves().size();
     final SortedSetDocValues[] values = new SortedSetDocValues[size];
     final int[] starts = new int[size+1];
+    long cost = 0;
     for (int i = 0; i < size; i++) {
       LeafReaderContext context = in.leaves().get(i);
       final LeafReader reader = context.reader();
@@ -212,14 +201,15 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
       }
       values[i] = v;
       starts[i] = context.docBase;
+      cost += v.cost();
     }
     starts[size] = maxDoc();
-    return new MultiSortedSetDocValues(values, starts, map);
+    return new MultiDocValues.MultiSortedSetDocValues(values, starts, map, cost);
   }
   
   // TODO: this could really be a weak map somewhere else on the coreCacheKey,
   // but do we really need to optimize slow-wrapper any more?
-  private final Map<String,OrdinalMap> cachedOrdMaps = new HashMap<>();
+  final Map<String,OrdinalMap> cachedOrdMaps = new HashMap<>();
 
   @Override
   public NumericDocValues getNormValues(String field) throws IOException {
@@ -258,7 +248,7 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
   }
 
   @Override
-  public PointValues getPointValues() {
+  public PointValues getPointValues(String field) {
     ensureOpen();
     return null;
   }
@@ -267,16 +257,6 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
   public FieldInfos getFieldInfos() {
     ensureOpen();
     return MultiFields.getMergedFieldInfos(in);
-  }
-
-  @Override
-  public Object getCoreCacheKey() {
-    return in.getCoreCacheKey();
-  }
-
-  @Override
-  public Object getCombinedCoreAndDeletesKey() {
-    return in.getCombinedCoreAndDeletesKey();
   }
 
   @Override
@@ -294,7 +274,7 @@ public final class SlowCompositeReaderWrapper extends LeafReader {
   }
 
   @Override
-  public Sort getIndexSort() {
-    return null;
+  public LeafMetaData getMetaData() {
+    return metaData;
   }
 }

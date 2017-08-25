@@ -30,6 +30,7 @@ import org.apache.lucene.analysis.CharFilter;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.charfilter.HTMLStripCharFilterFactory;
+import org.apache.lucene.analysis.charfilter.MappingCharFilterFactory;
 import org.apache.lucene.analysis.core.KeywordTokenizerFactory;
 import org.apache.lucene.analysis.core.LowerCaseFilterFactory;
 import org.apache.lucene.analysis.core.LowerCaseTokenizer;
@@ -106,7 +107,7 @@ public class TestCustomAnalyzer extends BaseTokenStreamTestCase {
 
   public void testFactoryHtmlStripClassicFolding() throws Exception {
     CustomAnalyzer a = CustomAnalyzer.builder()
-        .withDefaultMatchVersion(Version.LUCENE_6_0_0)
+        .withDefaultMatchVersion(Version.LUCENE_7_0_0)
         .addCharFilter(HTMLStripCharFilterFactory.class)
         .withTokenizer(ClassicTokenizerFactory.class)
         .addTokenFilter(ASCIIFoldingFilterFactory.class, "preserveOriginal", "true")
@@ -125,7 +126,7 @@ public class TestCustomAnalyzer extends BaseTokenStreamTestCase {
     assertSame(LowerCaseFilterFactory.class, tokenFilters.get(1).getClass());
     assertEquals(100, a.getPositionIncrementGap("dummy"));
     assertEquals(1000, a.getOffsetGap("dummy"));
-    assertSame(Version.LUCENE_6_0_0, a.getVersion());
+    assertSame(Version.LUCENE_7_0_0, a.getVersion());
 
     assertAnalyzesTo(a, "<p>foo bar</p> FOO BAR", 
         new String[] { "foo", "bar", "foo", "bar" },
@@ -138,7 +139,7 @@ public class TestCustomAnalyzer extends BaseTokenStreamTestCase {
   
   public void testHtmlStripClassicFolding() throws Exception {
     CustomAnalyzer a = CustomAnalyzer.builder()
-        .withDefaultMatchVersion(Version.LUCENE_6_0_0)
+        .withDefaultMatchVersion(Version.LUCENE_7_0_0)
         .addCharFilter("htmlstrip")
         .withTokenizer("classic")
         .addTokenFilter("asciifolding", "preserveOriginal", "true")
@@ -157,7 +158,7 @@ public class TestCustomAnalyzer extends BaseTokenStreamTestCase {
     assertSame(LowerCaseFilterFactory.class, tokenFilters.get(1).getClass());
     assertEquals(100, a.getPositionIncrementGap("dummy"));
     assertEquals(1000, a.getOffsetGap("dummy"));
-    assertSame(Version.LUCENE_6_0_0, a.getVersion());
+    assertSame(Version.LUCENE_7_0_0, a.getVersion());
 
     assertAnalyzesTo(a, "<p>foo bar</p> FOO BAR", 
         new String[] { "foo", "bar", "foo", "bar" },
@@ -477,6 +478,26 @@ public class TestCustomAnalyzer extends BaseTokenStreamTestCase {
         .addTokenFilter(DummyMultiTermAwareTokenFilterFactory.class, Collections.emptyMap())
         .build();
     assertEquals(new BytesRef("2A"), analyzer2.normalize("dummy", "0À"));
+  }
+
+  public void testNormalizationWithMultipleTokenFilters() throws IOException {
+    CustomAnalyzer analyzer = CustomAnalyzer.builder()
+        // none of these components are multi-term aware so they should not be applied
+        .withTokenizer(WhitespaceTokenizerFactory.class, Collections.emptyMap())
+        .addTokenFilter(LowerCaseFilterFactory.class, Collections.emptyMap())
+        .addTokenFilter(ASCIIFoldingFilterFactory.class, Collections.emptyMap())
+        .build();
+    assertEquals(new BytesRef("a b e"), analyzer.normalize("dummy", "À B é"));
+  }
+
+  public void testNormalizationWithMultiplCharFilters() throws IOException {
+    CustomAnalyzer analyzer = CustomAnalyzer.builder()
+        // none of these components are multi-term aware so they should not be applied
+        .withTokenizer(WhitespaceTokenizerFactory.class, Collections.emptyMap())
+        .addCharFilter(MappingCharFilterFactory.class, new HashMap<>(Collections.singletonMap("mapping", "org/apache/lucene/analysis/custom/mapping1.txt")))
+        .addCharFilter(MappingCharFilterFactory.class, new HashMap<>(Collections.singletonMap("mapping", "org/apache/lucene/analysis/custom/mapping2.txt")))
+        .build();
+    assertEquals(new BytesRef("e f c"), analyzer.normalize("dummy", "a b c"));
   }
 
 }

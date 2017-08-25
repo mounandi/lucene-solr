@@ -92,6 +92,7 @@ public class RandomCodec extends AssertingCodec {
   // which is less effective for testing.
   // TODO: improve how we randomize this...
   private final int maxPointsInLeafNode;
+  private final double maxMBSortInHeap;
   private final int bkdSplitRandomSeed;
 
   @Override
@@ -102,11 +103,12 @@ public class RandomCodec extends AssertingCodec {
 
         // Randomize how BKDWriter chooses its splis:
 
-        return new Lucene60PointsWriter(writeState, maxPointsInLeafNode) {
+        return new Lucene60PointsWriter(writeState, maxPointsInLeafNode, maxMBSortInHeap) {
           @Override
-          public void writeField(FieldInfo fieldInfo, PointsReader values, double maxMBSortInHeap) throws IOException {
+          public void writeField(FieldInfo fieldInfo, PointsReader reader) throws IOException {
 
-            boolean singleValuePerDoc = values.size(fieldInfo.name) == values.getDocCount(fieldInfo.name);
+            PointValues values = reader.getValues(fieldInfo.name);
+            boolean singleValuePerDoc = values.size() == values.getDocCount();
 
             try (BKDWriter writer = new RandomlySplittingBKDWriter(writeState.segmentInfo.maxDoc(),
                                                                    writeState.directory,
@@ -115,10 +117,10 @@ public class RandomCodec extends AssertingCodec {
                                                                    fieldInfo.getPointNumBytes(),
                                                                    maxPointsInLeafNode,
                                                                    maxMBSortInHeap,
-                                                                   values.size(fieldInfo.name),
+                                                                   values.size(),
                                                                    singleValuePerDoc,
                                                                    bkdSplitRandomSeed ^ fieldInfo.name.hashCode())) {
-                values.intersect(fieldInfo.name, new IntersectVisitor() {
+                values.intersect(new IntersectVisitor() {
                     @Override
                     public void visit(int docID) {
                       throw new IllegalStateException();
@@ -184,6 +186,7 @@ public class RandomCodec extends AssertingCodec {
     int lowFreqCutoff = TestUtil.nextInt(random, 2, 100);
 
     maxPointsInLeafNode = TestUtil.nextInt(random, 16, 2048);
+    maxMBSortInHeap = 5.0 + (3*random.nextDouble());
     bkdSplitRandomSeed = random.nextInt();
 
     add(avoidCodecs,
@@ -251,7 +254,8 @@ public class RandomCodec extends AssertingCodec {
   public String toString() {
     return super.toString() + ": " + previousMappings.toString() +
            ", docValues:" + previousDVMappings.toString() +
-           ", maxPointsInLeafNode=" + maxPointsInLeafNode;
+           ", maxPointsInLeafNode=" + maxPointsInLeafNode +
+           ", maxMBSortInHeap=" + maxMBSortInHeap;
   }
 
   /** Just like {@link BKDWriter} except it evilly picks random ways to split cells on
@@ -290,7 +294,7 @@ public class RandomCodec extends AssertingCodec {
     }
 
     @Override
-    protected int split(byte[] minPackedValue, byte[] maxPackedValue) {
+    protected int split(byte[] minPackedValue, byte[] maxPackedValue, int[] parentDims) {
       // BKD normally defaults by the widest dimension, to try to make as squarish cells as possible, but we just pick a random one ;)
       return random.nextInt(numDims);
     }

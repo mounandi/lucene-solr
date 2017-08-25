@@ -33,7 +33,6 @@ import org.apache.lucene.util.IOUtils;
 
 import com.ibm.icu.lang.UCharacter;
 import com.ibm.icu.lang.UProperty;
-import com.ibm.icu.lang.UScript;
 import com.ibm.icu.text.BreakIterator;
 import com.ibm.icu.text.RuleBasedBreakIterator;
 
@@ -79,6 +78,7 @@ public class ICUTokenizerFactory extends TokenizerFactory implements ResourceLoa
   private final Map<Integer,String> tailored;
   private ICUTokenizerConfig config;
   private final boolean cjkAsWords;
+  private final boolean myanmarAsWords;
   
   /** Creates a new ICUTokenizerFactory */
   public ICUTokenizerFactory(Map<String,String> args) {
@@ -95,6 +95,7 @@ public class ICUTokenizerFactory extends TokenizerFactory implements ResourceLoa
       }
     }
     cjkAsWords = getBoolean(args, "cjkAsWords", true);
+    myanmarAsWords = getBoolean(args, "myanmarAsWords", true);
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
@@ -104,15 +105,15 @@ public class ICUTokenizerFactory extends TokenizerFactory implements ResourceLoa
   public void inform(ResourceLoader loader) throws IOException {
     assert tailored != null : "init must be called first!";
     if (tailored.isEmpty()) {
-      config = new DefaultICUTokenizerConfig(cjkAsWords);
+      config = new DefaultICUTokenizerConfig(cjkAsWords, myanmarAsWords);
     } else {
-      final BreakIterator breakers[] = new BreakIterator[UScript.CODE_LIMIT];
+      final BreakIterator breakers[] = new BreakIterator[1 + UCharacter.getIntPropertyMaxValue(UProperty.SCRIPT)];
       for (Map.Entry<Integer,String> entry : tailored.entrySet()) {
         int code = entry.getKey();
         String resourcePath = entry.getValue();
         breakers[code] = parseRules(resourcePath, loader);
       }
-      config = new DefaultICUTokenizerConfig(cjkAsWords) {
+      config = new DefaultICUTokenizerConfig(cjkAsWords, myanmarAsWords) {
         
         @Override
         public BreakIterator getBreakIterator(int script) {

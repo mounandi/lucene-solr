@@ -43,6 +43,12 @@ public class TestJoin extends SolrTestCaseJ4 {
   @BeforeClass
   public static void beforeTests() throws Exception {
     System.setProperty("enable.update.log", "false"); // schema12 doesn't support _version_
+
+    if (System.getProperty("solr.tests.IntegerFieldType").contains("Point")) { // all points change at the same time
+      // point fields need docvalues
+      System.setProperty("solr.tests.numeric.dv", "true");
+    }
+
     initCore("solrconfig.xml","schema12.xml");
   }
 
@@ -151,7 +157,7 @@ public class TestJoin extends SolrTestCaseJ4 {
     // increase test effectiveness by avoiding 0 resultsets much of the time.
     String[][] compat = new String[][] {
         {"small_s","small2_s","small2_ss","small3_ss"},
-        {"small_i","small2_i","small2_is","small3_is"}
+        {"small_i","small2_i","small2_is","small3_is", "small_i_dv", "small_is_dv"}
     };
 
 
@@ -169,6 +175,8 @@ public class TestJoin extends SolrTestCaseJ4 {
       types.add(new FldType("small2_i",ZERO_ONE, new IRange(0,5+indexSize/3)));
       types.add(new FldType("small2_is",ZERO_TWO, new IRange(0,5+indexSize/3)));
       types.add(new FldType("small3_is",new IRange(0,25), new IRange(0,100)));
+      types.add(new FldType("small_i_dv",ZERO_ONE, new IRange(0,5+indexSize/3)));
+      types.add(new FldType("small_is_dv",ZERO_ONE, new IRange(0,5+indexSize/3)));
 
       clearIndex();
       Map<Comparable, Doc> model = indexDocs(types, null, indexSize);
@@ -177,12 +185,15 @@ public class TestJoin extends SolrTestCaseJ4 {
       for (int qiter=0; qiter<queryIter; qiter++) {
         String fromField;
         String toField;
+        /* disable matching incompatible fields since 7.0... it doesn't work with point fields and doesn't really make sense?
         if (random().nextInt(100) < 5) {
           // pick random fields 5% of the time
           fromField = types.get(random().nextInt(types.size())).fname;
           // pick the same field 50% of the time we pick a random field (since other fields won't match anything)
           toField = (random().nextInt(100) < 50) ? fromField : types.get(random().nextInt(types.size())).fname;
-        } else {
+        } else
+        */
+        {
           // otherwise, pick compatible fields that have a chance of matching indexed tokens
           String[] group = compat[random().nextInt(compat.length)];
           fromField = group[random().nextInt(group.length)];

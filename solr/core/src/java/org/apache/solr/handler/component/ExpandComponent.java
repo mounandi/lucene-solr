@@ -17,8 +17,6 @@
 package org.apache.solr.handler.component;
 
 import java.io.IOException;
-import java.net.MalformedURLException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -35,8 +33,8 @@ import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiDocValues;
 import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.index.OrdinalMap;
 import org.apache.lucene.index.SortedDocValues;
-import org.apache.lucene.queries.TermsQuery;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.Collector;
@@ -46,6 +44,7 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.TermInSetQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopDocsCollector;
 import org.apache.lucene.search.TopFieldCollector;
@@ -65,11 +64,9 @@ import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.schema.FieldType;
+import org.apache.solr.schema.NumberType;
+import org.apache.solr.schema.SchemaField;
 import org.apache.solr.schema.StrField;
-import org.apache.solr.schema.TrieDoubleField;
-import org.apache.solr.schema.TrieFloatField;
-import org.apache.solr.schema.TrieIntField;
-import org.apache.solr.schema.TrieLongField;
 import org.apache.solr.search.CollapsingQParserPlugin;
 import org.apache.solr.search.DocIterator;
 import org.apache.solr.search.DocList;
@@ -176,7 +173,7 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
       query = rb.getQuery();
     } else {
       try {
-        QParser parser = QParser.getParser(qs, null, req);
+        QParser parser = QParser.getParser(qs, req);
         query = parser.getQuery();
       } catch (Exception e) {
         throw new IOException(e);
@@ -198,7 +195,7 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
       try {
         for (String fq : fqs) {
           if (fq != null && fq.trim().length() != 0 && !fq.equals("*:*")) {
-            QParser fqp = QParser.getParser(fq, null, req);
+            QParser fqp = QParser.getParser(fq, req);
             newFilters.add(fqp.getQuery());
           }
         }
@@ -208,19 +205,21 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
     }
 
     SolrIndexSearcher searcher = req.getSearcher();
-    LeafReader reader = searcher.getLeafReader();
+    LeafReader reader = searcher.getSlowAtomicReader();
 
-    FieldType fieldType = searcher.getSchema().getField(field).getType();
+    SchemaField schemaField = searcher.getSchema().getField(field);
+    FieldType fieldType = schemaField.getType();
 
     SortedDocValues values = null;
-    long nullValue = 0;
+    long nullValue = 0L;
 
     if(fieldType instanceof StrField) {
       //Get The Top Level SortedDocValues
       if(CollapsingQParserPlugin.HINT_TOP_FC.equals(hint)) {
         Map<String, UninvertingReader.Type> mapping = new HashMap();
         mapping.put(field, UninvertingReader.Type.SORTED);
-        UninvertingReader uninvertingReader = new UninvertingReader(new ReaderWrapper(searcher.getLeafReader(), field), mapping);
+        @SuppressWarnings("resource")
+        UninvertingReader uninvertingReader = new UninvertingReader(new ReaderWrapper(searcher.getSlowAtomicReader(), field), mapping);
         values = uninvertingReader.getSortedDocValues(field);
       } else {
         values = DocValues.getSorted(reader, field);
@@ -228,20 +227,20 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
     } else {
       //Get the nullValue for the numeric collapse field
       String defaultValue = searcher.getSchema().getField(field).getDefaultValue();
-      if(defaultValue != null) {
-        if(fieldType instanceof TrieIntField || fieldType instanceof TrieLongField) {
+      
+      final NumberType numType = fieldType.getNumberType();
+
+      // Since the expand component depends on the operation of the collapse component, 
+      // which validates that numeric field types are 32-bit,
+      // we don't need to handle invalid 64-bit field types here.
+      if (defaultValue != null) {
+        if (numType == NumberType.INTEGER) {
           nullValue = Long.parseLong(defaultValue);
-        } else if(fieldType instanceof TrieFloatField){
+        } else if (numType == NumberType.FLOAT) {
           nullValue = Float.floatToIntBits(Float.parseFloat(defaultValue));
-        } else if(fieldType instanceof TrieDoubleField){
-          nullValue = Double.doubleToLongBits(Double.parseDouble(defaultValue));
         }
-      } else {
-        if(fieldType instanceof TrieFloatField){
-          nullValue = Float.floatToIntBits(0.0f);
-        } else if(fieldType instanceof TrieDoubleField){
-          nullValue = Double.doubleToLongBits(0.0f);
-        }
+      } else if (NumberType.FLOAT.equals(numType)) { // Integer case already handled by nullValue defaulting to 0
+        nullValue = Float.floatToIntBits(0.0f);
       }
     }
 
@@ -265,17 +264,23 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
     * This code gathers the group information for the current page.
     */
     List<LeafReaderContext> contexts = searcher.getTopReaderContext().leaves();
+
+    if(contexts.size() == 0) {
+      //When no context is available we can skip the expanding
+      return;
+    }
+
     int currentContext = 0;
     int currentDocBase = contexts.get(currentContext).docBase;
     int nextDocBase = (currentContext+1)<contexts.size() ? contexts.get(currentContext+1).docBase : Integer.MAX_VALUE;
     IntObjectHashMap<BytesRef> ordBytes = null;
     if(values != null) {
       groupBits = new FixedBitSet(values.getValueCount());
-      MultiDocValues.OrdinalMap ordinalMap = null;
+      OrdinalMap ordinalMap = null;
       SortedDocValues[] sortedDocValues = null;
       LongValues segmentOrdinalMap = null;
       SortedDocValues currentValues = null;
-      if(values instanceof  MultiDocValues.MultiSortedDocValues) {
+      if(values instanceof MultiDocValues.MultiSortedDocValues) {
         ordinalMap = ((MultiDocValues.MultiSortedDocValues)values).mapping;
         sortedDocValues = ((MultiDocValues.MultiSortedDocValues)values).values;
         currentValues = sortedDocValues[currentContext];
@@ -299,8 +304,11 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
 
         int contextDoc = globalDoc - currentDocBase;
         if(ordinalMap != null) {
-          int ord = currentValues.getOrd(contextDoc);
-          if(ord > -1) {
+          if (contextDoc > currentValues.docID()) {
+            currentValues.advance(contextDoc);
+          }
+          if (contextDoc == currentValues.docID()) {
+            int ord = currentValues.ordValue();
             ++count;
             BytesRef ref = currentValues.lookupOrd(ord);
             ord = (int)segmentOrdinalMap.get(ord);
@@ -309,8 +317,11 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
             collapsedSet.add(globalDoc);
           }
         } else {
-          int ord = values.getOrd(globalDoc);
-          if(ord > -1) {
+          if (globalDoc > values.docID()) {
+            values.advance(globalDoc);
+          }
+          if (globalDoc == values.docID()) {
+            int ord = values.ordValue();
             ++count;
             BytesRef ref = values.lookupOrd(ord);
             ordBytes.put(ord, BytesRef.deepCopyOf(ref));
@@ -340,7 +351,16 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
           collapseValues = contexts.get(currentContext).reader().getNumericDocValues(field);
         }
         int contextDoc = globalDoc - currentDocBase;
-        long value = collapseValues.get(contextDoc);
+        int valueDocID = collapseValues.docID();
+        if (valueDocID < contextDoc) {
+          valueDocID = collapseValues.advance(contextDoc);
+        }
+        long value;
+        if (valueDocID == contextDoc) {
+          value = collapseValues.longValue();
+        } else {
+          value = 0;
+        }
         if(value != nullValue) {
           ++count;
           groupSet.add(value);
@@ -349,7 +369,11 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
       }
 
       if(count > 0 && count < 200) {
-        groupQuery = getGroupQuery(field, fieldType, count, groupSet);
+        if (fieldType.isPointField()) {
+          groupQuery = getPointGroupQuery(schemaField, count, groupSet);
+        } else {
+          groupQuery = getGroupQuery(field, fieldType, count, groupSet);
+        }
       }
     }
 
@@ -361,6 +385,17 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
     Collector groupExpandCollector = null;
 
     if(values != null) {
+      //Get The Top Level SortedDocValues again so we can re-iterate:
+      if(CollapsingQParserPlugin.HINT_TOP_FC.equals(hint)) {
+        Map<String, UninvertingReader.Type> mapping = new HashMap();
+        mapping.put(field, UninvertingReader.Type.SORTED);
+        @SuppressWarnings("resource")
+        UninvertingReader uninvertingReader = new UninvertingReader(new ReaderWrapper(searcher.getSlowAtomicReader(), field), mapping);
+        values = uninvertingReader.getSortedDocValues(field);
+      } else {
+        values = DocValues.getSorted(reader, field);
+      }
+      
       groupExpandCollector = new GroupExpandCollector(values, groupBits, collapsedSet, limit, sort);
     } else {
       groupExpandCollector = new NumericGroupExpandCollector(field, nullValue, groupSet, collapsedSet, limit, sort);
@@ -412,13 +447,7 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
           String group = charsRef.toString();
           outMap.add(group, slice);
         } else {
-          if(fieldType instanceof TrieIntField || fieldType instanceof TrieLongField ) {
-            outMap.add(Long.toString(groupValue), slice);
-          } else if(fieldType instanceof TrieFloatField) {
-            outMap.add(Float.toString(Float.intBitsToFloat((int) groupValue)), slice);
-          } else if(fieldType instanceof TrieDoubleField) {
-            outMap.add(Double.toString(Double.longBitsToDouble(groupValue)), slice);
-          }
+          outMap.add(numericToString(fieldType, groupValue), slice);
         }
       }
     }
@@ -452,7 +481,6 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
     if (!rb.doExpand) {
       return;
     }
-
     if ((sreq.purpose & ShardRequest.PURPOSE_GET_FIELDS) != 0) {
       SolrQueryRequest req = rb.req;
       NamedList expanded = (NamedList) req.getContext().get("expanded");
@@ -492,9 +520,9 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
     rb.rsp.add("expanded", expanded);
   }
 
-  private class GroupExpandCollector implements Collector, GroupCollector {
+  private static class GroupExpandCollector implements Collector, GroupCollector {
     private SortedDocValues docValues;
-    private MultiDocValues.OrdinalMap ordinalMap;
+    private OrdinalMap ordinalMap;
     private SortedDocValues segmentValues;
     private LongValues segmentOrdinalMap;
     private MultiDocValues.MultiSortedDocValues multiSortedDocValues;
@@ -553,12 +581,23 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
           int globalDoc = docId + docBase;
           int ord = -1;
           if(ordinalMap != null) {
-            ord = segmentValues.getOrd(docId);
-            if(ord > -1) {
-              ord = (int)segmentOrdinalMap.get(ord);
+            if (docId > segmentValues.docID()) {
+              segmentValues.advance(docId);
+            }
+            if (docId == segmentValues.docID()) {
+              ord = (int)segmentOrdinalMap.get(segmentValues.ordValue());
+            } else {
+              ord = -1;
             }
           } else {
-            ord = docValues.getOrd(globalDoc);
+            if (globalDoc > docValues.docID()) {
+              docValues.advance(globalDoc);
+            }
+            if (globalDoc == docValues.docID()) {
+              ord = docValues.ordValue();
+            } else {
+              ord = -1;
+            }
           }
 
           if (ord > -1 && groupBits.get(ord) && !collapsedSet.contains(globalDoc)) {
@@ -574,7 +613,7 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
     }
   }
 
-  private class NumericGroupExpandCollector implements Collector, GroupCollector {
+  private static class NumericGroupExpandCollector implements Collector, GroupCollector {
     private NumericDocValues docValues;
 
     private String field;
@@ -624,7 +663,16 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
 
         @Override
         public void collect(int docId) throws IOException {
-          long value = docValues.get(docId);
+          int valuesDocID = docValues.docID();
+          if (valuesDocID < docId) {
+            valuesDocID = docValues.advance(docId);
+          }
+          long value;
+          if (valuesDocID == docId) {
+            value = docValues.longValue();
+          } else {
+            value = 0;
+          }
           final int index;
           if (value != nullValue && 
               (index = leafCollectors.indexOf(value)) >= 0 && 
@@ -654,23 +702,45 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
     BytesRefBuilder term = new BytesRefBuilder();
     Iterator<LongCursor> it = groupSet.iterator();
     int index = -1;
-    String stringVal =  null;
+
     while (it.hasNext()) {
       LongCursor cursor = it.next();
-      if(ft instanceof TrieIntField || ft instanceof TrieLongField) {
-        stringVal = Long.toString(cursor.value);
-      } else {
-        if(ft instanceof TrieFloatField) {
-          stringVal = Float.toString(Float.intBitsToFloat((int)cursor.value));
-        } else {
-          stringVal = Double.toString(Double.longBitsToDouble(cursor.value));
-        }
-      }
+      String stringVal = numericToString(ft, cursor.value);
       ft.readableToIndexed(stringVal, term);
       bytesRefs[++index] = term.toBytesRef();
     }
 
-    return new SolrConstantScoreQuery(new QueryWrapperFilter(new TermsQuery(fname, bytesRefs)));
+    return new SolrConstantScoreQuery(new QueryWrapperFilter(new TermInSetQuery(fname, bytesRefs)));
+  }
+
+  private Query getPointGroupQuery(SchemaField sf,
+                                   int size,
+                                   LongHashSet groupSet) {
+
+    Iterator<LongCursor> it = groupSet.iterator();
+    List<String> values = new ArrayList<>(size);
+    FieldType ft = sf.getType();
+    while (it.hasNext()) {
+      LongCursor cursor = it.next();
+      values.add(numericToString(ft, cursor.value));
+    }
+
+    return new SolrConstantScoreQuery(new QueryWrapperFilter(sf.getType().getSetQuery(null, sf, values)));
+  }
+
+  private String numericToString(FieldType fieldType, long val) {
+    if (fieldType.getNumberType() != null) {
+      switch (fieldType.getNumberType()) {
+        case INTEGER:
+        case LONG:
+          return Long.toString(val);
+        case FLOAT:
+          return Float.toString(Float.intBitsToFloat((int)val));
+        case DOUBLE:
+          return Double.toString(Double.longBitsToDouble(val));
+      }
+    }
+    throw new IllegalArgumentException("FieldType must be INT,LONG,FLOAT,DOUBLE found " + fieldType);
   }
 
   private Query getGroupQuery(String fname,
@@ -683,12 +753,12 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
       IntObjectCursor<BytesRef> cursor = it.next();
       bytesRefs[++index] = cursor.value;
     }
-    return new SolrConstantScoreQuery(new QueryWrapperFilter(new TermsQuery(fname, bytesRefs)));
+    return new SolrConstantScoreQuery(new QueryWrapperFilter(new TermInSetQuery(fname, bytesRefs)));
   }
 
 
   ////////////////////////////////////////////
-  ///  SolrInfoMBean
+  ///  SolrInfoBean
   ////////////////////////////////////////////
 
   @Override
@@ -697,17 +767,13 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
   }
 
   @Override
-  public URL[] getDocs() {
-    try {
-      return new URL[]{
-          new URL("http://wiki.apache.org/solr/ExpandComponent")
-      };
-    } catch (MalformedURLException e) {
-      throw new RuntimeException(e);
-    }
+  public Category getCategory() {
+    return Category.QUERY;
   }
 
-  private class ReaderWrapper extends FilterLeafReader {
+  // this reader alters the content of the given reader so it should not
+  // delegate the caching stuff
+  private static class ReaderWrapper extends FilterLeafReader {
 
     private String field;
 
@@ -718,10 +784,6 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
 
     public SortedDocValues getSortedDocValues(String field) {
       return null;
-    }
-
-    public Object getCoreCacheKey() {
-      return in.getCoreCacheKey();
     }
 
     public FieldInfos getFieldInfos() {
@@ -750,6 +812,21 @@ public class ExpandComponent extends SearchComponent implements PluginInfoInitia
       }
       FieldInfos infos = new FieldInfos(newInfos.toArray(new FieldInfo[newInfos.size()]));
       return infos;
+    }
+
+    // NOTE: delegating the caches is wrong here as we are altering the content
+    // of the reader, this should ONLY be used under an uninvertingreader which
+    // will restore doc values back using uninversion, otherwise all sorts of
+    // crazy things could happen.
+
+    @Override
+    public CacheHelper getCoreCacheHelper() {
+      return in.getCoreCacheHelper();
+    }
+
+    @Override
+    public CacheHelper getReaderCacheHelper() {
+      return in.getReaderCacheHelper();
     }
   }
 

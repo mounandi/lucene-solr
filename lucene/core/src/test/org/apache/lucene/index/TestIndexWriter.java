@@ -94,9 +94,11 @@ import org.apache.lucene.util.SetOnce;
 import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.ThreadInterruptedException;
+import org.apache.lucene.util.Version;
 import org.apache.lucene.util.automaton.Automata;
 import org.apache.lucene.util.automaton.Automaton;
 import org.apache.lucene.util.automaton.CharacterRunAutomaton;
+import org.junit.Ignore;
 import org.junit.Test;
 
 public class TestIndexWriter extends LuceneTestCase {
@@ -346,67 +348,6 @@ public class TestIndexWriter extends LuceneTestCase {
       } else if (j < 50) {
         assertEquals(flushCount, lastFlushCount);
         writer.getConfig().setMaxBufferedDocs(10);
-        writer.getConfig().setRAMBufferSizeMB(IndexWriterConfig.DISABLE_AUTO_FLUSH);
-      } else if (50 == j) {
-        assertTrue(flushCount > lastFlushCount);
-      }
-    }
-    writer.close();
-    dir.close();
-  }
-
-  public void testChangingRAMBuffer2() throws IOException {
-    Directory dir = newDirectory();      
-    IndexWriter writer  = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random())));
-    writer.getConfig().setMaxBufferedDocs(10);
-    writer.getConfig().setMaxBufferedDeleteTerms(10);
-    writer.getConfig().setRAMBufferSizeMB(IndexWriterConfig.DISABLE_AUTO_FLUSH);
-
-    for(int j=1;j<52;j++) {
-      Document doc = new Document();
-      doc.add(new Field("field", "aaa" + j, storedTextType));
-      writer.addDocument(doc);
-    }
-      
-    int lastFlushCount = -1;
-    for(int j=1;j<52;j++) {
-      writer.deleteDocuments(new Term("field", "aaa" + j));
-      TestUtil.syncConcurrentMerges(writer);
-      int flushCount = writer.getFlushCount();
-       
-      if (j == 1)
-        lastFlushCount = flushCount;
-      else if (j < 10) {
-        // No new files should be created
-        assertEquals(flushCount, lastFlushCount);
-      } else if (10 == j) {
-        assertTrue("" + j, flushCount > lastFlushCount);
-        lastFlushCount = flushCount;
-        writer.getConfig().setRAMBufferSizeMB(0.000001);
-        writer.getConfig().setMaxBufferedDeleteTerms(1);
-      } else if (j < 20) {
-        assertTrue(flushCount > lastFlushCount);
-        lastFlushCount = flushCount;
-      } else if (20 == j) {
-        writer.getConfig().setRAMBufferSizeMB(16);
-        writer.getConfig().setMaxBufferedDeleteTerms(IndexWriterConfig.DISABLE_AUTO_FLUSH);
-        lastFlushCount = flushCount;
-      } else if (j < 30) {
-        assertEquals(flushCount, lastFlushCount);
-      } else if (30 == j) {
-        writer.getConfig().setRAMBufferSizeMB(0.000001);
-        writer.getConfig().setMaxBufferedDeleteTerms(IndexWriterConfig.DISABLE_AUTO_FLUSH);
-        writer.getConfig().setMaxBufferedDeleteTerms(1);
-      } else if (j < 40) {
-        assertTrue(flushCount> lastFlushCount);
-        lastFlushCount = flushCount;
-      } else if (40 == j) {
-        writer.getConfig().setMaxBufferedDeleteTerms(10);
-        writer.getConfig().setRAMBufferSizeMB(IndexWriterConfig.DISABLE_AUTO_FLUSH);
-        lastFlushCount = flushCount;
-      } else if (j < 50) {
-        assertEquals(flushCount, lastFlushCount);
-        writer.getConfig().setMaxBufferedDeleteTerms(10);
         writer.getConfig().setRAMBufferSizeMB(IndexWriterConfig.DISABLE_AUTO_FLUSH);
       } else if (50 == j) {
         assertTrue(flushCount > lastFlushCount);
@@ -692,7 +633,7 @@ public class TestIndexWriter extends LuceneTestCase {
     writer.close();
     DirectoryReader reader = DirectoryReader.open(dir);
     LeafReader subreader = getOnlyLeafReader(reader);
-    TermsEnum te = subreader.fields().terms("").iterator();
+    TermsEnum te = subreader.terms("").iterator();
     assertEquals(new BytesRef("a"), te.next());
     assertEquals(new BytesRef("b"), te.next());
     assertEquals(new BytesRef("c"), te.next());
@@ -713,7 +654,7 @@ public class TestIndexWriter extends LuceneTestCase {
     writer.close();
     DirectoryReader reader = DirectoryReader.open(dir);
     LeafReader subreader = getOnlyLeafReader(reader);
-    TermsEnum te = subreader.fields().terms("").iterator();
+    TermsEnum te = subreader.terms("").iterator();
     assertEquals(new BytesRef(""), te.next());
     assertEquals(new BytesRef("a"), te.next());
     assertEquals(new BytesRef("b"), te.next());
@@ -1152,7 +1093,7 @@ public class TestIndexWriter extends LuceneTestCase {
     t.finish = true;
     t.join();
     if (t.failed) {
-      fail(new String(t.bytesLog.toString("UTF-8")));
+      fail(t.bytesLog.toString("UTF-8"));
     }
   }
 
@@ -1250,8 +1191,9 @@ public class TestIndexWriter extends LuceneTestCase {
 
 
   public void testDeleteUnusedFiles() throws Exception {
-
     assumeFalse("test relies on exact filenames", Codec.getDefault() instanceof SimpleTextCodec);
+    assumeWorkingMMapOnWindows();
+    
     for(int iter=0;iter<2;iter++) {
       // relies on windows semantics
       Path path = createTempDir();
@@ -2555,7 +2497,9 @@ public class TestIndexWriter extends LuceneTestCase {
     w.commit();
     w.close();
     DirectoryReader r = DirectoryReader.open(d);
-    assertEquals(0, getOnlyLeafReader(r).getNormValues("foo").get(0));
+    NumericDocValues norms = getOnlyLeafReader(r).getNormValues("foo");
+    assertEquals(0, norms.nextDoc());
+    assertEquals(0, norms.longValue());
     r.close();
     d.close();
   }
@@ -2766,5 +2710,42 @@ public class TestIndexWriter extends LuceneTestCase {
     dir.close();
   }
 
-}
+  @Ignore("requires running tests with biggish heap")
+  public void testMassiveField() throws Exception {
+    Directory dir = newDirectory();
+    IndexWriterConfig iwc = new IndexWriterConfig(new MockAnalyzer(random()));
+    final IndexWriter w = new IndexWriter(dir, iwc);
 
+    StringBuilder b = new StringBuilder();
+    while (b.length() <= IndexWriter.MAX_STORED_STRING_LENGTH) {
+      b.append("x ");
+    }
+
+    final Document doc = new Document();
+    //doc.add(new TextField("big", b.toString(), Field.Store.YES));
+    doc.add(new StoredField("big", b.toString()));
+    Exception e = expectThrows(IllegalArgumentException.class, () -> {w.addDocument(doc);});
+    assertEquals("stored field \"big\" is too large (" + b.length() + " characters) to store", e.getMessage());
+
+    // make sure writer is still usable:
+    Document doc2 = new Document();
+    doc2.add(new StringField("id", "foo", Field.Store.YES));
+    w.addDocument(doc2);
+
+    DirectoryReader r = DirectoryReader.open(w);
+    assertEquals(1, r.numDocs());
+    r.close();
+    w.close();
+    dir.close();
+  }
+
+  public void testRecordsIndexCreatedVersion() throws IOException {
+    Directory dir = newDirectory();
+    IndexWriter w = new IndexWriter(dir, newIndexWriterConfig());
+    w.commit();
+    w.close();
+    assertEquals(Version.LATEST.major, SegmentInfos.readLatestCommit(dir).getIndexCreatedVersionMajor());
+    dir.close();
+  }
+
+}

@@ -24,17 +24,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.commons.io.FileUtils;
 import org.apache.solr.BaseDistributedSearchTestCase;
 import org.apache.solr.client.solrj.embedded.JettySolrRunner;
+import org.apache.solr.client.solrj.impl.CloudSolrClient;
+import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.common.cloud.ClusterState;
+import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.core.Diagnostics;
 import org.apache.solr.core.MockDirectoryFactory;
+import org.apache.solr.util.TimeOut;
 import org.apache.zookeeper.KeeperException;
 import org.junit.BeforeClass;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTestCase {
   
@@ -43,7 +50,6 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
   private static final String ZK_HOST = "zkHost";
   private static final String ZOOKEEPER_FORCE_SYNC = "zookeeper.forceSync";
   protected static final String DEFAULT_COLLECTION = "collection1";
-  private static final boolean DEBUG = false;
   protected ZkTestServer zkServer;
   private AtomicInteger homeCount = new AtomicInteger();
 
@@ -93,19 +99,14 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
     File controlHome = new File(new File(getSolrHome()).getParentFile(), "control" + homeCount.incrementAndGet());
     FileUtils.copyDirectory(new File(getSolrHome()), controlHome);
     setupJettySolrHome(controlHome);
-    
-    System.setProperty("collection", "control_collection");
-    String numShardsS = System.getProperty(ZkStateReader.NUM_SHARDS_PROP);
-    System.setProperty(ZkStateReader.NUM_SHARDS_PROP, "1");
-    controlJetty = createJetty(controlHome, null);      // let the shardId default to shard1
-    System.clearProperty("collection");
-    if(numShardsS != null) {
-      System.setProperty(ZkStateReader.NUM_SHARDS_PROP, numShardsS);
-    } else {
-      System.clearProperty(ZkStateReader.NUM_SHARDS_PROP);
-    }
 
+    controlJetty = createJetty(controlHome, null);      // let the shardId default to shard1
     controlClient = createNewSolrClient(controlJetty.getLocalPort());
+
+    assertTrue(CollectionAdminRequest
+        .createCollection("control_collection", 1, 1)
+        .setCreateNodeSet(controlJetty.getNodeName())
+        .process(controlClient).isSuccess());
 
     StringBuilder sb = new StringBuilder();
     for (int i = 1; i <= numShards; i++) {
@@ -150,7 +151,9 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
       if (verbose) System.out.println("-");
       boolean sawLiveRecovering = false;
       ClusterState clusterState = zkStateReader.getClusterState();
-      Map<String,Slice> slices = clusterState.getSlicesMap(collection);
+      final DocCollection docCollection = clusterState.getCollectionOrNull(collection);
+      assertNotNull("Could not find collection:" + collection, docCollection);
+      Map<String,Slice> slices = docCollection.getSlicesMap();
       assertNotNull("Could not find collection:" + collection, slices);
       for (Map.Entry<String,Slice> entry : slices.entrySet()) {
         Slice slice = entry.getValue();
@@ -223,13 +226,39 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
 
     log.info("Collection has disappeared - collection: " + collection);
   }
+  
+  static void waitForNewLeader(CloudSolrClient cloudClient, String shardName, Replica oldLeader, TimeOut timeOut)
+      throws Exception {
+    log.info("Will wait for a node to become leader for {} secs", timeOut.timeLeft(SECONDS));
+    ZkStateReader zkStateReader = cloudClient.getZkStateReader();
+    zkStateReader.forceUpdateCollection(DEFAULT_COLLECTION);
+
+    for (; ; ) {
+      ClusterState clusterState = zkStateReader.getClusterState();
+      DocCollection coll = clusterState.getCollection("collection1");
+      Slice slice = coll.getSlice(shardName);
+      if (slice.getLeader() != null && !slice.getLeader().equals(oldLeader) && slice.getLeader().getState() == Replica.State.ACTIVE) {
+        log.info("Old leader {}, new leader {}. New leader got elected in {} ms", oldLeader, slice.getLeader(),timeOut.timeElapsed(MILLISECONDS) );
+        break;
+      }
+
+      if (timeOut.hasTimedOut()) {
+        Diagnostics.logThreadDumps("Could not find new leader in specified timeout");
+        zkStateReader.getZkClient().printLayoutToStdOut();
+        fail("Could not find new leader even after waiting for " + timeOut.timeElapsed(MILLISECONDS) + "ms");
+      }
+
+      Thread.sleep(100);
+    }
+  }
 
   public static void verifyReplicaStatus(ZkStateReader reader, String collection, String shard, String coreNodeName, Replica.State expectedState) throws InterruptedException {
     int maxIterations = 100;
     Replica.State coreState = null;
     while(maxIterations-->0) {
-      Slice slice = reader.getClusterState().getSlice(collection, shard);
-      if(slice!=null) {
+      final DocCollection docCollection = reader.getClusterState().getCollectionOrNull(collection);
+      if(docCollection != null && docCollection.getSlice(shard)!=null) {
+        Slice slice = docCollection.getSlice(shard);
         Replica replica = slice.getReplicasMap().get(coreNodeName);
         if (replica != null) {
           coreState = replica.getState();
@@ -248,10 +277,12 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
 
       zkStateReader.forceUpdateCollection(collection);
       ClusterState clusterState = zkStateReader.getClusterState();
-      Map<String,Slice> slices = clusterState.getSlicesMap(collection);
-      if (slices == null) {
+      final DocCollection docCollection = clusterState.getCollectionOrNull(collection);
+      if (docCollection == null || docCollection.getSlices() == null) {
         throw new IllegalArgumentException("Cannot find collection:" + collection);
       }
+      
+      Map<String,Slice> slices = docCollection.getSlicesMap();
       for (Map.Entry<String,Slice> entry : slices.entrySet()) {
         Slice slice = entry.getValue();
         if (slice.getState() != Slice.State.ACTIVE) {
@@ -269,9 +300,6 @@ public abstract class AbstractDistribZkTestBase extends BaseDistributedSearchTes
   
   @Override
   public void distribTearDown() throws Exception {
-    if (DEBUG) {
-      printLayout();
-    }
     System.clearProperty(ZK_HOST);
     System.clearProperty("collection");
     System.clearProperty(ENABLE_UPDATE_LOG);

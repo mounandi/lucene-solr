@@ -27,14 +27,11 @@ import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.DocRouter;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.Replica;
-import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.util.Utils;
-import org.easymock.EasyMock;
 import org.junit.Test;
 
-import static org.easymock.EasyMock.createMock;
-
 public class ClusterStateTest extends SolrTestCaseJ4 {
+
   @Test
   public void testStoreAndRead() throws Exception {
     Map<String,DocCollection> collectionStates = new HashMap<>();
@@ -56,8 +53,7 @@ public class ClusterStateTest extends SolrTestCaseJ4 {
     slices.put("shard2", slice2);
     collectionStates.put("collection1", new DocCollection("collection1", slices, null, DocRouter.DEFAULT));
     collectionStates.put("collection2", new DocCollection("collection2", slices, null, DocRouter.DEFAULT));
-    ZkStateReader zkStateReaderMock = getMockZkStateReader(collectionStates.keySet());
-    
+
     ClusterState clusterState = new ClusterState(-1,liveNodes, collectionStates);
     byte[] bytes = Utils.toJSON(clusterState);
     // System.out.println("#################### " + new String(bytes));
@@ -66,8 +62,8 @@ public class ClusterStateTest extends SolrTestCaseJ4 {
     assertEquals("Provided liveNodes not used properly", 2, loadedClusterState
         .getLiveNodes().size());
     assertEquals("No collections found", 2, loadedClusterState.getCollectionsMap().size());
-    assertEquals("Properties not copied properly", replica.getStr("prop1"), loadedClusterState.getSlice("collection1", "shard1").getReplicasMap().get("node1").getStr("prop1"));
-    assertEquals("Properties not copied properly", replica.getStr("prop2"), loadedClusterState.getSlice("collection1", "shard1").getReplicasMap().get("node1").getStr("prop2"));
+    assertEquals("Properties not copied properly", replica.getStr("prop1"), loadedClusterState.getCollection("collection1").getSlice("shard1").getReplicasMap().get("node1").getStr("prop1"));
+    assertEquals("Properties not copied properly", replica.getStr("prop2"), loadedClusterState.getCollection("collection1").getSlice("shard1").getReplicasMap().get("node1").getStr("prop2"));
 
     loadedClusterState = ClusterState.load(-1, new byte[0], liveNodes);
     
@@ -82,11 +78,4 @@ public class ClusterStateTest extends SolrTestCaseJ4 {
     assertEquals("Should not have collections", 0, loadedClusterState.getCollectionsMap().size());
   }
 
-  public static ZkStateReader getMockZkStateReader(final Set<String> collections) {
-    ZkStateReader mock = createMock(ZkStateReader.class);
-    EasyMock.reset(mock);
-    EasyMock.replay(mock);
-
-    return mock;
-  }
 }

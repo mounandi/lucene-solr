@@ -30,6 +30,7 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SortedDocValues;
+import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.ScoreDoc;
@@ -82,11 +83,21 @@ public class DatasetSplitter {
     // get the exact no. of existing classes
     int noOfClasses = 0;
     for (LeafReaderContext leave : originalIndex.leaves()) {
+      long valueCount = 0;
       SortedDocValues classValues = leave.reader().getSortedDocValues(classFieldName);
-      if (classValues == null) {
-        throw new IllegalStateException("the classFieldName \"" + classFieldName + "\" must index sorted doc values");
+      if (classValues != null) {
+        valueCount = classValues.getValueCount();
+      } else {
+        SortedSetDocValues sortedSetDocValues = leave.reader().getSortedSetDocValues(classFieldName);
+        if (sortedSetDocValues != null) {
+          valueCount = sortedSetDocValues.getValueCount();
+        }
       }
-      noOfClasses += classValues.getValueCount();
+      if (classValues == null) {
+        // approximate with no. of terms
+        noOfClasses += leave.reader().terms(classFieldName).size();
+      }
+      noOfClasses += valueCount;
     }
 
     try {
@@ -110,8 +121,8 @@ public class DatasetSplitter {
       int b = 0;
 
       // iterate over existing documents
-      for (GroupDocs group : topGroups.groups) {
-        int totalHits = group.totalHits;
+      for (GroupDocs<Object> group : topGroups.groups) {
+        long totalHits = group.totalHits;
         double testSize = totalHits * testRatio;
         int tc = 0;
         double cvSize = totalHits * crossValidationRatio;

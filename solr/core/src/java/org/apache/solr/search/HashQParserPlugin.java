@@ -59,22 +59,22 @@ public class HashQParserPlugin extends QParserPlugin {
     return new HashQParser(query, localParams, params, request);
   }
 
-  private class HashQParser extends QParser {
+  private static class HashQParser extends QParser {
 
     public HashQParser(String query, SolrParams localParams, SolrParams params, SolrQueryRequest request) {
       super(query, localParams, params, request);
     }
 
     public Query parse() {
-      int workers = localParams.getInt("workers");
-      int worker = localParams.getInt("worker");
+      int workers = localParams.getInt("workers", 0);
+      int worker = localParams.getInt("worker", 0);
       String keys = params.get("partitionKeys");
       keys = keys.replace(" ", "");
       return new HashQuery(keys, workers, worker);
     }
   }
 
-  private class HashQuery extends ExtendedQueryBase implements PostFilter {
+  private static class HashQuery extends ExtendedQueryBase implements PostFilter {
 
     private String keysParam;
     private int workers;
@@ -135,7 +135,7 @@ public class HashQParserPlugin extends QParserPlugin {
       return searcher.rewrite(constantScoreQuery).createWeight(searcher, false, boost);
     }
 
-    public class BitsFilter extends Filter {
+    public static class BitsFilter extends Filter {
       private FixedBitSet[] bitSets;
       public BitsFilter(FixedBitSet[] bitSets) {
         this.bitSets = bitSets;
@@ -166,7 +166,7 @@ public class HashQParserPlugin extends QParserPlugin {
     }
 
 
-    class SegmentPartitioner implements Runnable {
+    static class SegmentPartitioner implements Runnable {
 
       public LeafReaderContext context;
       private int worker;
@@ -238,7 +238,7 @@ public class HashQParserPlugin extends QParserPlugin {
     }
   }
 
-  private class HashCollector extends DelegatingCollector {
+  private static class HashCollector extends DelegatingCollector {
     private int worker;
     private int workers;
     private HashKey hashKey;
@@ -268,10 +268,10 @@ public class HashQParserPlugin extends QParserPlugin {
 
   private interface HashKey {
     public void setNextReader(LeafReaderContext reader) throws IOException;
-    public long hashCode(int doc);
+    public long hashCode(int doc) throws IOException;
   }
 
-  private class BytesHash implements HashKey {
+  private static class BytesHash implements HashKey {
 
     private SortedDocValues values;
     private String field;
@@ -287,15 +287,23 @@ public class HashQParserPlugin extends QParserPlugin {
       values = context.reader().getSortedDocValues(field);
     }
 
-    public long hashCode(int doc) {
-      BytesRef ref = values.get(doc);
+    public long hashCode(int doc) throws IOException {
+      if (doc > values.docID()) {
+        values.advance(doc);
+      }
+      BytesRef ref;
+      if (doc == values.docID()) {
+        ref = values.binaryValue();
+      } else {
+        ref = null;
+      }
       this.fieldType.indexedToReadable(ref, charsRefBuilder);
       CharsRef charsRef = charsRefBuilder.get();
       return charsRef.hashCode();
     }
   }
 
-  private class NumericHash implements HashKey {
+  private static class NumericHash implements HashKey {
 
     private NumericDocValues values;
     private String field;
@@ -308,13 +316,22 @@ public class HashQParserPlugin extends QParserPlugin {
       values = context.reader().getNumericDocValues(field);
     }
 
-    public long hashCode(int doc) {
-      long l = values.get(doc);
+    public long hashCode(int doc) throws IOException {
+      int valuesDocID = values.docID();
+      if (valuesDocID < doc) {
+        valuesDocID = values.advance(doc);
+      }
+      long l;
+      if (valuesDocID == doc) {
+        l = values.longValue();
+      } else {
+        l = 0;
+      }
       return Longs.hashCode(l);
     }
   }
 
-  private class ZeroHash implements HashKey {
+  private static class ZeroHash implements HashKey {
 
     public long hashCode(int doc) {
       return 0;
@@ -325,7 +342,7 @@ public class HashQParserPlugin extends QParserPlugin {
     }
   }
 
-  private class CompositeHash implements HashKey {
+  private static class CompositeHash implements HashKey {
 
     private HashKey key1;
     private HashKey key2;
@@ -346,7 +363,7 @@ public class HashQParserPlugin extends QParserPlugin {
       key4.setNextReader(context);
     }
 
-    public long hashCode(int doc) {
+    public long hashCode(int doc) throws IOException {
       return key1.hashCode(doc)+key2.hashCode(doc)+key3.hashCode(doc)+key4.hashCode(doc);
     }
   }

@@ -72,7 +72,8 @@ public class TestUniqueTermCount extends LuceneTestCase {
     NumericDocValues fooNorms = MultiDocValues.getNormValues(reader, "foo");
     assertNotNull(fooNorms);
     for (int i = 0; i < reader.maxDoc(); i++) {
-      assertEquals(expected.get(i).longValue(), fooNorms.get(i));
+      assertEquals(i, fooNorms.nextDoc());
+      assertEquals(expected.get(i).longValue(), fooNorms.longValue());
     }
   }
 
@@ -97,7 +98,7 @@ public class TestUniqueTermCount extends LuceneTestCase {
   /**
    * Simple similarity that encodes maxTermFrequency directly
    */
-  class TestSimilarity extends Similarity {
+  static class TestSimilarity extends Similarity {
 
     @Override
     public long computeNorm(FieldInvertState state) {

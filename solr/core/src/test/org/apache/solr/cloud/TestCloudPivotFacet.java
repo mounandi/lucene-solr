@@ -91,6 +91,11 @@ public class TestCloudPivotFacet extends AbstractFullDistribZkTestBase {
   // param used by test purely for tracing & validation
   private static String TRACE_SORT = "_test_sort";
 
+  public TestCloudPivotFacet() {
+    // we need DVs on point fields to compute stats & facets
+    if (Boolean.getBoolean(NUMERIC_POINTS_SYSPROP)) System.setProperty(NUMERIC_DOCVALUES_SYSPROP,"true");
+  }
+  
   /** 
    * Controls the odds of any given doc having a value in any given field -- as this gets lower, 
    * the counts for "facet.missing" pivots should increase.

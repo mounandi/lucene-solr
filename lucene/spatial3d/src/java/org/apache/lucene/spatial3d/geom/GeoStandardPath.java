@@ -16,6 +16,10 @@
  */
 package org.apache.lucene.spatial3d.geom;
 
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.IOException;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -63,7 +67,7 @@ class GeoStandardPath extends GeoBasePath {
     Collections.addAll(points, pathPoints);
     done();
   }
-  
+
   /** Piece-wise constructor.  Use in conjunction with addPoint() and done().
    *@param planetModel is the planet model.
    *@param maxCutoffAngle is the width of the path, measured as an angle.
@@ -193,6 +197,23 @@ class GeoStandardPath extends GeoBasePath {
 
   }
 
+  /**
+   * Constructor for deserialization.
+   * @param planetModel is the planet model.
+   * @param inputStream is the input stream.
+   */
+  public GeoStandardPath(final PlanetModel planetModel, final InputStream inputStream) throws IOException {
+    this(planetModel, 
+      SerializableObject.readDouble(inputStream),
+      SerializableObject.readPointArray(planetModel, inputStream));
+  }
+
+  @Override
+  public void write(final OutputStream outputStream) throws IOException {
+    SerializableObject.writeDouble(outputStream, cutoffAngle);
+    SerializableObject.writePointArray(outputStream, points);
+  }
+
   @Override
   protected double distance(final DistanceStyle distanceStyle, final double x, final double y, final double z) {
     // Algorithm:
@@ -281,6 +302,23 @@ class GeoStandardPath extends GeoBasePath {
 
     for (final PathSegment pathSegment : segments) {
       if (pathSegment.intersects(planetModel, plane, notablePoints, bounds)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  @Override
+  public boolean intersects(GeoShape geoShape) {
+    for (final SegmentEndpoint pathPoint : endPoints) {
+      if (pathPoint.intersects(geoShape)) {
+        return true;
+      }
+    }
+
+    for (final PathSegment pathSegment : segments) {
+      if (pathSegment.intersects(geoShape)) {
         return true;
       }
     }
@@ -549,6 +587,17 @@ class GeoStandardPath extends GeoBasePath {
       return circlePlane.intersects(planetModel, p, notablePoints, this.notablePoints, bounds, this.cutoffPlanes);
     }
 
+    /** Determine if this endpoint intersects a GeoShape.
+     *@param geoShape is the GeoShape.
+     *@return true if there is shape intersect this endpoint.
+     */
+    public boolean intersects(final GeoShape geoShape) {
+      //System.err.println("  looking for intersection between plane "+p+" and circle "+circlePlane+" on proper side of "+cutoffPlanes+" within "+bounds);
+      if (circlePlane == null)
+        return false;
+      return geoShape.intersects(circlePlane, this.notablePoints, this.cutoffPlanes);
+    }
+
     /** Get the bounds for a segment endpoint.
      *@param planetModel is the planet model.
      *@param bounds are the bounds to be modified.
@@ -797,6 +846,15 @@ class GeoStandardPath extends GeoBasePath {
     public boolean intersects(final PlanetModel planetModel, final Plane p, final GeoPoint[] notablePoints, final Membership[] bounds) {
       return upperConnectingPlane.intersects(planetModel, p, notablePoints, upperConnectingPlanePoints, bounds, lowerConnectingPlane, startCutoffPlane, endCutoffPlane) ||
           lowerConnectingPlane.intersects(planetModel, p, notablePoints, lowerConnectingPlanePoints, bounds, upperConnectingPlane, startCutoffPlane, endCutoffPlane);
+    }
+
+    /** Determine if this endpoint intersects a specified GeoShape.
+     *@param geoShape is the GeoShape.
+     *@return true if there GeoShape intersects this endpoint.
+     */
+    public boolean intersects(final GeoShape geoShape) {
+      return geoShape.intersects(upperConnectingPlane, upperConnectingPlanePoints, lowerConnectingPlane, startCutoffPlane, endCutoffPlane) ||
+          geoShape.intersects(lowerConnectingPlane, lowerConnectingPlanePoints, upperConnectingPlane, startCutoffPlane, endCutoffPlane);
     }
 
     /** Get the bounds for a segment endpoint.

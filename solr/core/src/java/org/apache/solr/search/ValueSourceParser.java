@@ -34,6 +34,7 @@ import org.apache.lucene.queries.function.docvalues.BoolDocValues;
 import org.apache.lucene.queries.function.docvalues.DoubleDocValues;
 import org.apache.lucene.queries.function.docvalues.LongDocValues;
 import org.apache.lucene.queries.function.valuesource.*;
+import org.apache.lucene.queries.payloads.PayloadFunction;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SortField;
@@ -46,7 +47,7 @@ import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.request.SolrRequestInfo;
-import org.apache.solr.schema.CurrencyField;
+import org.apache.solr.schema.CurrencyFieldType;
 import org.apache.solr.schema.FieldType;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.schema.StrField;
@@ -55,15 +56,18 @@ import org.apache.solr.search.facet.AggValueSource;
 import org.apache.solr.search.facet.AvgAgg;
 import org.apache.solr.search.facet.CountAgg;
 import org.apache.solr.search.facet.HLLAgg;
-import org.apache.solr.search.facet.MaxAgg;
-import org.apache.solr.search.facet.MinAgg;
+import org.apache.solr.search.facet.MinMaxAgg;
 import org.apache.solr.search.facet.PercentileAgg;
+import org.apache.solr.search.facet.StddevAgg;
 import org.apache.solr.search.facet.SumAgg;
 import org.apache.solr.search.facet.SumsqAgg;
 import org.apache.solr.search.facet.UniqueAgg;
+import org.apache.solr.search.facet.VarianceAgg;
 import org.apache.solr.search.function.CollapseScoreFunction;
+import org.apache.solr.search.function.ConcatStringFunction;
 import org.apache.solr.search.function.OrdFieldSource;
 import org.apache.solr.search.function.ReverseOrdFieldSource;
+import org.apache.solr.search.function.SolrComparisonBoolFunction;
 import org.apache.solr.search.function.distance.GeoDistValueSourceParser;
 import org.apache.solr.search.function.distance.GeohashFunction;
 import org.apache.solr.search.function.distance.GeohashHaversineFunction;
@@ -71,7 +75,10 @@ import org.apache.solr.search.function.distance.HaversineFunction;
 import org.apache.solr.search.function.distance.SquaredEuclideanFunction;
 import org.apache.solr.search.function.distance.StringDistanceFunction;
 import org.apache.solr.search.function.distance.VectorDistanceFunction;
+import org.apache.solr.search.join.ChildFieldValueSourceParser;
 import org.apache.solr.util.DateMathParser;
+import org.apache.solr.util.PayloadDecoder;
+import org.apache.solr.util.PayloadUtils;
 import org.apache.solr.util.plugin.NamedListInitializedPlugin;
 import org.locationtech.spatial4j.distance.DistanceUtils;
 
@@ -218,7 +225,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
             return "mod";
           }
           @Override
-          protected float func(int doc, FunctionValues aVals, FunctionValues bVals) {
+          protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
             return aVals.floatVal(doc) % bVals.floatVal(doc);
           }
         };
@@ -247,7 +254,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
           }
 
           @Override
-          protected float func(int doc, FunctionValues vals) {
+          protected float func(int doc, FunctionValues vals) throws IOException {
             return Math.abs(vals.floatVal(doc));
           }
         };
@@ -289,7 +296,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
           }
 
           @Override
-          protected float func(int doc, FunctionValues aVals, FunctionValues bVals) {
+          protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
             return aVals.floatVal(doc) - bVals.floatVal(doc);
           }
         };
@@ -437,11 +444,11 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
 
         String fieldName = fp.parseArg();
         SchemaField f = fp.getReq().getSchema().getField(fieldName);
-        if (! (f.getType() instanceof CurrencyField)) {
+        if (! (f.getType() instanceof CurrencyFieldType)) {
           throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
-                                  "Currency function input must be the name of a CurrencyField: " + fieldName);
+                                  "Currency function input must be the name of a CurrencyFieldType: " + fieldName);
         }
-        CurrencyField ft = (CurrencyField) f.getType();
+        CurrencyFieldType ft = (CurrencyFieldType) f.getType();
         String code = fp.hasMoreArguments() ? fp.parseArg() : null;
         return ft.getConvertedValueSource(code, ft.getValueSource(f, fp));
       }
@@ -449,133 +456,133 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
 
     addParser(new DoubleParser("rad") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return vals.doubleVal(doc) * DistanceUtils.DEGREES_TO_RADIANS;
       }
     });
     addParser(new DoubleParser("deg") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return vals.doubleVal(doc) * DistanceUtils.RADIANS_TO_DEGREES;
       }
     });
     addParser(new DoubleParser("sqrt") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.sqrt(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("cbrt") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.cbrt(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("log") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.log10(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("ln") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.log(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("exp") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.exp(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("sin") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.sin(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("cos") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.cos(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("tan") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.tan(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("asin") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.asin(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("acos") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.acos(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("atan") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.atan(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("sinh") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.sinh(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("cosh") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.cosh(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("tanh") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.tanh(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("ceil") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.ceil(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("floor") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.floor(vals.doubleVal(doc));
       }
     });
     addParser(new DoubleParser("rint") {
       @Override
-      public double func(int doc, FunctionValues vals) {
+      public double func(int doc, FunctionValues vals) throws IOException {
         return Math.rint(vals.doubleVal(doc));
       }
     });
     addParser(new Double2Parser("pow") {
       @Override
-      public double func(int doc, FunctionValues a, FunctionValues b) {
+      public double func(int doc, FunctionValues a, FunctionValues b) throws IOException {
         return Math.pow(a.doubleVal(doc), b.doubleVal(doc));
       }
     });
     addParser(new Double2Parser("hypot") {
       @Override
-      public double func(int doc, FunctionValues a, FunctionValues b) {
+      public double func(int doc, FunctionValues a, FunctionValues b) throws IOException {
         return Math.hypot(a.doubleVal(doc), b.doubleVal(doc));
       }
     });
     addParser(new Double2Parser("atan2") {
       @Override
-      public double func(int doc, FunctionValues a, FunctionValues b) {
+      public double func(int doc, FunctionValues a, FunctionValues b) throws IOException {
         return Math.atan2(a.doubleVal(doc), b.doubleVal(doc));
       }
     });
@@ -702,6 +709,52 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
       }
     });
 
+    addParser("payload", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        // payload(field,value[,default, ['min|max|average|first']])
+        //   defaults to "average" and 0.0 default value
+
+        TInfo tinfo = parseTerm(fp); // would have made this parser a new separate class and registered it, but this handy method is private :/
+
+        ValueSource defaultValueSource;
+        if (fp.hasMoreArguments()) {
+          defaultValueSource = fp.parseValueSource();
+        } else {
+          defaultValueSource = new ConstValueSource(0.0f);
+        }
+
+        PayloadFunction payloadFunction = null;
+        String func = "average";
+        if (fp.hasMoreArguments()) {
+          func = fp.parseArg();
+        }
+        payloadFunction = PayloadUtils.getPayloadFunction(func);
+
+        // Support func="first" by payloadFunction=null
+        if(payloadFunction == null && !"first".equals(func)) {
+          // not "first" (or average, min, or max)
+          throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Invalid payload function: " + func);
+        }
+
+        FieldType fieldType = fp.getReq().getCore().getLatestSchema().getFieldTypeNoEx(tinfo.field);
+        PayloadDecoder decoder = PayloadUtils.getPayloadDecoder(fieldType);
+
+        if (decoder==null) {
+          throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "No payload decoder found for field: " + tinfo.field);
+        }
+
+        return new FloatPayloadValueSource(
+            tinfo.field,
+            tinfo.val,
+            tinfo.indexedField,
+            tinfo.indexedBytes.get(),
+            decoder,
+            payloadFunction,
+            defaultValueSource);
+      }
+    });
+
     addParser("true", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) {
@@ -726,7 +779,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
             return "exists";
           }
           @Override
-          protected boolean func(int doc, FunctionValues vals) {
+          protected boolean func(int doc, FunctionValues vals) throws IOException {
             return vals.exists(doc);
           }
         };
@@ -739,7 +792,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
         ValueSource vs = fp.parseValueSource();
         return new SimpleBoolFunction(vs) {
           @Override
-          protected boolean func(int doc, FunctionValues vals) {
+          protected boolean func(int doc, FunctionValues vals) throws IOException {
             return !vals.boolVal(doc);
           }
           @Override
@@ -761,7 +814,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
             return "and";
           }
           @Override
-          protected boolean func(int doc, FunctionValues[] vals) {
+          protected boolean func(int doc, FunctionValues[] vals) throws IOException {
             for (FunctionValues dv : vals)
               if (!dv.boolVal(doc)) return false;
             return true;
@@ -780,7 +833,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
             return "or";
           }
           @Override
-          protected boolean func(int doc, FunctionValues[] vals) {
+          protected boolean func(int doc, FunctionValues[] vals) throws IOException {
             for (FunctionValues dv : vals)
               if (dv.boolVal(doc)) return true;
             return false;
@@ -799,7 +852,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
             return "xor";
           }
           @Override
-          protected boolean func(int doc, FunctionValues[] vals) {
+          protected boolean func(int doc, FunctionValues[] vals) throws IOException {
             int nTrue=0, nFalse=0;
             for (FunctionValues dv : vals) {
               if (dv.boolVal(doc)) nTrue++;
@@ -822,10 +875,69 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
       }
     });
 
+    addParser("gt", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        ValueSource lhsValSource = fp.parseValueSource();
+        ValueSource rhsValSource = fp.parseValueSource();
+
+        return new SolrComparisonBoolFunction(lhsValSource, rhsValSource, "gt", (cmp) -> cmp > 0);
+      }
+    });
+
+    addParser("lt", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        ValueSource lhsValSource = fp.parseValueSource();
+        ValueSource rhsValSource = fp.parseValueSource();
+
+        return new SolrComparisonBoolFunction(lhsValSource, rhsValSource, "lt", (cmp) -> cmp < 0);
+      }
+    });
+
+    addParser("gte", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        ValueSource lhsValSource = fp.parseValueSource();
+        ValueSource rhsValSource = fp.parseValueSource();
+
+        return new SolrComparisonBoolFunction(lhsValSource, rhsValSource, "gte", (cmp) -> cmp >= 0);
+
+      }
+    });
+
+    addParser("lte", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        ValueSource lhsValSource = fp.parseValueSource();
+        ValueSource rhsValSource = fp.parseValueSource();
+
+        return new SolrComparisonBoolFunction(lhsValSource, rhsValSource, "lte", (cmp) -> cmp <= 0);
+      }
+    });
+
+    addParser("eq", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        ValueSource lhsValSource = fp.parseValueSource();
+        ValueSource rhsValSource = fp.parseValueSource();
+
+        return new SolrComparisonBoolFunction(lhsValSource, rhsValSource, "eq", (cmp) -> cmp == 0);
+      }
+    });
+
     addParser("def", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
         return new DefFunction(fp.parseValueSourceList());
+      }
+    });
+
+    addParser("concat", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        List<ValueSource> sources = fp.parseValueSourceList();
+        return new ConcatStringFunction(sources.toArray(new ValueSource[sources.size()]));
       }
     });
 
@@ -879,14 +991,21 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
       }
     });
 
-    /***
-     addParser("agg_stdev", new ValueSourceParser() {
-    @Override
-    public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-    return null;
-    }
+    addParser("agg_variance", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        return new VarianceAgg(fp.parseValueSource());
+      }
     });
-
+    
+    addParser("agg_stddev", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        return new StddevAgg(fp.parseValueSource());
+      }
+    });
+    
+    /***
      addParser("agg_multistat", new ValueSourceParser() {
     @Override
     public ValueSource parse(FunctionQParser fp) throws SyntaxError {
@@ -898,19 +1017,20 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
     addParser("agg_min", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new MinAgg(fp.parseValueSource());
+        return new MinMaxAgg("min", fp.parseValueSource());
       }
     });
 
     addParser("agg_max", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new MaxAgg(fp.parseValueSource());
+        return new MinMaxAgg("max", fp.parseValueSource());
       }
     });
 
     addParser("agg_percentile", new PercentileAgg.Parser());
-
+    
+    addParser("childfield", new ChildFieldValueSourceParser());
   }
 
   ///////////////////////////////////////////////////////////////////////////////
@@ -1069,7 +1189,7 @@ class DateValueSourceParser extends ValueSourceParser {
         }
 
         @Override
-        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) {
+        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
           return ms1 - bVals.longVal(doc);
         }
       };
@@ -1083,7 +1203,7 @@ class DateValueSourceParser extends ValueSourceParser {
         }
 
         @Override
-        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) {
+        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
           return aVals.longVal(doc) - ms2;
         }
       };
@@ -1097,7 +1217,7 @@ class DateValueSourceParser extends ValueSourceParser {
         }
 
         @Override
-        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) {
+        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
           return aVals.longVal(doc) - bVals.longVal(doc);
         }
       };
@@ -1215,7 +1335,7 @@ abstract class DoubleParser extends NamedParser {
     super(name);
   }
 
-  public abstract double func(int doc, FunctionValues vals);
+  public abstract double func(int doc, FunctionValues vals) throws IOException;
 
   @Override
   public ValueSource parse(FunctionQParser fp) throws SyntaxError {
@@ -1237,11 +1357,11 @@ abstract class DoubleParser extends NamedParser {
       final FunctionValues vals =  source.getValues(context, readerContext);
       return new DoubleDocValues(this) {
         @Override
-        public double doubleVal(int doc) {
+        public double doubleVal(int doc) throws IOException {
           return func(doc, vals);
         }
         @Override
-        public String toString(int doc) {
+        public String toString(int doc) throws IOException {
           return name() + '(' + vals.toString(doc) + ')';
         }
       };
@@ -1255,7 +1375,7 @@ abstract class Double2Parser extends NamedParser {
     super(name);
   }
 
-  public abstract double func(int doc, FunctionValues a, FunctionValues b);
+  public abstract double func(int doc, FunctionValues a, FunctionValues b) throws IOException;
 
   @Override
   public ValueSource parse(FunctionQParser fp) throws SyntaxError {
@@ -1285,12 +1405,12 @@ abstract class Double2Parser extends NamedParser {
       final FunctionValues aVals =  a.getValues(context, readerContext);
       final FunctionValues bVals =  b.getValues(context, readerContext);
       return new DoubleDocValues(this) {
-         @Override
-        public double doubleVal(int doc) {
+        @Override
+        public double doubleVal(int doc) throws IOException {
           return func(doc, aVals, bVals);
         }
         @Override
-        public String toString(int doc) {
+        public String toString(int doc) throws IOException {
           return name() + '(' + aVals.toString(doc) + ',' + bVals.toString(doc) + ')';
         }
       };
@@ -1356,7 +1476,7 @@ class BoolConstValueSource extends ConstNumberSource {
     return this.constant == other.constant;
   }
 
-    @Override
+  @Override
   public int getInt() {
     return constant ? 1 : 0;
   }

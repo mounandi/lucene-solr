@@ -17,6 +17,7 @@
 package org.apache.solr.response.transform;
 
 import java.io.IOException;
+import java.util.Set;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexableField;
@@ -39,6 +40,7 @@ import org.apache.solr.search.DocList;
 import org.apache.solr.search.QParser;
 import org.apache.solr.search.QueryWrapperFilter;
 import org.apache.solr.search.SyntaxError;
+import org.apache.solr.search.SolrDocumentFetcher;
 
 /**
  *
@@ -77,7 +79,7 @@ public class ChildDocTransformerFactory extends TransformerFactory {
 
     BitSetProducer parentsFilter = null;
     try {
-      Query parentFilterQuery = QParser.getParser( parentFilter, null, req).getQuery();
+      Query parentFilterQuery = QParser.getParser( parentFilter, req).getQuery();
       parentsFilter = new QueryBitSetProducer(new QueryWrapperFilter(parentFilterQuery));
     } catch (SyntaxError syntaxError) {
       throw new SolrException( ErrorCode.BAD_REQUEST, "Failed to create correct parent filter query" );
@@ -86,7 +88,7 @@ public class ChildDocTransformerFactory extends TransformerFactory {
     Query childFilterQuery = null;
     if(childFilter != null) {
       try {
-        childFilterQuery = QParser.getParser( childFilter, null, req).getQuery();
+        childFilterQuery = QParser.getParser( childFilter, req).getQuery();
       } catch (SyntaxError syntaxError) {
         throw new SolrException( ErrorCode.BAD_REQUEST, "Failed to create correct child filter query" );
       }
@@ -121,7 +123,7 @@ class ChildDocTransformer extends DocTransformer {
   }
 
   @Override
-  public void transform(SolrDocument doc, int docid, float score) {
+  public void transform(SolrDocument doc, int docid) {
 
     FieldType idFt = idField.getType();
     Object parentIdField = doc.getFirstValue(idField.getName());
@@ -135,11 +137,20 @@ class ChildDocTransformer extends DocTransformer {
       Query query = new ToChildBlockJoinQuery(parentQuery, parentsFilter);
       DocList children = context.getSearcher().getDocList(query, childFilterQuery, new Sort(), 0, limit);
       if(children.matches() > 0) {
+        SolrDocumentFetcher docFetcher = context.getSearcher().getDocFetcher();
+
+        Set<String> dvFieldsToReturn = docFetcher.getNonStoredDVs(true);
+        boolean shouldDecorateWithDVs = dvFieldsToReturn.size() > 0;
         DocIterator i = children.iterator();
+
         while(i.hasNext()) {
           Integer childDocNum = i.next();
           Document childDoc = context.getSearcher().doc(childDocNum);
-          SolrDocument solrChildDoc = DocsStreamer.getDoc(childDoc, schema);
+          SolrDocument solrChildDoc = DocsStreamer.convertLuceneDocToSolrDoc(childDoc, schema);
+
+          if (shouldDecorateWithDVs) {
+            docFetcher.decorateDocValueFields(solrChildDoc, childDocNum, dvFieldsToReturn);
+          }
 
           // TODO: future enhancement...
           // support an fl local param in the transformer, which is used to build

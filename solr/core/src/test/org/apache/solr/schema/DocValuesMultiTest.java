@@ -16,9 +16,11 @@
  */
 package org.apache.solr.schema;
 
-import org.apache.lucene.index.LeafReader;
+import java.io.IOException;
+
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.FieldInfos;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.core.SolrCore;
@@ -27,10 +29,8 @@ import org.apache.solr.util.RefCounted;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import java.io.IOException;
-
 public class DocValuesMultiTest extends SolrTestCaseJ4 {
-
+  
   @BeforeClass
   public static void beforeTests() throws Exception {
     initCore("solrconfig-basic.xml", "schema-docValuesMulti.xml");
@@ -55,6 +55,10 @@ public class DocValuesMultiTest extends SolrTestCaseJ4 {
 
   @Test
   public void testDocValues() throws IOException {
+
+    final DocValuesType expectedNumericDvType = Boolean.getBoolean(NUMERIC_POINTS_SYSPROP) ?
+      DocValuesType.SORTED_NUMERIC : DocValuesType.SORTED_SET;
+    
     assertU(adoc("id", "1", "floatdv", "4.5", "intdv", "-1", "intdv", "3",
         "stringdv", "value1", "stringdv", "value2",
         "booldv", "false", "booldv", "true"));
@@ -63,22 +67,22 @@ public class DocValuesMultiTest extends SolrTestCaseJ4 {
       final RefCounted<SolrIndexSearcher> searcherRef = core.openNewSearcher(true, true);
       final SolrIndexSearcher searcher = searcherRef.get();
       try {
-        final LeafReader reader = searcher.getLeafReader();
+        final LeafReader reader = searcher.getSlowAtomicReader();
         assertEquals(1, reader.numDocs());
         final FieldInfos infos = reader.getFieldInfos();
         assertEquals(DocValuesType.SORTED_SET, infos.fieldInfo("stringdv").getDocValuesType());
         assertEquals(DocValuesType.SORTED_SET, infos.fieldInfo("booldv").getDocValuesType());
-        assertEquals(DocValuesType.SORTED_SET, infos.fieldInfo("floatdv").getDocValuesType());
-        assertEquals(DocValuesType.SORTED_SET, infos.fieldInfo("intdv").getDocValuesType());
+        assertEquals(expectedNumericDvType, infos.fieldInfo("floatdv").getDocValuesType());
+        assertEquals(expectedNumericDvType, infos.fieldInfo("intdv").getDocValuesType());
 
         SortedSetDocValues dv = reader.getSortedSetDocValues("stringdv");
-        dv.setDocument(0);
+        assertEquals(0, dv.nextDoc());
         assertEquals(0, dv.nextOrd());
         assertEquals(1, dv.nextOrd());
         assertEquals(SortedSetDocValues.NO_MORE_ORDS, dv.nextOrd());
 
         dv = reader.getSortedSetDocValues("booldv");
-        dv.setDocument(0);
+        assertEquals(0, dv.nextDoc());
         assertEquals(0, dv.nextOrd());
         assertEquals(1, dv.nextOrd());
         assertEquals(SortedSetDocValues.NO_MORE_ORDS, dv.nextOrd());

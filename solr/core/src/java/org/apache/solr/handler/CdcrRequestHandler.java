@@ -16,6 +16,7 @@
  */
 package org.apache.solr.handler;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
@@ -24,37 +25,56 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.locks.Lock;
 
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.HttpSolrClient;
+import org.apache.solr.client.solrj.request.AbstractUpdateRequest;
 import org.apache.solr.client.solrj.request.QueryRequest;
+import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.ClusterState;
+import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.ZkCoreNodeProps;
 import org.apache.solr.common.cloud.ZkNodeProps;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.common.params.UpdateParams;
 import org.apache.solr.common.util.ExecutorUtil;
+import org.apache.solr.common.util.IOUtils;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.CloseHook;
 import org.apache.solr.core.PluginBag;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrRequestHandler;
+import org.apache.solr.request.SolrRequestInfo;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.update.CdcrUpdateLog;
+import org.apache.solr.update.SolrCoreState;
 import org.apache.solr.update.UpdateLog;
+import org.apache.solr.update.VersionInfo;
+import org.apache.solr.update.processor.DistributedUpdateProcessor;
 import org.apache.solr.util.DefaultSolrThreadFactory;
 import org.apache.solr.util.plugin.SolrCoreAware;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.solr.handler.admin.CoreAdminHandler.COMPLETED;
+import static org.apache.solr.handler.admin.CoreAdminHandler.FAILED;
+import static org.apache.solr.handler.admin.CoreAdminHandler.RESPONSE;
+import static org.apache.solr.handler.admin.CoreAdminHandler.RESPONSE_MESSAGE;
+import static org.apache.solr.handler.admin.CoreAdminHandler.RESPONSE_STATUS;
+import static org.apache.solr.handler.admin.CoreAdminHandler.RUNNING;
 
 /**
  * <p>
@@ -89,6 +109,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
   private SolrCore core;
   private String collection;
+  private String shard;
   private String path;
 
   private SolrParams updateLogSynchronizerConfiguration;
@@ -199,6 +220,18 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
         this.handleErrorsAction(req, rsp);
         break;
       }
+      case BOOTSTRAP: {
+        this.handleBootstrapAction(req, rsp);
+        break;
+      }
+      case BOOTSTRAP_STATUS:  {
+        this.handleBootstrapStatus(req, rsp);
+        break;
+      }
+      case CANCEL_BOOTSTRAP:  {
+        this.handleCancelBootstrap(req, rsp);
+        break;
+      }
       default: {
         throw new RuntimeException("Unknown action: " + action);
       }
@@ -211,9 +244,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
   public void inform(SolrCore core) {
     this.core = core;
     collection = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+    shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
 
     // Make sure that the core is ZKAware
-    if (!core.getCoreDescriptor().getCoreContainer().isZooKeeperAware()) {
+    if (!core.getCoreContainer().isZooKeeperAware()) {
       throw new SolrException(SolrException.ErrorCode.SERVER_ERROR,
           "Solr instance is not running in SolrCloud mode.");
     }
@@ -290,9 +324,7 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
       @Override
       public void preClose(SolrCore core) {
-        String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
-        String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
-        log.info("Solr core is being closed - shutting down CDCR handler @ {}:{}", collectionName, shard);
+        log.info("Solr core is being closed - shutting down CDCR handler @ {}:{}", collection, shard);
 
         updateLogSynchronizer.shutdown();
         replicatorManager.shutdown();
@@ -359,14 +391,15 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
    */
   private void handleCollectionCheckpointAction(SolrQueryRequest req, SolrQueryResponse rsp)
       throws IOException, SolrServerException {
-    ZkController zkController = core.getCoreDescriptor().getCoreContainer().getZkController();
+    ZkController zkController = core.getCoreContainer().getZkController();
     try {
       zkController.getZkStateReader().forceUpdateCollection(collection);
     } catch (Exception e) {
       log.warn("Error when updating cluster state", e);
     }
     ClusterState cstate = zkController.getClusterState();
-    Collection<Slice> shards = cstate.getActiveSlices(collection);
+    DocCollection docCollection = cstate.getCollectionOrNull(collection);
+    Collection<Slice> shards = docCollection == null? null : docCollection.getActiveSlices();
 
     ExecutorService parallelExecutor = ExecutorUtil.newMDCAwareCachedThreadPool(new DefaultSolrThreadFactory("parallelCdcrExecutor"));
 
@@ -409,10 +442,20 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     }
 
     UpdateLog ulog = core.getUpdateHandler().getUpdateLog();
+    VersionInfo versionInfo = ulog.getVersionInfo();
     try (UpdateLog.RecentUpdates recentUpdates = ulog.getRecentUpdates()) {
-      List<Long> versions = recentUpdates.getVersions(1);
-      long lastVersion = versions.isEmpty() ? -1 : Math.abs(versions.get(0));
-      rsp.add(CdcrParams.CHECKPOINT, lastVersion);
+      long maxVersionFromRecent = recentUpdates.getMaxRecentVersion();
+      long maxVersionFromIndex = versionInfo.getMaxVersionFromIndex(req.getSearcher());
+      log.info("Found maxVersionFromRecent {} maxVersionFromIndex {}", maxVersionFromRecent, maxVersionFromIndex);
+      // there is no race with ongoing bootstrap because we don't expect any updates to come from the source
+      long maxVersion = Math.max(maxVersionFromIndex, maxVersionFromRecent);
+      if (maxVersion == 0L) {
+        maxVersion = -1;
+      }
+      rsp.add(CdcrParams.CHECKPOINT, maxVersion);
+    } catch (IOException e) {
+      throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, "Action '" + CdcrParams.CdcrAction.SHARDCHECKPOINT +
+          "' could not read max version");
     }
   }
 
@@ -574,9 +617,203 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
     rsp.add(CdcrParams.ERRORS, hosts);
   }
 
+  private void handleBootstrapAction(SolrQueryRequest req, SolrQueryResponse rsp) throws IOException, SolrServerException {
+    String collectionName = core.getCoreDescriptor().getCloudDescriptor().getCollectionName();
+    String shard = core.getCoreDescriptor().getCloudDescriptor().getShardId();
+    if (!leaderStateManager.amILeader()) {
+      log.warn("Action {} sent to non-leader replica @ {}:{}", CdcrParams.CdcrAction.BOOTSTRAP, collectionName, shard);
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Action " + CdcrParams.CdcrAction.BOOTSTRAP +
+          " sent to non-leader replica");
+    }
+
+    Runnable runnable = () -> {
+      Lock recoveryLock = req.getCore().getSolrCoreState().getRecoveryLock();
+      boolean locked = recoveryLock.tryLock();
+      SolrCoreState coreState = core.getSolrCoreState();
+      try {
+        if (!locked)  {
+          handleCancelBootstrap(req, rsp);
+        } else if (leaderStateManager.amILeader())  {
+          coreState.setCdcrBootstrapRunning(true);
+          //running.set(true);
+          String masterUrl = req.getParams().get(ReplicationHandler.MASTER_URL);
+          BootstrapCallable bootstrapCallable = new BootstrapCallable(masterUrl, core);
+          coreState.setCdcrBootstrapCallable(bootstrapCallable);
+          Future<Boolean> bootstrapFuture = core.getCoreContainer().getUpdateShardHandler().getRecoveryExecutor()
+              .submit(bootstrapCallable);
+          coreState.setCdcrBootstrapFuture(bootstrapFuture);
+          try {
+            bootstrapFuture.get();
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Bootstrap was interrupted", e);
+          } catch (ExecutionException e) {
+            log.error("Bootstrap operation failed", e);
+          }
+        } else  {
+          log.error("Action {} sent to non-leader replica @ {}:{}. Aborting bootstrap.", CdcrParams.CdcrAction.BOOTSTRAP, collectionName, shard);
+        }
+      } finally {
+        if (locked) {
+          coreState.setCdcrBootstrapRunning(false);
+          recoveryLock.unlock();
+        }
+      }
+    };
+
+    try {
+      core.getCoreContainer().getUpdateShardHandler().getUpdateExecutor().submit(runnable);
+      rsp.add(RESPONSE_STATUS, "submitted");
+    } catch (RejectedExecutionException ree)  {
+      // no problem, we're probably shutting down
+      rsp.add(RESPONSE_STATUS, "failed");
+    }
+  }
+
+  private void handleCancelBootstrap(SolrQueryRequest req, SolrQueryResponse rsp) {
+    BootstrapCallable callable = (BootstrapCallable)core.getSolrCoreState().getCdcrBootstrapCallable();
+    IOUtils.closeQuietly(callable);
+    rsp.add(RESPONSE_STATUS, "cancelled");
+  }
+
+  private void handleBootstrapStatus(SolrQueryRequest req, SolrQueryResponse rsp) throws IOException, SolrServerException {
+    SolrCoreState coreState = core.getSolrCoreState();
+    if (coreState.getCdcrBootstrapRunning()) {
+      rsp.add(RESPONSE_STATUS, RUNNING);
+      return;
+    }
+
+    Future<Boolean> future = coreState.getCdcrBootstrapFuture();
+    BootstrapCallable callable = (BootstrapCallable)coreState.getCdcrBootstrapCallable();
+    if (future == null) {
+      rsp.add(RESPONSE_STATUS, "notfound");
+      rsp.add(RESPONSE_MESSAGE, "No bootstrap found in running, completed or failed states");
+    } else if (future.isCancelled() || callable.isClosed()) {
+      rsp.add(RESPONSE_STATUS, "cancelled");
+    } else if (future.isDone()) {
+      // could be a normal termination or an exception
+      try {
+        Boolean result = future.get();
+        if (result) {
+          rsp.add(RESPONSE_STATUS, COMPLETED);
+        } else {
+          rsp.add(RESPONSE_STATUS, FAILED);
+        }
+      } catch (InterruptedException e) {
+        // should not happen?
+      } catch (ExecutionException e) {
+        rsp.add(RESPONSE_STATUS, FAILED);
+        rsp.add(RESPONSE, e);
+      } catch (CancellationException ce) {
+        rsp.add(RESPONSE_STATUS, FAILED);
+        rsp.add(RESPONSE_MESSAGE, "Bootstrap was cancelled");
+      }
+    } else {
+      rsp.add(RESPONSE_STATUS, RUNNING);
+    }
+  }
+
+  private static class BootstrapCallable implements Callable<Boolean>, Closeable {
+    private final String masterUrl;
+    private final SolrCore core;
+    private volatile boolean closed = false;
+
+    BootstrapCallable(String masterUrl, SolrCore core) {
+      this.masterUrl = masterUrl;
+      this.core = core;
+    }
+
+    @Override
+    public void close() throws IOException {
+      closed = true;
+      SolrRequestHandler handler = core.getRequestHandler(ReplicationHandler.PATH);
+      ReplicationHandler replicationHandler = (ReplicationHandler) handler;
+      replicationHandler.abortFetch();
+    }
+
+    public boolean isClosed() {
+      return closed;
+    }
+
+    @Override
+    public Boolean call() throws Exception {
+      boolean success = false;
+      UpdateLog ulog = core.getUpdateHandler().getUpdateLog();
+      // we start buffering updates as a safeguard however we do not expect
+      // to receive any updates from the source during bootstrap
+      ulog.bufferUpdates();
+      try {
+        commitOnLeader(masterUrl);
+        // use rep handler directly, so we can do this sync rather than async
+        SolrRequestHandler handler = core.getRequestHandler(ReplicationHandler.PATH);
+        ReplicationHandler replicationHandler = (ReplicationHandler) handler;
+
+        if (replicationHandler == null) {
+          throw new SolrException(SolrException.ErrorCode.SERVICE_UNAVAILABLE,
+              "Skipping recovery, no " + ReplicationHandler.PATH + " handler found");
+        }
+
+        ModifiableSolrParams solrParams = new ModifiableSolrParams();
+        solrParams.set(ReplicationHandler.MASTER_URL, masterUrl);
+        // we do not want the raw tlog files from the source
+        solrParams.set(ReplicationHandler.TLOG_FILES, false);
+
+        success = replicationHandler.doFetch(solrParams, false).getSuccessful();
+
+        // this is required because this callable can race with HttpSolrCall#destroy
+        // which clears the request info.
+        // Applying buffered updates fails without the following line because LogReplayer
+        // also tries to set request info and fails with AssertionError
+        SolrRequestInfo.clearRequestInfo();
+
+        Future<UpdateLog.RecoveryInfo> future = ulog.applyBufferedUpdates();
+        if (future == null) {
+          // no replay needed
+          log.info("No replay needed.");
+        } else {
+          log.info("Replaying buffered documents.");
+          // wait for replay
+          UpdateLog.RecoveryInfo report = future.get();
+          if (report.failed) {
+            SolrException.log(log, "Replay failed");
+            throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, "Replay failed");
+          }
+        }
+        return success;
+      } finally {
+        if (closed || !success) {
+          // we cannot apply the buffer in this case because it will introduce newer versions in the
+          // update log and then the source cluster will get those versions via collectioncheckpoint
+          // causing the versions in between to be completely missed
+          boolean dropped = ulog.dropBufferedUpdates();
+          assert dropped;
+        }
+      }
+    }
+
+    private void commitOnLeader(String leaderUrl) throws SolrServerException,
+        IOException {
+      try (HttpSolrClient client = new HttpSolrClient.Builder(leaderUrl)
+          .withConnectionTimeout(30000)
+          .build()) {
+        UpdateRequest ureq = new UpdateRequest();
+        ureq.setParams(new ModifiableSolrParams());
+        ureq.getParams().set(DistributedUpdateProcessor.COMMIT_END_POINT, true);
+        ureq.getParams().set(UpdateParams.OPEN_SEARCHER, false);
+        ureq.setAction(AbstractUpdateRequest.ACTION.COMMIT, false, true).process(
+            client);
+      }
+    }
+  }
+
   @Override
   public String getDescription() {
     return "Manage Cross Data Center Replication";
+  }
+
+  @Override
+  public Category getCategory() {
+    return Category.REPLICATION;
   }
 
   /**
@@ -595,9 +832,10 @@ public class CdcrRequestHandler extends RequestHandlerBase implements SolrCoreAw
 
     @Override
     public Long call() throws Exception {
-      try (HttpSolrClient server = new HttpSolrClient.Builder(baseUrl).build()) {
-        server.setConnectionTimeout(15000);
-        server.setSoTimeout(60000);
+      try (HttpSolrClient server = new HttpSolrClient.Builder(baseUrl)
+          .withConnectionTimeout(15000)
+          .withSocketTimeout(60000)
+          .build()) {
 
         ModifiableSolrParams params = new ModifiableSolrParams();
         params.set(CommonParams.ACTION, CdcrParams.CdcrAction.SHARDCHECKPOINT.toString());

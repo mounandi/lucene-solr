@@ -20,7 +20,9 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
@@ -35,6 +37,7 @@ import org.apache.solr.common.params.HighlightParams;
 import org.apache.solr.handler.component.HighlightComponent;
 import org.apache.solr.handler.component.ResponseBuilder;
 import org.apache.solr.handler.component.SearchComponent;
+import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.search.DocSet;
@@ -43,10 +46,6 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-/**
- * Tests some basic functionality of Solr while demonstrating good
- * Best Practices for using AbstractSolrTestCase
- */
 public class HighlighterTest extends SolrTestCaseJ4 {
 
   private static String LONG_TEXT = "a long days night this should be a piece of text which is is is is is is is is is is is is is is is is is is is " +
@@ -91,6 +90,25 @@ public class HighlighterTest extends SolrTestCaseJ4 {
   }
 
   @Test
+  public void testMethodPostings() {
+    String field = "t_text";
+    assertU(adoc(field, LONG_TEXT,
+        "id", "1"));
+    assertU(commit());
+
+    try {
+      assertQ("Tried PostingsSolrHighlighter but failed due to offsets not in postings",
+          req("q", "long", "hl.method", "postings", "df", field, "hl", "true"));
+      fail("Did not encounter exception for no offsets");
+    } catch (Exception e) {
+      assertTrue("Cause should be illegal argument", e.getCause() instanceof IllegalArgumentException);
+      assertTrue("Should warn no offsets", e.getCause().getMessage().contains("indexed without offsets"));
+    }
+    // note: the default schema.xml has no offsets in postings to test the PostingsHighlighter. Leave that for another
+    //  test class.
+  }
+
+  @Test
   public void testMergeContiguous() throws Exception {
     HashMap<String,String> args = new HashMap<>();
     args.put(HighlightParams.HIGHLIGHT, "true");
@@ -99,8 +117,9 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put(HighlightParams.SNIPPETS, String.valueOf(4));
     args.put(HighlightParams.FRAGSIZE, String.valueOf(40));
     args.put(HighlightParams.MERGE_CONTIGUOUS_FRAGMENTS, "true");
+    args.put(HighlightParams.METHOD, "original"); // test works; no complaints
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     String input = "this is some long text.  It has the word long in many places.  In fact, it has long on some different fragments.  " +
             "Let us see what happens to long in this case.";
     String gold = "this is some <em>long</em> text.  It has the word <em>long</em> in many places.  In fact, it has <em>long</em> on some different fragments.  " +
@@ -126,7 +145,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put(HighlightParams.MERGE_CONTIGUOUS_FRAGMENTS, "false");
     args.put("f.t_text." + HighlightParams.MERGE_CONTIGUOUS_FRAGMENTS, "false");
     sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     assertQ("Merge Contiguous",
         sumLRF.makeRequest("t_text:long"),
         "//lst[@name='highlighting']/lst[@name='1']",
@@ -146,7 +165,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.fl", "tv_text");
     args.put("hl.snippets", "2");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard",0,200,args);
+      "",0,200,args);
     
     assertU(adoc("tv_text", LONG_TEXT, 
                  "id", "1"));
@@ -167,7 +186,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl", "true");
     args.put("hl.fl", "tv_no_off_text");
 
-    TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory("", 0, 200, args);
 
     assertU(adoc("tv_no_off_text", "Crackerjack Cameron", "id", "1"));
     assertU(commit());
@@ -210,7 +229,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.fl", "tv_mv_text");
     args.put("hl.snippets", "2");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard",0,200,args);
+      "",0,200,args);
     
     assertU(adoc("tv_mv_text", LONG_TEXT, 
                  "tv_mv_text", LONG_TEXT, 
@@ -237,7 +256,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.fl", "tv_mv_text");
     args.put("hl.snippets", "2");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard",0,200,args);
+      "",0,200,args);
 
     String shortText = "short";
     assertU(adoc("tv_mv_text", shortText,
@@ -263,7 +282,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("qf", "tv_text");
     args.put("q.alt", "*:*");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "dismax",0,200,args);
+      "/dismax",0,200,args);
     
     assertU(adoc("tv_text", "a long day's night", "id", "1"));
     assertU(commit());
@@ -290,7 +309,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.fl", "textgap");
     args.put("df", "textgap");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
     assertU(adoc("textgap", "first entry hasnt queryword",
         "textgap", "second entry has queryword long",
@@ -312,7 +331,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.fl", "textgap");
     args.put("df", "textgap");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-        "standard", 0, 200, args);
+        "", 0, 200, args);
     
     assertU(adoc("textgap", "first entry has one word foo", 
         "textgap", "second entry has both words foo bar",
@@ -351,7 +370,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("df", "t_text");
     args.put("hl.fl", "");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
     assertU(adoc("t_text", "a long day's night", "id", "1"));
     assertU(commit());
@@ -373,7 +392,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl", "false");
     args.put("hl.fl", "t_text");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
     assertU(adoc("t_text", "a long day's night", "id", "1"));
     assertU(commit());
@@ -391,7 +410,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl", "true");
     args.put("hl.fl", "t_text tv_text");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
     assertU(adoc("t_text", "a long day's night", "id", "1",
                  "tv_text", "a long night's day"));
@@ -418,7 +437,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
      args.put("hl.fl", "t_text1 t_text2");
      
      TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-           "standard", 0, 200, args);
+           "", 0, 200, args);
      // default should highlight both random and words in both fields
      assertQ("Test Default",
            sumLRF.makeRequest("t_text1:random OR t_text2:words"),
@@ -430,7 +449,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
      // requireFieldMatch=true - highlighting should only occur if term matched in that field
      args.put("hl.requireFieldMatch", "true");
      sumLRF = h.getRequestFactory(
-           "standard", 0, 200, args);
+           "", 0, 200, args);
      assertQ("Test RequireFieldMatch",
          sumLRF.makeRequest("t_text1:random OR t_text2:words"),
          "//lst[@name='highlighting']/lst[@name='1']",
@@ -444,7 +463,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
      assertU(delI("1"));
      assertU(commit());
      sumLRF = h.getRequestFactory(
-           "standard", 0, 200, args);
+           "", 0, 200, args);
      assertQ("Test RequireFieldMatch on un-optimized index",
            sumLRF.makeRequest("t_text1:random OR t_text2:words"),
            "//lst[@name='highlighting']/lst[@name='2']",
@@ -463,7 +482,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.simple.pre","<B>");
     args.put("hl.simple.post", "</B>");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
     assertU(adoc("t_text", "a long days night", "id", "1"));
     assertU(commit());
@@ -478,7 +497,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("f.t_text.hl.simple.pre", "<I>");
     args.put("f.t_text.hl.simple.post", "</I>");
     sumLRF = h.getRequestFactory(
-          "standard", 0, 200, args);
+          "", 0, 200, args);
     assertQ("Basic summarization",
           sumLRF.makeRequest("t_text:long"),
           "//lst[@name='highlighting']/lst[@name='1']",
@@ -494,7 +513,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl", "true");
     args.put("hl.fl", "tv_text");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
 
     String text = 
@@ -518,7 +537,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     final String field = random().nextBoolean() ? "t_text" : "tv_text";
     args.put("hl.fl", field);
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
 
     assertU(adoc(field, LONG_TEXT, "id", "1"));
@@ -530,14 +549,14 @@ public class HighlighterTest extends SolrTestCaseJ4 {
             "//lst[@name='1']/arr[count(str)=1]"
             );
     args.put("hl.maxAnalyzedChars", "20");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("token at end of text",
         sumLRF.makeRequest(field + ":disjoint"),
         "//lst[@name='highlighting']/lst[@name='1']",
         "//lst[@name='1'][not(*)]"
     );
     args.put("hl.maxAnalyzedChars", "-1");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("token at start of text",
         sumLRF.makeRequest(field + ":disjoint"),
         "//lst[@name='highlighting']/lst[@name='1']",
@@ -579,7 +598,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.regex.pattern", "[-\\w ,\"']{20,200}");
     args.put("hl.regex.slop", ".9");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
     String t = "This is an example of a sentence. Another example \"sentence\" with " +
       "special characters\nand a line-break! Miscellaneous character like ^ are " +
@@ -598,7 +617,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
             );
     // try with some punctuation included
     args.put("hl.regex.pattern", "[-\\w ,^/\\n\"']{20,200}");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("regex fragmenter 2",
             sumLRF.makeRequest("t_text:example"),
             "//lst[@name='highlighting']/lst[@name='1']",
@@ -621,7 +640,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
      args.put("hl", "true");
      args.put("hl.fl", "tv_text");
      TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-       "standard", 0, 200, args);
+       "", 0, 200, args);
      assertQ("Basic summarization",
            sumLRF.makeRequest("tv_text:long"),
            "//lst[@name='highlighting']/lst[@name='1']",
@@ -631,7 +650,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
      // 25
      args.put("hl.fragsize","25");
      sumLRF = h.getRequestFactory(
-           "standard", 0, 200, args);
+           "", 0, 200, args);
      assertQ("Basic summarization",
            sumLRF.makeRequest("tv_text:long"),
            "//lst[@name='highlighting']/lst[@name='1']",
@@ -641,7 +660,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
      // 0 - NullFragmenter
      args.put("hl.fragsize","0");
      sumLRF = h.getRequestFactory(
-           "standard", 0, 200, args);
+           "", 0, 200, args);
      assertQ("Basic summarization",
            sumLRF.makeRequest("tv_text:long"),
            "//lst[@name='highlighting']/lst[@name='1']",
@@ -665,7 +684,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.fragsize","0");
     args.put("hl.fl", "t_text");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
 
     // no alternate
     assertQ("Alternate summarization",
@@ -676,7 +695,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
 
     // with an alternate
     args.put("hl.alternateField", "foo_t");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("Alternate summarization",
             sumLRF.makeRequest("tv_text:keyword"),
             "//lst[@name='highlighting']/lst[@name='1' and count(*)=1]",
@@ -686,7 +705,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     // with an alternate + max length
     args.put("hl.alternateField", "t_text");
     args.put("hl.maxAlternateFieldLength", "15");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("Alternate summarization",
             sumLRF.makeRequest("tv_text:keyword"),
             "//lst[@name='highlighting']/lst[@name='1' and count(*)=1]",
@@ -696,7 +715,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     // with a non-existing alternate field + max length
     args.put("hl.alternateField", "NonExistingField");
     args.put("hl.maxAlternateFieldLength", "15");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("Alternate summarization",
             sumLRF.makeRequest("tv_text:keyword"),
             "//lst[@name='highlighting']/lst[@name='1' and count(*)=1]",
@@ -725,7 +744,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.alternateField", "tv_text");
     args.put("hl.maxAlternateFieldLength", "39");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     assertQ("Alternate summarization with highlighting",
             sumLRF.makeRequest("tv_text:keyword"),
             "//lst[@name='highlighting']/lst[@name='1' and count(*)=1]",
@@ -742,7 +761,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     // With hl.requireFieldMatch, will not highlight but fall back to plain-text alternate
     args.put("hl.requireFieldMatch", "true");
     sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     assertQ("Alternate summarization with highlighting, requireFieldMatch",
             sumLRF.makeRequest("other_t:keyword"),
             "//lst[@name='highlighting']/lst[@name='1' and count(*)=1]",
@@ -755,7 +774,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.remove("hl.alternateField");
     args.put("f.t_text.hl.alternateField", "tv_text");
     args.put("f.t_text.hl.maxAlternateFieldLength", "0");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("Alternate summarization with highlighting",
             sumLRF.makeRequest("tv_text:keyword"),
             "//lst[@name='highlighting']/lst[@name='1' and count(*)=1]",
@@ -763,11 +782,11 @@ public class HighlighterTest extends SolrTestCaseJ4 {
             );
 
     // Prove fallback highlighting works also with FVH
-    args.put("hl.useFastVectorHighlighter", "true");
+    args.put("hl.method", "fastVector");
     args.put("hl.tag.pre", "<fvhpre>");
     args.put("hl.tag.post", "</fvhpost>");
     args.put("f.t_text.hl.maxAlternateFieldLength", "18");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("Alternate summarization with highlighting using FVH",
             sumLRF.makeRequest("tv_text:keyword"),
             "//lst[@name='highlighting']/lst[@name='1' and count(*)=1]",
@@ -776,7 +795,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
 
     // Prove it is possible to turn off highlighting of alternate field
     args.put("hl.highlightAlternate", "false");
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     assertQ("Alternate summarization without highlighting",
             sumLRF.makeRequest("tv_text:keyword"),
             "//lst[@name='highlighting']/lst[@name='1' and count(*)=1]",
@@ -794,7 +813,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.usePhraseHighlighter", "false");
 
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
 
     // String borrowed from Lucene's HighlighterTest
     String t = "This piece of text refers to Kennedy at the beginning then has a longer piece of text that is very long in the middle and finally ends with another reference to Kennedy";
@@ -824,7 +843,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     // now check if Lucene-794 highlighting works as expected
     args.put("hl.usePhraseHighlighter", "true");
 
-    sumLRF = h.getRequestFactory("standard", 0, 200, args);
+    sumLRF = h.getRequestFactory("", 0, 200, args);
     
     // check phrase highlighting
     assertQ("Phrase highlighting - Lucene-794",
@@ -852,11 +871,13 @@ public class HighlighterTest extends SolrTestCaseJ4 {
         "text", "test", // static not stored
         "foo_s", "test", // dynamic stored
         "foo_sI", "test", // dynamic not stored
+        "bar_s", "test", // dynamic stored
+        "bar_sI", "test", // dynamic not stored
         "weight", "1.0")); // stored but not text
     assertU(commit());
     assertU(optimize());
 
-    TestHarness.LocalRequestFactory lrf = h.getRequestFactory("standard", 0,
+    TestHarness.LocalRequestFactory lrf = h.getRequestFactory("", 0,
         10, args);
 
     SolrQueryRequest request = lrf.makeRequest("test");
@@ -872,7 +893,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     request.close();
 
     args.put("hl.fl", "foo_*");
-    lrf = h.getRequestFactory("standard", 0, 10, args);
+    lrf = h.getRequestFactory("", 0, 10, args);
     request = lrf.makeRequest("test");
     highlighter = HighlightComponent.getHighlighter(h.getCore());
     highlightFieldNames = Arrays.asList(highlighter.getHighlightFields(null,
@@ -882,6 +903,21 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     assertEquals("Expected to highlight on field \"foo_s\"", "foo_s",
         highlightFieldNames.get(0));
     request.close();
+
+    // SOLR-5127
+    args.put("hl.fl", (random().nextBoolean() ? "foo_*,bar_*" : "bar_*,foo_*"));
+    lrf = h.getRequestFactory("", 0, 10, args);
+    // hl.fl ordering need not be preserved in output
+    final Set<String> highlightedSetExpected = new HashSet<String>();
+    highlightedSetExpected.add("foo_s");
+    highlightedSetExpected.add("bar_s");
+    try (LocalSolrQueryRequest localRequest = lrf.makeRequest("test")) {
+      highlighter = HighlightComponent.getHighlighter(h.getCore());
+      final Set<String> highlightedSetActual = new HashSet<String>(
+          Arrays.asList(highlighter.getHighlightFields(null,
+              localRequest, new String[] {})));
+      assertEquals(highlightedSetExpected, highlightedSetActual);
+    }
   }
 
   @Test
@@ -895,7 +931,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.usePhraseHighlighter", "true");
     args.put("hl.highlightMultiTerm", "true");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
     assertU(adoc("t_text", "a long day's night", "id", "1"));
     assertU(commit());
@@ -919,7 +955,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
     args.put("hl.usePhraseHighlighter", "true");
     args.put("hl.highlightMultiTerm", "true");
     TestHarness.LocalRequestFactory sumLRF = h.getRequestFactory(
-      "standard", 0, 200, args);
+      "", 0, 200, args);
     
     assertU(adoc("t_text", "a long day's night", "id", "1"));
     assertU(commit());

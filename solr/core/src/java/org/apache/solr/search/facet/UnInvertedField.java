@@ -97,8 +97,10 @@ public class UnInvertedField extends DocTermOrds {
   long memsz;
   final AtomicLong use = new AtomicLong(); // number of uses
 
+  /* The number of documents holding the term {@code maxDocs = maxTermCounts[termNum]}. */
   int[] maxTermCounts = new int[1024];
 
+  /* termNum -> docIDs for big terms. */
   final Map<Integer,TopTerm> bigTerms = new LinkedHashMap<>();
 
   private SolrIndexSearcher.DocsEnumState deState;
@@ -111,6 +113,12 @@ public class UnInvertedField extends DocTermOrds {
     searcher = null;
   }
 
+  /**
+   * Called for each term in the field being uninverted.
+   * Collects {@link #maxTermCounts} for all bigTerms as well as storing them in {@link #bigTerms}.
+   * @param te positioned at the current term.
+   * @param termNum the ID/pointer/ordinal of the current term. Monotonically increasing between calls.
+   */
   @Override
   protected void visitTerm(TermsEnum te, int termNum) throws IOException {
 
@@ -136,7 +144,7 @@ public class UnInvertedField extends DocTermOrds {
       if (deState == null) {
         deState = new SolrIndexSearcher.DocsEnumState();
         deState.fieldName = field;
-        deState.liveDocs = searcher.getLeafReader().getLiveDocs();
+        deState.liveDocs = searcher.getSlowAtomicReader().getLiveDocs();
         deState.termsEnum = te;  // TODO: check for MultiTermsEnum in SolrIndexSearcher could now fail?
         deState.postingsEnum = postingsEnum;
         deState.minSetSizeCached = maxTermDocFreq;
@@ -164,10 +172,6 @@ public class UnInvertedField extends DocTermOrds {
     }
     if (maxTermCounts != null)
       sz += maxTermCounts.length * 4;
-    if (indexedTermsArray != null) {
-      // assume 8 byte references?
-      sz += 8+8+8+8+(indexedTermsArray.length<<3)+sizeOfIndexedStrings;
-    }
     memsz = sz;
     return sz;
   }
@@ -239,7 +243,7 @@ public class UnInvertedField extends DocTermOrds {
 
     public TermsEnum getTermsEnum() throws IOException {
       if (te == null) {
-        te = getOrdTermsEnum(searcher.getLeafReader());
+        te = getOrdTermsEnum(searcher.getSlowAtomicReader());
       }
       return te;
     }
@@ -258,8 +262,8 @@ public class UnInvertedField extends DocTermOrds {
       if (termInstances > 0) {
         int code = index[doc];
 
-        if ((code & 0xff)==1) {
-          int pos = code>>>8;
+        if ((code & 0x80000000)!=0) {
+          int pos = code & 0x7fffffff;
           int whichArray = (doc >>> 16) & 0xff;
           byte[] arr = tnums[whichArray];
           int tnum = 0;
@@ -305,7 +309,7 @@ public class UnInvertedField extends DocTermOrds {
 
 
 
-  private void getCounts(FacetFieldProcessorUIF processor, CountSlotAcc counts) throws IOException {
+  private void getCounts(FacetFieldProcessorByArrayUIF processor, CountSlotAcc counts) throws IOException {
     DocSet docs = processor.fcontext.base;
     int baseSize = docs.size();
     int maxDoc = searcher.maxDoc();
@@ -344,8 +348,8 @@ public class UnInvertedField extends DocTermOrds {
         int doc = iter.nextDoc();
         int code = index[doc];
 
-        if ((code & 0xff) == 1) {
-          int pos = code >>> 8;
+        if ((code & 0x80000000)!=0) {
+          int pos = code & 0x7fffffff;
           int whichArray = (doc >>> 16) & 0xff;
           byte[] arr = tnums[whichArray];
           int tnum = 0;
@@ -397,7 +401,7 @@ public class UnInvertedField extends DocTermOrds {
 
 
 
-  public void collectDocs(FacetFieldProcessorUIF processor) throws IOException {
+  public void collectDocs(FacetFieldProcessorByArrayUIF processor) throws IOException {
     if (processor.collectAcc==null && processor.allBucketsAcc == null && processor.startTermIndex == 0 && processor.endTermIndex >= numTermsInField) {
       getCounts(processor, processor.countAcc);
       return;
@@ -408,7 +412,7 @@ public class UnInvertedField extends DocTermOrds {
 
   // called from FieldFacetProcessor
   // TODO: do a callback version that can be specialized!
-  public void collectDocsGeneric(FacetFieldProcessorUIF processor) throws IOException {
+  public void collectDocsGeneric(FacetFieldProcessorByArrayUIF processor) throws IOException {
     use.incrementAndGet();
 
     int startTermIndex = processor.startTermIndex;
@@ -469,8 +473,8 @@ public class UnInvertedField extends DocTermOrds {
 
         int code = index[doc];
 
-        if ((code & 0xff)==1) {
-          int pos = code>>>8;
+        if ((code & 0x80000000)!=0) {
+          int pos = code & 0x7fffffff;
           int whichArray = (doc >>> 16) & 0xff;
           byte[] arr = tnums[whichArray];
           int tnum = 0;

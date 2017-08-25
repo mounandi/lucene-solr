@@ -26,18 +26,16 @@ import java.util.function.BiConsumer;
 import java.util.function.LongFunction;
 
 import org.apache.lucene.document.DoublePoint;
-import org.apache.lucene.document.FieldType.LegacyNumericType;
 import org.apache.lucene.document.FloatPoint;
 import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.index.BinaryDocValues;
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.DocValuesType;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.MultiDocValues;
 import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.index.OrdinalMap;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
@@ -103,58 +101,12 @@ public final class JoinUtil {
       termsWithScoreCollector = GenericTermsCollector.createCollectorMV(mvFunction, scoreMode);
     } else {
       Function<BinaryDocValues> svFunction = DocValuesTermsCollector.binaryDocValues(fromField);
-      termsWithScoreCollector =  GenericTermsCollector.createCollectorSV(svFunction, scoreMode);
+      termsWithScoreCollector = GenericTermsCollector.createCollectorSV(svFunction, scoreMode);
     }
     
-    return createJoinQuery(multipleValuesPerDocument, toField, fromQuery, fromSearcher, scoreMode,
-        termsWithScoreCollector);
-    
+    return createJoinQuery(multipleValuesPerDocument, toField, fromQuery, fromField, fromSearcher, scoreMode, termsWithScoreCollector);
   }
   
-  /**
-   * @deprecated Because {@link LegacyNumericType} is deprecated, instead use {@link #createJoinQuery(String, boolean, String, Class, Query, IndexSearcher, ScoreMode)}
-   *
-   * Method for query time joining for numeric fields. It supports multi- and single- values longs and ints. 
-   * All considerations from {@link JoinUtil#createJoinQuery(String, boolean, String, Query, IndexSearcher, ScoreMode)} are applicable here too,
-   * though memory consumption might be higher.
-   * <p>
-   *
-   * @param fromField                 The from field to join from
-   * @param multipleValuesPerDocument Whether the from field has multiple terms per document
-   *                                  when true fromField might be {@link DocValuesType#SORTED_NUMERIC},
-   *                                  otherwise fromField should be {@link DocValuesType#NUMERIC}
-   * @param toField                   The to field to join to, should be {@link org.apache.lucene.document.LegacyIntField} or {@link org.apache.lucene.document.LegacyLongField}
-   * @param numericType               either {@link org.apache.lucene.document.FieldType.LegacyNumericType#INT} or {@link org.apache.lucene.document.FieldType.LegacyNumericType#LONG}, it should correspond to fromField and toField types
-   * @param fromQuery                 The query to match documents on the from side
-   * @param fromSearcher              The searcher that executed the specified fromQuery
-   * @param scoreMode                 Instructs how scores from the fromQuery are mapped to the returned query
-   * @return a {@link Query} instance that can be used to join documents based on the
-   *         terms in the from and to field
-   * @throws IOException If I/O related errors occur
-   */
-  @Deprecated
-  public static Query createJoinQuery(String fromField,
-      boolean multipleValuesPerDocument,
-      String toField, LegacyNumericType numericType,
-      Query fromQuery,
-      IndexSearcher fromSearcher,
-      ScoreMode scoreMode) throws IOException {
-    
-    final GenericTermsCollector termsCollector;
-     
-    if (multipleValuesPerDocument) {
-      Function<SortedSetDocValues> mvFunction = DocValuesTermsCollector.sortedNumericAsSortedSetDocValues(fromField,numericType);
-      termsCollector = GenericTermsCollector.createCollectorMV(mvFunction, scoreMode);
-    } else {
-      Function<BinaryDocValues> svFunction = DocValuesTermsCollector.numericAsBinaryDocValues(fromField,numericType);
-      termsCollector =  GenericTermsCollector.createCollectorSV(svFunction, scoreMode);
-    }
-    
-    return createJoinQuery(multipleValuesPerDocument, toField, fromQuery, fromSearcher, scoreMode,
-        termsCollector);
-    
-  }
-
   /**
    * Method for query time joining for numeric fields. It supports multi- and single- values longs, ints, floats and longs.
    * All considerations from {@link JoinUtil#createJoinQuery(String, boolean, String, Query, IndexSearcher, ScoreMode)} are applicable here too,
@@ -247,12 +199,16 @@ public final class JoinUtil {
 
         @Override
         public void collect(int doc) throws IOException {
-          sortedNumericDocValues.setDocument(doc);
-          for (int i = 0; i < sortedNumericDocValues.count(); i++) {
-            long value = sortedNumericDocValues.valueAt(i);
-            joinValues.add(value);
-            if (needsScore) {
-              scoreAggregator.accept(value, scorer.score());
+          if (doc > sortedNumericDocValues.docID()) {
+            sortedNumericDocValues.advance(doc);
+          }
+          if (doc == sortedNumericDocValues.docID()) {
+            for (int i = 0; i < sortedNumericDocValues.docValueCount(); i++) {
+              long value = sortedNumericDocValues.nextValue();
+              joinValues.add(value);
+              if (needsScore) {
+                scoreAggregator.accept(value, scorer.score());
+              }
             }
           }
         }
@@ -277,10 +233,29 @@ public final class JoinUtil {
 
         NumericDocValues numericDocValues;
         Scorer scorer;
+        private int lastDocID = -1;
+
+        private boolean docsInOrder(int docID) {
+          if (docID < lastDocID) {
+            throw new AssertionError("docs out of order: lastDocID=" + lastDocID + " vs docID=" + docID);
+          }
+          lastDocID = docID;
+          return true;
+        }
 
         @Override
         public void collect(int doc) throws IOException {
-          long value = numericDocValues.get(doc);
+          assert docsInOrder(doc);
+          int dvDocID = numericDocValues.docID();
+          if (dvDocID < doc) {
+            dvDocID = numericDocValues.advance(doc);
+          }
+          long value;
+          if (dvDocID == doc) {
+            value = numericDocValues.longValue();
+          } else {
+            value = 0;
+          }
           joinValues.add(value);
           if (needsScore) {
             scoreAggregator.accept(value, scorer.score());
@@ -290,6 +265,7 @@ public final class JoinUtil {
         @Override
         protected void doSetNextReader(LeafReaderContext context) throws IOException {
           numericDocValues = DocValues.getNumeric(context.reader(), fromField);
+          lastDocID = -1;
         }
 
         @Override
@@ -386,7 +362,7 @@ public final class JoinUtil {
     encoded.length = bytesPerDim;
 
     if (needsScore) {
-      return new PointInSetIncludingScoreQuery(fromQuery, multipleValuesPerDocument, toField, bytesPerDim, stream) {
+      return new PointInSetIncludingScoreQuery(scoreMode, fromQuery, multipleValuesPerDocument, toField, bytesPerDim, stream) {
 
         @Override
         protected String toString(byte[] value) {
@@ -403,25 +379,26 @@ public final class JoinUtil {
     }
   }
 
-  private static Query createJoinQuery(boolean multipleValuesPerDocument, String toField, Query fromQuery,
-      IndexSearcher fromSearcher, ScoreMode scoreMode, final GenericTermsCollector collector)
-          throws IOException {
+  private static Query createJoinQuery(boolean multipleValuesPerDocument, String toField, Query fromQuery, String fromField,
+      IndexSearcher fromSearcher, ScoreMode scoreMode, final GenericTermsCollector collector) throws IOException {
     
     fromSearcher.search(fromQuery, collector);
-    
     switch (scoreMode) {
       case None:
-        return new TermsQuery(toField, fromQuery, collector.getCollectedTerms());
+        return new TermsQuery(toField, collector.getCollectedTerms(), fromField, fromQuery, fromSearcher.getTopReaderContext().id());
       case Total:
       case Max:
       case Min:
       case Avg:
         return new TermsIncludingScoreQuery(
+            scoreMode,
             toField,
             multipleValuesPerDocument,
             collector.getCollectedTerms(),
             collector.getScoresPerTerm(),
-            fromQuery
+            fromField,
+            fromQuery,
+            fromSearcher.getTopReaderContext().id()
         );
       default:
         throw new IllegalArgumentException(String.format(Locale.ROOT, "Score mode %s isn't supported.", scoreMode));
@@ -430,7 +407,7 @@ public final class JoinUtil {
 
 
   /**
-   * Delegates to {@link #createJoinQuery(String, Query, Query, IndexSearcher, ScoreMode, MultiDocValues.OrdinalMap, int, int)},
+   * Delegates to {@link #createJoinQuery(String, Query, Query, IndexSearcher, ScoreMode, OrdinalMap, int, int)},
    * but disables the min and max filtering.
    *
    * @param joinField   The {@link SortedDocValues} field containing the join values
@@ -448,7 +425,7 @@ public final class JoinUtil {
                                       Query toQuery,
                                       IndexSearcher searcher,
                                       ScoreMode scoreMode,
-                                      MultiDocValues.OrdinalMap ordinalMap) throws IOException {
+                                      OrdinalMap ordinalMap) throws IOException {
     return createJoinQuery(joinField, fromQuery, toQuery, searcher, scoreMode, ordinalMap, 0, Integer.MAX_VALUE);
   }
 
@@ -487,11 +464,10 @@ public final class JoinUtil {
                                       Query toQuery,
                                       IndexSearcher searcher,
                                       ScoreMode scoreMode,
-                                      MultiDocValues.OrdinalMap ordinalMap,
+                                      OrdinalMap ordinalMap,
                                       int min,
                                       int max) throws IOException {
-    IndexReader indexReader = searcher.getIndexReader();
-    int numSegments = indexReader.leaves().size();
+    int numSegments = searcher.getIndexReader().leaves().size();
     final long valueCount;
     if (numSegments == 0) {
       return new MatchNoDocsQuery("JoinUtil.createJoinQuery with no segments");
@@ -532,7 +508,8 @@ public final class JoinUtil {
         if (min <= 0 && max == Integer.MAX_VALUE) {
           GlobalOrdinalsCollector globalOrdinalsCollector = new GlobalOrdinalsCollector(joinField, ordinalMap, valueCount);
           searcher.search(rewrittenFromQuery, globalOrdinalsCollector);
-          return new GlobalOrdinalsQuery(globalOrdinalsCollector.getCollectorOrdinals(), joinField, ordinalMap, rewrittenToQuery, rewrittenFromQuery, indexReader);
+          return new GlobalOrdinalsQuery(globalOrdinalsCollector.getCollectorOrdinals(), joinField, ordinalMap, rewrittenToQuery,
+              rewrittenFromQuery, searcher.getTopReaderContext().id());
         } else {
           globalOrdinalsWithScoreCollector = new GlobalOrdinalsWithScoreCollector.NoScore(joinField, ordinalMap, valueCount, min, max);
           break;
@@ -541,7 +518,8 @@ public final class JoinUtil {
         throw new IllegalArgumentException(String.format(Locale.ROOT, "Score mode %s isn't supported.", scoreMode));
     }
     searcher.search(rewrittenFromQuery, globalOrdinalsWithScoreCollector);
-    return new GlobalOrdinalsWithScoreQuery(globalOrdinalsWithScoreCollector, joinField, ordinalMap, rewrittenToQuery, rewrittenFromQuery, min, max, indexReader);
+    return new GlobalOrdinalsWithScoreQuery(globalOrdinalsWithScoreCollector, scoreMode, joinField, ordinalMap, rewrittenToQuery,
+        rewrittenFromQuery, min, max, searcher.getTopReaderContext().id());
   }
 
 }

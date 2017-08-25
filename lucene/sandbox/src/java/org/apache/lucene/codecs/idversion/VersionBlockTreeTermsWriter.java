@@ -50,7 +50,6 @@ import org.apache.lucene.util.fst.PairOutputs.Pair;
 import org.apache.lucene.util.fst.PairOutputs;
 import org.apache.lucene.util.fst.PositiveIntOutputs;
 import org.apache.lucene.util.fst.Util;
-import org.apache.lucene.util.packed.PackedInts;
 
 /*
   TODO:
@@ -162,7 +161,7 @@ public final class VersionBlockTreeTermsWriter extends FieldsConsumer {
   }
 
   private final List<FieldMetaData> fields = new ArrayList<>();
-  // private final String segment;
+  private final String segment;
 
   /** Create a new writer.  The number of items (terms or
    *  sub-blocks) per block will aim to be between
@@ -176,6 +175,7 @@ public final class VersionBlockTreeTermsWriter extends FieldsConsumer {
     throws IOException
   {
     BlockTreeTermsWriter.validateSettings(minItemsInBlock, maxItemsInBlock);
+    segment = state.segmentInfo.name;
 
     maxDoc = state.segmentInfo.maxDoc();
 
@@ -354,8 +354,7 @@ public final class VersionBlockTreeTermsWriter extends FieldsConsumer {
 
       final Builder<Pair<BytesRef,Long>> indexBuilder = new Builder<>(FST.INPUT_TYPE.BYTE1,
                                                                       0, 0, true, false, Integer.MAX_VALUE,
-                                                                      FST_OUTPUTS, false,
-                                                                      PackedInts.COMPACT, true, 15);
+                                                                      FST_OUTPUTS, true, 15);
       //if (DEBUG) {
       //  System.out.println("  compile index for prefix=" + prefix);
       //}
@@ -731,7 +730,6 @@ public final class VersionBlockTreeTermsWriter extends FieldsConsumer {
     
     /** Writes one term's worth of postings. */
     public void write(BytesRef text, TermsEnum termsEnum) throws IOException {
-
       BlockTermState state = postingsWriter.writeTerm(text, termsEnum, docsSeen);
       // TODO: LUCENE-5693: we don't need this check if we fix IW to not send deleted docs to us on flush:
       if (state != null && ((IDVersionPostingsWriter) postingsWriter).lastDocID != -1) {

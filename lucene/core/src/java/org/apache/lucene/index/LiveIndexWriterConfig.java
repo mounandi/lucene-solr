@@ -17,6 +17,9 @@
 package org.apache.lucene.index;
 
 
+import java.util.Collections;
+import java.util.Set;
+
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.index.DocumentsWriterPerThread.IndexingChain;
@@ -39,7 +42,6 @@ public class LiveIndexWriterConfig {
   
   private volatile int maxBufferedDocs;
   private volatile double ramBufferSizeMB;
-  private volatile int maxBufferedDeleteTerms;
   private volatile IndexReaderWarmer mergedSegmentWarmer;
 
   // modified by IndexWriterConfig
@@ -98,12 +100,14 @@ public class LiveIndexWriterConfig {
   /** The sort order to use to write merged segments. */
   protected Sort indexSort = null;
 
+  /** The field names involved in the index sort */
+  protected Set<String> indexSortFields = Collections.emptySet();
+
   // used by IndexWriterConfig
   LiveIndexWriterConfig(Analyzer analyzer) {
     this.analyzer = analyzer;
     ramBufferSizeMB = IndexWriterConfig.DEFAULT_RAM_BUFFER_SIZE_MB;
     maxBufferedDocs = IndexWriterConfig.DEFAULT_MAX_BUFFERED_DOCS;
-    maxBufferedDeleteTerms = IndexWriterConfig.DEFAULT_MAX_BUFFERED_DELETE_TERMS;
     mergedSegmentWarmer = null;
     delPolicy = new KeepOnlyLastCommitDeletionPolicy();
     commit = null;
@@ -130,52 +134,10 @@ public class LiveIndexWriterConfig {
   }
 
   /**
-   * Determines the maximum number of delete-by-term operations that will be
-   * buffered before both the buffered in-memory delete terms and queries are
-   * applied and flushed.
-   * <p>
-   * Disabled by default (writer flushes by RAM usage).
-   * <p>
-   * NOTE: This setting won't trigger a segment flush.
-   * 
-   * <p>
-   * Takes effect immediately, but only the next time a document is added,
-   * updated or deleted. Also, if you only delete-by-query, this setting has no
-   * effect, i.e. delete queries are buffered until the next segment is flushed.
-   * 
-   * @throws IllegalArgumentException
-   *           if maxBufferedDeleteTerms is enabled but smaller than 1
-   * 
-   * @see #setRAMBufferSizeMB
-   */
-  public LiveIndexWriterConfig setMaxBufferedDeleteTerms(int maxBufferedDeleteTerms) {
-    if (maxBufferedDeleteTerms != IndexWriterConfig.DISABLE_AUTO_FLUSH && maxBufferedDeleteTerms < 1) {
-      throw new IllegalArgumentException("maxBufferedDeleteTerms must at least be 1 when enabled");
-    }
-    this.maxBufferedDeleteTerms = maxBufferedDeleteTerms;
-    return this;
-  }
-
-  /**
-   * Returns the number of buffered deleted terms that will trigger a flush of all
-   * buffered deletes if enabled.
-   *
-   * @see #setMaxBufferedDeleteTerms(int)
-   */
-  public int getMaxBufferedDeleteTerms() {
-    return maxBufferedDeleteTerms;
-  }
-  
-  /**
    * Determines the amount of RAM that may be used for buffering added documents
-   * and deletions before beginning to flush them to the Directory.  For
-   * faster indexing performance it's best to use as large a RAM buffer as you can.
-   * <p>
-   * Note that this setting is not a hard limit on memory usage during indexing, as
-   * transient and non-trivial memory well beyond this buffer size may be used,
-   * for example due to segment merges or writing points to new segments.
-   * For application stability the available memory in the JVM
-   * should be significantly larger than the RAM buffer used for indexing.
+   * and deletions before they are flushed to the Directory. Generally for
+   * faster indexing performance it's best to flush by RAM usage instead of
+   * document count and use as large a RAM buffer as you can.
    * <p>
    * When this is set, the writer will flush whenever buffered documents and
    * deletions use this much RAM. Pass in
@@ -183,15 +145,19 @@ public class LiveIndexWriterConfig {
    * due to RAM usage. Note that if flushing by document count is also enabled,
    * then the flush will be triggered by whichever comes first.
    * <p>
+   * The maximum RAM limit is inherently determined by the JVMs available
+   * memory. Yet, an {@link IndexWriter} session can consume a significantly
+   * larger amount of memory than the given RAM limit since this limit is just
+   * an indicator when to flush memory resident documents to the Directory.
+   * Flushes are likely happen concurrently while other threads adding documents
+   * to the writer. For application stability the available memory in the JVM
+   * should be significantly larger than the RAM buffer used for indexing.
+   * <p>
    * <b>NOTE</b>: the account of RAM usage for pending deletions is only
    * approximate. Specifically, if you delete by Query, Lucene currently has no
    * way to measure the RAM usage of individual Queries so the accounting will
-   * under-estimate and you should compensate by either calling commit()
-   * periodically yourself, or by using {@link #setMaxBufferedDeleteTerms(int)}
-   * to flush and apply buffered deletes by count instead of RAM usage (for each
-   * buffered delete Query a constant number of bytes is used to estimate RAM
-   * usage). Note that enabling {@link #setMaxBufferedDeleteTerms(int)} will not
-   * trigger any segment flushes.
+   * under-estimate and you should compensate by either calling commit() or refresh()
+   * periodically yourself.
    * <p>
    * <b>NOTE</b>: It's not guaranteed that all memory resident documents are
    * flushed once this limit is exceeded. Depending on the configured
@@ -454,13 +420,19 @@ public class LiveIndexWriterConfig {
     return indexSort;
   }
 
+  /**
+   * Returns the field names involved in the index sort
+   */
+  public Set<String> getIndexSortFields() {
+    return indexSortFields;
+  }
+
   @Override
   public String toString() {
     StringBuilder sb = new StringBuilder();
     sb.append("analyzer=").append(analyzer == null ? "null" : analyzer.getClass().getName()).append("\n");
     sb.append("ramBufferSizeMB=").append(getRAMBufferSizeMB()).append("\n");
     sb.append("maxBufferedDocs=").append(getMaxBufferedDocs()).append("\n");
-    sb.append("maxBufferedDeleteTerms=").append(getMaxBufferedDeleteTerms()).append("\n");
     sb.append("mergedSegmentWarmer=").append(getMergedSegmentWarmer()).append("\n");
     sb.append("delPolicy=").append(getIndexDeletionPolicy().getClass().getName()).append("\n");
     IndexCommit commit = getIndexCommit();

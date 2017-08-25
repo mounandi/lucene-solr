@@ -88,7 +88,6 @@ public class MinimalSchemaTest extends SolrTestCaseJ4 {
                 "show","schema")
             ,"//int[@name='numDocs'][.='2']"
             ,"//null[@name='uniqueKeyField']"
-            ,"//null[@name='defaultSearchField']"
             );
 
   }
@@ -115,8 +114,9 @@ public class MinimalSchemaTest extends SolrTestCaseJ4 {
             handler.startsWith("/graph") ||
             handler.startsWith("/sql") ||
             handler.startsWith("/stream") ||
-            handler.startsWith("/terms")
-
+            handler.startsWith("/terms") ||
+            handler.startsWith("/analysis/")||
+            handler.startsWith("/debug/")
             ) {
           continue;
         }

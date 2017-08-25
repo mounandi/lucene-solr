@@ -35,7 +35,6 @@ import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 import org.apache.lucene.document.Document;
-import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
@@ -44,8 +43,6 @@ import org.apache.lucene.search.DisjunctionMaxQuery;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Sort;
-import org.apache.solr.common.SolrDocument;
-import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.MapSolrParams;
@@ -84,23 +81,14 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.ImmutableMap;
 
+import static java.util.Collections.singletonList;
 import static org.apache.solr.core.PluginInfo.APPENDS;
 import static org.apache.solr.core.PluginInfo.DEFAULTS;
 import static org.apache.solr.core.PluginInfo.INVARIANTS;
 import static org.apache.solr.core.RequestParams.USEPARAM;
 
 /**
- * <p>Utilities that may be of use to RequestHandlers.</p>
- *
- * <p>
- * Many of these functions have code that was stolen/mutated from
- * StandardRequestHandler.
- * </p>
- *
- * <p>:TODO: refactor StandardRequestHandler to use these utilities</p>
- *
- * <p>:TODO: Many "standard" functionality methods are not cognisant of
- * default parameter settings.
+ * Utilities that may be of use to RequestHandlers.
  */
 public class SolrPluginUtils {
 
@@ -182,8 +170,10 @@ public class SolrPluginUtils {
   private static SolrParams applyParamSet(RequestParams requestParams,
                                           SolrParams defaults, String paramSets, String type) {
     if (paramSets == null) return defaults;
-    for (String name : StrUtils.splitSmart(paramSets, ',')) {
+    List<String> paramSetList = paramSets.indexOf(',') == -1 ? singletonList(paramSets) : StrUtils.splitSmart(paramSets, ',');
+    for (String name : paramSetList) {
       RequestParams.VersionedParams params = requestParams.getParams(name, type);
+      if (params == null) return defaults;
       if (type.equals(DEFAULTS)) {
         defaults = SolrParams.wrapDefaults(params, defaults);
       } else if (type.equals(INVARIANTS)) {
@@ -245,7 +235,7 @@ public class SolrPluginUtils {
                                           SolrQueryRequest req,
                                           SolrQueryResponse res) throws IOException {
     SolrIndexSearcher searcher = req.getSearcher();
-    if(!searcher.enableLazyFieldLoading) {
+    if(!searcher.getDocFetcher().isLazyFieldLoadingEnabled()) {
       // nothing to do
       return;
     }
@@ -486,7 +476,7 @@ public class SolrPluginUtils {
 
     String qs = commands.size() >= 1 ? commands.get(0) : "";
     try {
-    Query query = QParser.getParser(qs, null, req).getQuery();
+    Query query = QParser.getParser(qs, req).getQuery();
 
     // If the first non-query, non-filter command is a simple sort on an indexed field, then
     // we can use the Lucene sort ability.
@@ -580,8 +570,8 @@ public class SolrPluginUtils {
         String[] fieldAndSlopVsBoost = caratPattern.split(s);
         String[] fieldVsSlop = tildePattern.split(fieldAndSlopVsBoost[0]);
         String field = fieldVsSlop[0];
-        int slop  = (2 == fieldVsSlop.length) ? Integer.valueOf(fieldVsSlop[1]) : defaultSlop;
-        Float boost = (1 == fieldAndSlopVsBoost.length) ? 1  : Float.valueOf(fieldAndSlopVsBoost[1]);
+        int slop  = (2 == fieldVsSlop.length) ? Integer.parseInt(fieldVsSlop[1]) : defaultSlop;
+        float boost = (1 == fieldAndSlopVsBoost.length) ? 1  : Float.parseFloat(fieldAndSlopVsBoost[1]);
         FieldParams fp = new FieldParams(field,wordGrams,slop,boost);
         out.add(fp);
       }
@@ -904,7 +894,7 @@ public class SolrPluginUtils {
      * aliases should work)
      */
     @Override
-    protected Query getFieldQuery(String field, String queryText, boolean quoted)
+    protected Query getFieldQuery(String field, String queryText, boolean quoted, boolean raw)
         throws SyntaxError {
 
       if (aliases.containsKey(field)) {
@@ -914,7 +904,7 @@ public class SolrPluginUtils {
         List<Query> disjuncts = new ArrayList<>();
         for (String f : a.fields.keySet()) {
 
-          Query sub = getFieldQuery(f,queryText,quoted);
+          Query sub = getFieldQuery(f,queryText,quoted, false);
           if (null != sub) {
             if (null != a.fields.get(f)) {
               sub = new BoostQuery(sub, a.fields.get(f));
@@ -928,7 +918,7 @@ public class SolrPluginUtils {
 
       } else {
         try {
-          return super.getFieldQuery(field, queryText, quoted);
+          return super.getFieldQuery(field, queryText, quoted, raw);
         } catch (Exception e) {
           return null;
         }
@@ -978,7 +968,7 @@ public class SolrPluginUtils {
     List<Query> out = new ArrayList<>(queries.length);
     for (String q : queries) {
       if (null != q && 0 != q.trim().length()) {
-        out.add(QParser.getParser(q, null, req).getQuery());
+        out.add(QParser.getParser(q, req).getQuery());
       }
     }
     return out;
@@ -1006,62 +996,11 @@ public class SolrPluginUtils {
     }
   }
 
-  /**
-   * Convert a DocList to a SolrDocumentList
-   *
-   * The optional param "ids" is populated with the lucene document id
-   * for each SolrDocument.
-   *
-   * @param docs The {@link org.apache.solr.search.DocList} to convert
-   * @param searcher The {@link org.apache.solr.search.SolrIndexSearcher} to use to load the docs from the Lucene index
-   * @param fields The names of the Fields to load
-   * @param ids A map to store the ids of the docs
-   * @return The new {@link org.apache.solr.common.SolrDocumentList} containing all the loaded docs
-   * @throws java.io.IOException if there was a problem loading the docs
-   * @since solr 1.4
-   */
-  public static SolrDocumentList docListToSolrDocumentList(
-      DocList docs,
-      SolrIndexSearcher searcher,
-      Set<String> fields,
-      Map<SolrDocument, Integer> ids ) throws IOException
-  {
-    IndexSchema schema = searcher.getSchema();
-
-    SolrDocumentList list = new SolrDocumentList();
-    list.setNumFound(docs.matches());
-    list.setMaxScore(docs.maxScore());
-    list.setStart(docs.offset());
-
-    DocIterator dit = docs.iterator();
-
-    while (dit.hasNext()) {
-      int docid = dit.nextDoc();
-
-      Document luceneDoc = searcher.doc(docid, fields);
-      SolrDocument doc = new SolrDocument();
-
-      for( IndexableField field : luceneDoc) {
-        if (null == fields || fields.contains(field.name())) {
-          SchemaField sf = schema.getField( field.name() );
-          doc.addField( field.name(), sf.getType().toObject( field ) );
-        }
-      }
-      if (docs.hasScores() && (null == fields || fields.contains("score"))) {
-        doc.addField("score", dit.score());
-      }
-
-      list.add( doc );
-
-      if( ids != null ) {
-        ids.put( doc, new Integer(docid) );
-      }
-    }
-    return list;
+  public static void invokeSetters(Object bean, Iterable<Map.Entry<String,Object>> initArgs) {
+    invokeSetters(bean, initArgs, false);
   }
 
-
-  public static void invokeSetters(Object bean, Iterable<Map.Entry<String,Object>> initArgs) {
+  public static void invokeSetters(Object bean, Iterable<Map.Entry<String,Object>> initArgs, boolean lenient) {
     if (initArgs == null) return;
     final Class<?> clazz = bean.getClass();
     for (Map.Entry<String,Object> entry : initArgs) {
@@ -1069,19 +1008,27 @@ public class SolrPluginUtils {
       String setterName = "set" + String.valueOf(Character.toUpperCase(key.charAt(0))) + key.substring(1);
       try {
         final Object val = entry.getValue();
-        final Method method = findSetter(clazz, setterName, key, val.getClass());
-        method.invoke(bean, val);
+        final Method method = findSetter(clazz, setterName, key, val.getClass(), lenient);
+        if (method != null) {
+          method.invoke(bean, val);
+        }
       } catch (InvocationTargetException | IllegalAccessException e1) {
+        if (lenient) {
+          continue;
+        }
         throw new RuntimeException("Error invoking setter " + setterName + " on class : " + clazz.getName(), e1);
       }
     }
   }
 
-  private static Method findSetter(Class<?> clazz, String setterName, String key, Class<?> paramClazz) {
+  private static Method findSetter(Class<?> clazz, String setterName, String key, Class<?> paramClazz, boolean lenient) {
     BeanInfo beanInfo;
     try {
       beanInfo = Introspector.getBeanInfo(clazz);
     } catch (IntrospectionException ie) {
+      if (lenient) {
+        return null;
+      }
       throw new RuntimeException("Error getting bean info for class : " + clazz.getName(), ie);
     }
     for (final boolean matchParamClazz: new boolean[]{true, false}) {
@@ -1093,6 +1040,9 @@ public class SolrPluginUtils {
           return m;
         }
       }
+    }
+    if (lenient) {
+      return null;
     }
     throw new RuntimeException("No setter corrresponding to '" + key + "' in " + clazz.getName());
   }

@@ -60,6 +60,7 @@ public class ResponseBuilder
   public boolean doExpand;
   public boolean doStats;
   public boolean doTerms;
+  public boolean doAnalytics;
   public MergeStrategy mergeFieldHandler;
 
   private boolean needDocList = false;
@@ -136,7 +137,6 @@ public class ResponseBuilder
   public int shards_start = -1;
   public List<ShardRequest> outgoing;  // requests to be sent
   public List<ShardRequest> finished;  // requests that have received responses from all shards
-  public String preferredHostAddress = null;
   public String shortCircuitedURL;
 
   public int getShardNum(String shard) {
@@ -174,6 +174,8 @@ public class ResponseBuilder
   StatsInfo _statsInfo;
   TermsComponent.TermsHelper _termsHelper;
   SimpleOrderedMap<List<NamedList<Object>>> _pivots;
+  Object _analyticsRequestManager;
+  boolean _isOlapAnalytics;
 
   // Context fields for grouping
   public final Map<String, Collection<SearchGroup<BytesRef>>> mergedSearchGroups = new HashMap<>();
@@ -383,8 +385,8 @@ public class ResponseBuilder
     return sortSpec;
   }
 
-  public void setSortSpec(SortSpec sort) {
-    this.sortSpec = sort;
+  public void setSortSpec(SortSpec sortSpec) {
+    this.sortSpec = sortSpec;
   }
 
   public GroupingSpecification getGroupingSpec() {

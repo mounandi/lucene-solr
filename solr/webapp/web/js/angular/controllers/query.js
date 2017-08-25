@@ -20,10 +20,10 @@ solrAdminApp.controller('QueryController',
     $scope.resetMenu("query", Constants.IS_COLLECTION_PAGE);
 
     // @todo read URL parameters into scope
-    $scope.query = {wt: 'json', q:'*:*', indent:'on'};
+    $scope.query = {q:'*:*'};
     $scope.filters = [{fq:""}];
     $scope.dismax = {defType: "dismax"};
-    $scope.edismax = {defType: "edismax", stopwords: true, lowercaseOperators: true};
+    $scope.edismax = {defType: "edismax", stopwords: true, lowercaseOperators: false};
     $scope.hl = {hl:"on"};
     $scope.facet = {facet: "on"};
     $scope.spatial = {};
@@ -61,9 +61,13 @@ solrAdminApp.controller('QueryController',
       if ($scope.rawParams) {
         var rawParams = $scope.rawParams.split(/[&\n]/);
         for (var i in rawParams) {
-            var param = rawParams[i];
-            var parts = param.split("=");
-            set(parts[0], parts[1]);
+          var param = rawParams[i];
+          var equalPos = param.indexOf("=");
+          if (equalPos > -1) {
+            set(param.substring(0, equalPos), param.substring(equalPos+1));
+          } else {
+            set(param, ""); // Use empty value for params without "="
+          }
         }
       }
 
@@ -83,10 +87,13 @@ solrAdminApp.controller('QueryController',
       var url = Query.url(params);
       Query.query(params, function(data) {
         $scope.lang = $scope.query.wt;
+        if ($scope.lang == undefined || $scope.lang == '') {
+          $scope.lang = "json";
+        }
         $scope.response = data;
-        $scope.url = $location.protocol() + "://" +
-                     $location.host() + ":" +
-                     $location.port() + url;
+        // Use relative URL to make it also work through proxies that may have a different host/port/context
+        $scope.url = url;
+        $scope.hostPortContext = $location.absUrl().substr(0,$location.absUrl().indexOf("#")); // For display only
       });
     };
 

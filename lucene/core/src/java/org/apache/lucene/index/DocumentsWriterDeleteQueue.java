@@ -16,9 +16,9 @@
  */
 package org.apache.lucene.index;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.lucene.index.DocValuesUpdate.BinaryDocValuesUpdate;
@@ -26,13 +26,15 @@ import org.apache.lucene.index.DocValuesUpdate.NumericDocValuesUpdate;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.InfoStream;
 
 /**
  * {@link DocumentsWriterDeleteQueue} is a non-blocking linked pending deletes
  * queue. In contrast to other queue implementation we only maintain the
  * tail of the queue. A delete queue is always used in a context of a set of
  * DWPTs and a global delete pool. Each of the DWPT and the global pool need to
- * maintain their 'own' head of the queue (as a DeleteSlice instance per DWPT).
+ * maintain their 'own' head of the queue (as a DeleteSlice instance per
+ * {@link DocumentsWriterPerThread}).
  * The difference between the DWPT and the global pool is that the DWPT starts
  * maintaining a head once it has added its first document since for its segments
  * private deletes only the deletes after that document are relevant. The global
@@ -71,10 +73,6 @@ final class DocumentsWriterDeleteQueue implements Accountable {
 
   // the current end (latest delete operation) in the delete queue:
   private volatile Node<?> tail;
-  
-  @SuppressWarnings("rawtypes")
-  private static final AtomicReferenceFieldUpdater<DocumentsWriterDeleteQueue,Node> tailUpdater = AtomicReferenceFieldUpdater
-      .newUpdater(DocumentsWriterDeleteQueue.class, Node.class, "tail");
 
   /** Used to record deletes against all prior (already written to disk) segments.  Whenever any segment flushes, we bundle up this set of
    *  deletes and insert into the buffered updates stream before the newly flushed segment(s). */
@@ -89,19 +87,22 @@ final class DocumentsWriterDeleteQueue implements Accountable {
   /** Generates the sequence number that IW returns to callers changing the index, showing the effective serialization of all operations. */
   private final AtomicLong nextSeqNo;
 
+  private final InfoStream infoStream;
+
   // for asserts
   long maxSeqNo = Long.MAX_VALUE;
   
-  DocumentsWriterDeleteQueue() {
+  DocumentsWriterDeleteQueue(InfoStream infoStream) {
     // seqNo must start at 1 because some APIs negate this to also return a boolean
-    this(0, 1);
+    this(infoStream, 0, 1);
   }
   
-  DocumentsWriterDeleteQueue(long generation, long startSeqNo) {
-    this(new BufferedUpdates("global"), generation, startSeqNo);
+  DocumentsWriterDeleteQueue(InfoStream infoStream, long generation, long startSeqNo) {
+    this(infoStream, new BufferedUpdates("global"), generation, startSeqNo);
   }
 
-  DocumentsWriterDeleteQueue(BufferedUpdates globalBufferedUpdates, long generation, long startSeqNo) {
+  DocumentsWriterDeleteQueue(InfoStream infoStream, BufferedUpdates globalBufferedUpdates, long generation, long startSeqNo) {
+    this.infoStream = infoStream;
     this.globalBufferedUpdates = globalBufferedUpdates;
     this.generation = generation;
     this.nextSeqNo = new AtomicLong(startSeqNo);
@@ -193,7 +194,7 @@ final class DocumentsWriterDeleteQueue implements Accountable {
     }
   }
 
-  FrozenBufferedUpdates freezeGlobalBuffer(DeleteSlice callerSlice) {
+  FrozenBufferedUpdates freezeGlobalBuffer(DeleteSlice callerSlice) throws IOException {
     globalBufferLock.lock();
     /*
      * Here we freeze the global buffer so we need to lock it, apply all
@@ -213,9 +214,13 @@ final class DocumentsWriterDeleteQueue implements Accountable {
         globalSlice.apply(globalBufferedUpdates, BufferedUpdates.MAX_INT);
       }
 
-      final FrozenBufferedUpdates packet = new FrozenBufferedUpdates(globalBufferedUpdates, false);
-      globalBufferedUpdates.clear();
-      return packet;
+      if (globalBufferedUpdates.any()) {
+        final FrozenBufferedUpdates packet = new FrozenBufferedUpdates(infoStream, globalBufferedUpdates, null);
+        globalBufferedUpdates.clear();
+        return packet;
+      } else {
+        return null;
+      }
     } finally {
       globalBufferLock.unlock();
     }
@@ -322,16 +327,8 @@ final class DocumentsWriterDeleteQueue implements Accountable {
       this.item = item;
     }
 
-    @SuppressWarnings("rawtypes")
-    static final AtomicReferenceFieldUpdater<Node,Node> nextUpdater = AtomicReferenceFieldUpdater
-        .newUpdater(Node.class, Node.class, "next");
-
     void apply(BufferedUpdates bufferedDeletes, int docIDUpto) {
       throw new IllegalStateException("sentinel item must never be applied");
-    }
-
-    boolean casNext(Node<?> cmp, Node<?> val) {
-      return nextUpdater.compareAndSet(this, cmp, val);
     }
   }
 
@@ -438,7 +435,7 @@ final class DocumentsWriterDeleteQueue implements Accountable {
     globalBufferLock.lock();
     try {
       forceApplyGlobalSlice();
-      return globalBufferedUpdates.terms.size();
+      return globalBufferedUpdates.deleteTerms.size();
     } finally {
       globalBufferLock.unlock();
     }

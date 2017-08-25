@@ -16,26 +16,23 @@
  */
 package org.apache.lucene.spatial.bbox;
 
-import org.locationtech.spatial4j.shape.Rectangle;
+import java.io.IOException;
+
+import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.NumericDocValues;
-import org.apache.lucene.queries.function.FunctionValues;
-import org.apache.lucene.queries.function.ValueSource;
-import org.apache.lucene.search.Explanation;
-import org.apache.lucene.util.Bits;
-
-import java.io.IOException;
-import java.util.Map;
+import org.apache.lucene.spatial.ShapeValues;
+import org.apache.lucene.spatial.ShapeValuesSource;
+import org.locationtech.spatial4j.shape.Rectangle;
+import org.locationtech.spatial4j.shape.Shape;
 
 /**
- * A ValueSource in which the indexed Rectangle is returned from
- * {@link org.apache.lucene.queries.function.FunctionValues#objectVal(int)}.
+ * A ShapeValuesSource returning a Rectangle from each document derived from four numeric fields
  *
  * @lucene.internal
  */
-class BBoxValueSource extends ValueSource {
+class BBoxValueSource extends ShapeValuesSource {
 
   private final BBoxStrategy strategy;
 
@@ -44,55 +41,38 @@ class BBoxValueSource extends ValueSource {
   }
 
   @Override
-  public String description() {
+  public String toString() {
     return "bboxShape(" + strategy.getFieldName() + ")";
   }
 
   @Override
-  public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
+  public ShapeValues getValues(LeafReaderContext readerContext) throws IOException {
     LeafReader reader = readerContext.reader();
     final NumericDocValues minX = DocValues.getNumeric(reader, strategy.field_minX);
     final NumericDocValues minY = DocValues.getNumeric(reader, strategy.field_minY);
     final NumericDocValues maxX = DocValues.getNumeric(reader, strategy.field_maxX);
     final NumericDocValues maxY = DocValues.getNumeric(reader, strategy.field_maxY);
 
-    final Bits validBits = DocValues.getDocsWithField(reader, strategy.field_minX);//could have chosen any field
     //reused
     final Rectangle rect = strategy.getSpatialContext().makeRectangle(0,0,0,0);
 
-    return new FunctionValues() {
+    return new ShapeValues() {
+
       @Override
-      public Object objectVal(int doc) {
-        if (!validBits.get(doc)) {
-          return null;
-        } else {
-          rect.reset(
-              Double.longBitsToDouble(minX.get(doc)), Double.longBitsToDouble(maxX.get(doc)),
-              Double.longBitsToDouble(minY.get(doc)), Double.longBitsToDouble(maxY.get(doc)));
-          return rect;
-        }
+      public boolean advanceExact(int doc) throws IOException {
+        return minX.advanceExact(doc) && minY.advanceExact(doc) && maxX.advanceExact(doc) && maxY.advanceExact(doc);
       }
 
       @Override
-      public String strVal(int doc) {//TODO support WKT output once Spatial4j does
-        Object v = objectVal(doc);
-        return v == null ? null : v.toString();
+      public Shape value() throws IOException {
+        double minXValue = Double.longBitsToDouble(minX.longValue());
+        double minYValue = Double.longBitsToDouble(minY.longValue());
+        double maxXValue = Double.longBitsToDouble(maxX.longValue());
+        double maxYValue = Double.longBitsToDouble(maxY.longValue());
+        rect.reset(minXValue, maxXValue, minYValue, maxYValue);
+        return rect;
       }
 
-      @Override
-      public boolean exists(int doc) {
-        return validBits.get(doc);
-      }
-
-      @Override
-      public Explanation explain(int doc) {
-        return Explanation.match(Float.NaN, toString(doc));
-      }
-
-      @Override
-      public String toString(int doc) {
-        return description() + '=' + strVal(doc);
-      }
     };
   }
 

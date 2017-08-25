@@ -18,7 +18,9 @@ package org.apache.lucene.index;
 
 
 import java.io.PrintStream;
+import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.stream.Collectors;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -89,8 +91,12 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
    */
   public final static double DEFAULT_RAM_BUFFER_SIZE_MB = 16.0;
 
-  /** Default setting for {@link #setReaderPooling}. */
-  public final static boolean DEFAULT_READER_POOLING = false;
+  /** Default setting (true) for {@link #setReaderPooling}. */
+  // We changed this default to true with concurrent deletes/updates (LUCENE-7868),
+  // because we will otherwise need to open and close segment readers more frequently.
+  // False is still supported, but will have worse performance since readers will
+  // be forced to aggressively move all state to disk.
+  public final static boolean DEFAULT_READER_POOLING = true;
 
   /** Default value is 1945. Change using {@link #setRAMPerThreadHardLimitMB(int)} */
   public static final int DEFAULT_RAM_PER_THREAD_HARD_LIMIT_MB = 1945;
@@ -321,7 +327,6 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
    * Expert: Controls when segments are flushed to disk during indexing.
    * The {@link FlushPolicy} initialized during {@link IndexWriter} instantiation and once initialized
    * the given instance is bound to this {@link IndexWriter} and should not be used with another writer.
-   * @see #setMaxBufferedDeleteTerms(int)
    * @see #setMaxBufferedDocs(int)
    * @see #setRAMBufferSizeMB(double)
    */
@@ -373,11 +378,6 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
   }
   
   @Override
-  public int getMaxBufferedDeleteTerms() {
-    return super.getMaxBufferedDeleteTerms();
-  }
-  
-  @Override
   public int getMaxBufferedDocs() {
     return super.getMaxBufferedDocs();
   }
@@ -423,11 +423,6 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
   }
   
   @Override
-  public IndexWriterConfig setMaxBufferedDeleteTerms(int maxBufferedDeleteTerms) {
-    return (IndexWriterConfig) super.setMaxBufferedDeleteTerms(maxBufferedDeleteTerms);
-  }
-  
-  @Override
   public IndexWriterConfig setMaxBufferedDocs(int maxBufferedDocs) {
     return (IndexWriterConfig) super.setMaxBufferedDocs(maxBufferedDocs);
   }
@@ -464,15 +459,17 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
                                                                                      SortField.Type.FLOAT);
 
   /**
-   * Set the {@link Sort} order to use when merging segments.  Note that newly flushed segments will remain unsorted.
+   * Set the {@link Sort} order to use when merging segments.
    */
   public IndexWriterConfig setIndexSort(Sort sort) {
     for(SortField sortField : sort.getSort()) {
-      if (ALLOWED_INDEX_SORT_TYPES.contains(sortField.getType()) == false) {
+      final SortField.Type sortType = Sorter.getSortFieldType(sortField);
+      if (ALLOWED_INDEX_SORT_TYPES.contains(sortType) == false) {
         throw new IllegalArgumentException("invalid SortField type: must be one of " + ALLOWED_INDEX_SORT_TYPES + " but got: " + sortField);
       }
     }
     this.indexSort = sort;
+    this.indexSortFields = Arrays.stream(sort.getSort()).map(SortField::getField).collect(Collectors.toSet());
     return this;
   }
 

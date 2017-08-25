@@ -41,9 +41,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.naming.Context;
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
@@ -87,19 +90,21 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
   static final String[] packages = {
       "", "analysis.", "schema.", "handler.", "search.", "update.", "core.", "response.", "request.",
       "update.processor.", "util.", "spelling.", "handler.component.", "handler.dataimport.",
-      "spelling.suggest.", "spelling.suggest.fst.", "rest.schema.analysis.", "security.","handler.admin."
+      "spelling.suggest.", "spelling.suggest.fst.", "rest.schema.analysis.", "security.","handler.admin.",
+      "cloud.autoscaling."
   };
+  private static final java.lang.String SOLR_CORE_NAME = "solr.core.name";
+  private static Set<String> loggedOnce = new ConcurrentSkipListSet<>();
 
   protected URLClassLoader classLoader;
   private final Path instanceDir;
   private String dataDir;
   
   private final List<SolrCoreAware> waitingForCore = Collections.synchronizedList(new ArrayList<SolrCoreAware>());
-  private final List<SolrInfoMBean> infoMBeans = Collections.synchronizedList(new ArrayList<SolrInfoMBean>());
+  private final List<SolrInfoBean> infoMBeans = Collections.synchronizedList(new ArrayList<SolrInfoBean>());
   private final List<ResourceLoaderAware> waitingForResources = Collections.synchronizedList(new ArrayList<ResourceLoaderAware>());
   private static final Charset UTF_8 = StandardCharsets.UTF_8;
 
-  //TODO: Solr5. Remove this completely when you obsolete putting <core> tags in solr.xml (See Solr-4196)
   private final Properties coreProperties;
 
   private volatile boolean live;
@@ -139,7 +144,7 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
 
   /**
    * <p>
-   * This loader will delegate to the context classloader when possible,
+   * This loader will delegate to Solr's classloader when possible,
    * otherwise it will attempt to resolve resources using any jar files
    * found in the "lib/" directory in the specified instance directory.
    * </p>
@@ -150,15 +155,16 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
   public SolrResourceLoader(Path instanceDir, ClassLoader parent, Properties coreProperties) {
     if (instanceDir == null) {
       this.instanceDir = SolrResourceLoader.locateSolrHome().toAbsolutePath().normalize();
-      log.info("new SolrResourceLoader for deduced Solr Home: '{}'", this.instanceDir);
+      log.debug("new SolrResourceLoader for deduced Solr Home: '{}'", this.instanceDir);
     } else{
       this.instanceDir = instanceDir.toAbsolutePath().normalize();
-      log.info("new SolrResourceLoader for directory: '{}'", this.instanceDir);
+      log.debug("new SolrResourceLoader for directory: '{}'", this.instanceDir);
     }
 
-    if (parent == null)
-      parent = Thread.currentThread().getContextClassLoader();
-    this.classLoader = new URLClassLoader(new URL[0], parent);
+    if (parent == null) {
+      parent = getClass().getClassLoader();
+    }
+    this.classLoader = URLClassLoader.newInstance(new URL[0], parent);
 
     /* 
      * Skip the lib subdirectory when we are loading from the solr home.
@@ -192,6 +198,21 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
     URLClassLoader newLoader = addURLsToClassLoader(classLoader, urls);
     if (newLoader != classLoader) {
       this.classLoader = newLoader;
+    }
+
+    log.info("[{}] Added {} libs to classloader, from paths: {}",
+        getCoreName("null"), urls.size(), urls.stream()
+        .map(u -> u.getPath().substring(0,u.getPath().lastIndexOf("/")))
+        .sorted()
+        .distinct()
+        .collect(Collectors.toList()));
+  }
+
+  private String getCoreName(String defaultVal) {
+    if (getCoreProperties() != null) {
+      return getCoreProperties().getProperty(SOLR_CORE_NAME, defaultVal);
+    } else {
+      return defaultVal;
     }
   }
 
@@ -232,7 +253,7 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
     allURLs.addAll(Arrays.asList(oldLoader.getURLs()));
     allURLs.addAll(urls);
     for (URL url : urls) {
-      log.info("Adding '{}' to classloader", url.toString());
+      log.debug("Adding '{}' to classloader", url.toString());
     }
 
     ClassLoader oldParent = oldLoader.getParent();
@@ -644,9 +665,9 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
         assertAwareCompatibility( ResourceLoaderAware.class, obj );
         waitingForResources.add( (ResourceLoaderAware)obj );
       }
-      if (obj instanceof SolrInfoMBean){
+      if (obj instanceof SolrInfoBean){
         //TODO: Assert here?
-        infoMBeans.add((SolrInfoMBean) obj);
+        infoMBeans.add((SolrInfoBean) obj);
       }
     }
 
@@ -702,21 +723,21 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
   }
 
   /**
-   * Register any {@link org.apache.solr.core.SolrInfoMBean}s
+   * Register any {@link SolrInfoBean}s
    * @param infoRegistry The Info Registry
    */
-  public void inform(Map<String, SolrInfoMBean> infoRegistry) {
+  public void inform(Map<String, SolrInfoBean> infoRegistry) {
     // this can currently happen concurrently with requests starting and lazy components
     // loading.  Make sure infoMBeans doesn't change.
 
-    SolrInfoMBean[] arr;
+    SolrInfoBean[] arr;
     synchronized (infoMBeans) {
-      arr = infoMBeans.toArray(new SolrInfoMBean[infoMBeans.size()]);
+      arr = infoMBeans.toArray(new SolrInfoBean[infoMBeans.size()]);
       waitingForResources.clear();
     }
 
 
-    for (SolrInfoMBean bean : arr) {
+    for (SolrInfoBean bean : arr) {
       // Too slow? I suspect not, but we may need
       // to start tracking this in a Set.
       if (!infoRegistry.containsValue(bean)) {
@@ -754,11 +775,11 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
     try {
       Context c = new InitialContext();
       home = (String)c.lookup("java:comp/env/"+project+"/home");
-      log.info("Using JNDI solr.home: "+home );
+      logOnceInfo("home_using_jndi", "Using JNDI solr.home: "+home );
     } catch (NoInitialContextException e) {
-      log.info("JNDI not configured for "+project+" (NoInitialContextEx)");
+      log.debug("JNDI not configured for "+project+" (NoInitialContextEx)");
     } catch (NamingException e) {
-      log.info("No /"+project+"/home in JNDI");
+      log.debug("No /"+project+"/home in JNDI");
     } catch( RuntimeException ex ) {
       log.warn("Odd RuntimeException while testing for JNDI: " + ex.getMessage());
     } 
@@ -768,16 +789,24 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
       String prop = project + ".solr.home";
       home = System.getProperty(prop);
       if( home != null ) {
-        log.info("using system property "+prop+": " + home );
+        logOnceInfo("home_using_sysprop", "Using system property "+prop+": " + home );
       }
     }
     
     // if all else fails, try 
     if( home == null ) {
       home = project + '/';
-      log.info(project + " home defaulted to '" + home + "' (could not find system property or JNDI)");
+      logOnceInfo("home_default", project + " home defaulted to '" + home + "' (could not find system property or JNDI)");
     }
     return Paths.get(home);
+  }
+
+  // Logs a message only once per startup
+  private static void logOnceInfo(String key, String msg) {
+    if (!loggedOnce.contains(key)) {
+      loggedOnce.add(key);
+      log.info(msg);
+    }
   }
 
   /**
@@ -851,7 +880,7 @@ public class SolrResourceLoader implements ResourceLoader,Closeable
   public void close() throws IOException {
     IOUtils.close(classLoader);
   }
-  public List<SolrInfoMBean> getInfoMBeans(){
+  public List<SolrInfoBean> getInfoMBeans(){
     return Collections.unmodifiableList(infoMBeans);
   }
 

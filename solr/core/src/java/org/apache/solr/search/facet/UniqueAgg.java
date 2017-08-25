@@ -25,9 +25,12 @@ import java.util.Set;
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.NumericDocValues;
-import org.apache.lucene.util.Bits;
+import org.apache.lucene.index.SortedNumericDocValues;
+import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.schema.SchemaField;
+import org.apache.solr.util.LongIterator;
+import org.apache.solr.util.LongSet;
 
 public class UniqueAgg extends StrAggValueSource {
   public static String UNIQUE = "unique";
@@ -43,16 +46,18 @@ public class UniqueAgg extends StrAggValueSource {
   public SlotAcc createSlotAcc(FacetContext fcontext, int numDocs, int numSlots) throws IOException {
     SchemaField sf = fcontext.qcontext.searcher().getSchema().getField(getArg());
     if (sf.multiValued() || sf.getType().multiValuedFieldCache()) {
-      if (sf.hasDocValues()) {
-        return new UniqueMultiDvSlotAcc(fcontext, getArg(), numSlots, null);
+      if (sf.getType().isPointField()) {
+        return new SortedNumericAcc(fcontext, getArg(), numSlots);
+      } else if (sf.hasDocValues()) {
+        return new UniqueMultiDvSlotAcc(fcontext, sf, numSlots, null);
       } else {
-        return new UniqueMultivaluedSlotAcc(fcontext, getArg(), numSlots, null);
+        return new UniqueMultivaluedSlotAcc(fcontext, sf, numSlots, null);
       }
     } else {
-      if (sf.getType().getNumericType() != null) {
+      if (sf.getType().getNumberType() != null) {
         return new NumericAcc(fcontext, getArg(), numSlots);
       } else {
-        return new UniqueSinglevaluedSlotAcc(fcontext, getArg(), numSlots, null);
+        return new UniqueSinglevaluedSlotAcc(fcontext, sf, numSlots, null);
       }
     }
   }
@@ -113,88 +118,17 @@ public class UniqueAgg extends StrAggValueSource {
     }
 
     @Override
-    public int compareTo(FacetSortableMerger other, FacetField.SortDirection direction) {
+    public int compareTo(FacetSortableMerger other, FacetRequest.SortDirection direction) {
       return Long.compare( getLong(), ((Merger)other).getLong() );
     }
   }
 
 
-
-  static class LongSet {
-
-    static final float LOAD_FACTOR = 0.7f;
-
-    long[] vals;
-    int cardinality;
-    int mask;
-    int threshold;
-    int zeroCount;  // 1 if a 0 was collected
-
-    /** sz must be a power of two */
-    LongSet(int sz) {
-      vals = new long[sz];
-      mask = sz - 1;
-      threshold = (int) (sz * LOAD_FACTOR);
-    }
-
-    void add(long val) {
-      if (val == 0) {
-        zeroCount = 1;
-        return;
-      }
-      if (cardinality >= threshold) {
-        rehash();
-      }
-      
-      // For floats: exponent bits start at bit 23 for single precision,
-      // and bit 52 for double precision.
-      // Many values will only have significant bits just to the right of that,
-      // and the leftmost bits will all be zero.
-
-      // For now, lets just settle to get first 8 significant mantissa bits of double or float in the lowest bits of our hash
-      // The upper bits of our hash will be irrelevant.
-      int h = (int) (val + (val >>> 44) + (val >>> 15));
-      for (int slot = h & mask; ;slot = (slot + 1) & mask) {
-        long v = vals[slot];
-        if (v == 0) {
-          vals[slot] = val;
-          cardinality++;
-          break;
-        } else if (v == val) {
-          // val is already in the set
-          break;
-        }
-      }
-    }
-
-    private void rehash() {
-      long[] oldVals = vals;
-      int newCapacity = vals.length << 1;
-      vals = new long[newCapacity];
-      mask = newCapacity - 1;
-      threshold = (int) (newCapacity * LOAD_FACTOR);
-      cardinality = 0;
-
-      for (long val : oldVals) {
-        if (val != 0) {
-          add(val);
-        }
-      }
-    }
-
-    int cardinality() {
-      return cardinality + zeroCount;
-    }
-  }
-
-
-  class NumericAcc extends SlotAcc {
+  static abstract class BaseNumericAcc extends SlotAcc {
     SchemaField sf;
     LongSet[] sets;
-    NumericDocValues values;
-    Bits exists;
 
-    public NumericAcc(FacetContext fcontext, String field, int numSlots) throws IOException {
+    public BaseNumericAcc(FacetContext fcontext, String field, int numSlots) throws IOException {
       super(fcontext);
       sf = fcontext.searcher.getSchema().getField(field);
       sets = new LongSet[numSlots];
@@ -211,15 +145,13 @@ public class UniqueAgg extends StrAggValueSource {
     }
 
     @Override
-    public void setNextReader(LeafReaderContext readerContext) throws IOException {
-      values = DocValues.getNumeric(readerContext.reader(),  sf.getName());
-      exists = DocValues.getDocsWithField(readerContext.reader(), sf.getName());
-    }
-
-    @Override
     public void collect(int doc, int slot) throws IOException {
-      long val = values.get(doc);
-      if (val == 0 && !exists.get(doc)) {
+      int valuesDocID = docIdSetIterator().docID();
+      if (valuesDocID < doc) {
+        valuesDocID = docIdSetIterator().advance(doc);
+      }
+      if (valuesDocID > doc) {
+        // missing
         return;
       }
 
@@ -227,9 +159,12 @@ public class UniqueAgg extends StrAggValueSource {
       if (set == null) {
         set = sets[slot] = new LongSet(16);
       }
-      // TODO: could handle 0s at this level too
-      set.add(val);
+      collectValues(doc, set);
     }
+
+    protected abstract DocIdSetIterator docIdSetIterator();
+
+    protected abstract void collectValues(int doc, LongSet set) throws IOException;
 
     @Override
     public Object getValue(int slot) throws IOException {
@@ -257,16 +192,11 @@ public class UniqueAgg extends StrAggValueSource {
       if (unique <= maxExplicit) {
         List lst = new ArrayList( Math.min(unique, maxExplicit) );
         if (set != null) {
-          if (set.zeroCount > 0) {
-            lst.add(0);
-          }
-          for (long val : set.vals) {
-            if (val != 0) {
-              lst.add(val);
-            }
+          LongIterator iter = set.iterator();
+          while (iter.hasNext()) {
+            lst.add( iter.next() );
           }
         }
-
         map.add("vals", lst);
       }
 
@@ -279,6 +209,54 @@ public class UniqueAgg extends StrAggValueSource {
       return getCardinality(slotA) - getCardinality(slotB);
     }
 
+  }
+
+  static class NumericAcc extends BaseNumericAcc {
+    NumericDocValues values;
+
+    public NumericAcc(FacetContext fcontext, String field, int numSlots) throws IOException {
+      super(fcontext, field, numSlots);
+    }
+
+    @Override
+    protected DocIdSetIterator docIdSetIterator() {
+      return values;
+    }
+
+    @Override
+    public void setNextReader(LeafReaderContext readerContext) throws IOException {
+      values = DocValues.getNumeric(readerContext.reader(),  sf.getName());
+    }
+
+    @Override
+    protected void collectValues(int doc, LongSet set) throws IOException {
+      set.add(values.longValue());
+    }
+  }
+
+  static class SortedNumericAcc extends BaseNumericAcc {
+    SortedNumericDocValues values;
+
+    public SortedNumericAcc(FacetContext fcontext, String field, int numSlots) throws IOException {
+      super(fcontext, field, numSlots);
+    }
+
+    @Override
+    protected DocIdSetIterator docIdSetIterator() {
+      return values;
+    }
+
+    @Override
+    public void setNextReader(LeafReaderContext readerContext) throws IOException {
+      values = DocValues.getSortedNumeric(readerContext.reader(),  sf.getName());
+    }
+
+    @Override
+    protected void collectValues(int doc, LongSet set) throws IOException {
+      for (int i = 0; i < values.docValueCount(); i++) {
+        set.add(values.nextValue());
+      }
+    }
   }
 
 

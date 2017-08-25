@@ -21,23 +21,28 @@ import java.io.IOException;
 
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiDocValues;
+import org.apache.lucene.index.OrdinalMap;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.LongValues;
-import org.apache.solr.search.SolrIndexSearcher;
+import org.apache.solr.schema.SchemaField;
 
 class UniqueMultiDvSlotAcc extends UniqueSlotAcc {
-  final SortedSetDocValues topLevel;
-  final SortedSetDocValues[] subDvs;
-  final MultiDocValues.OrdinalMap ordMap;
+  SortedSetDocValues topLevel;
+  SortedSetDocValues[] subDvs;
+  OrdinalMap ordMap;
   LongValues toGlobal;
   SortedSetDocValues subDv;
 
-  public UniqueMultiDvSlotAcc(FacetContext fcontext, String field, int numSlots, HLLAgg.HLLFactory factory) throws IOException {
+  public UniqueMultiDvSlotAcc(FacetContext fcontext, SchemaField field, int numSlots, HLLAgg.HLLFactory factory) throws IOException {
     super(fcontext, field, numSlots, factory);
-    SolrIndexSearcher searcher = fcontext.qcontext.searcher();
-    topLevel = FieldUtil.getSortedSetDocValues(fcontext.qcontext, searcher.getSchema().getField(field), null);
+  }
+
+  @Override
+  public void reset() throws IOException {
+    super.reset();
+    topLevel = FieldUtil.getSortedSetDocValues(fcontext.qcontext, field, null);
     nTerms = (int) topLevel.getValueCount();
     if (topLevel instanceof MultiDocValues.MultiSortedSetDocValues) {
       ordMap = ((MultiDocValues.MultiSortedSetDocValues) topLevel).mapping;
@@ -49,12 +54,15 @@ class UniqueMultiDvSlotAcc extends UniqueSlotAcc {
   }
 
   @Override
-  protected BytesRef lookupOrd(int ord) {
+  protected BytesRef lookupOrd(int ord) throws IOException {
     return topLevel.lookupOrd(ord);
   }
 
   @Override
   public void setNextReader(LeafReaderContext readerContext) throws IOException {
+    if (topLevel == null) {
+      reset();
+    }
     super.setNextReader(readerContext);
     if (subDvs != null) {
       subDv = subDvs[readerContext.ord];
@@ -66,21 +74,26 @@ class UniqueMultiDvSlotAcc extends UniqueSlotAcc {
   }
 
   @Override
-  public void collect(int doc, int slotNum) {
-    subDv.setDocument(doc);
-    int segOrd = (int) subDv.nextOrd();
-    if (segOrd < 0) return;
-
-    FixedBitSet bits = arr[slotNum];
-    if (bits == null) {
-      bits = new FixedBitSet(nTerms);
-      arr[slotNum] = bits;
+  public void collect(int doc, int slotNum) throws IOException {
+    if (doc > subDv.docID()) {
+      subDv.advance(doc);
     }
+    if (doc == subDv.docID()) {
 
-    do {
-      int ord = toGlobal == null ? segOrd : (int) toGlobal.get(segOrd);
-      bits.set(ord);
-      segOrd = (int) subDv.nextOrd();
-    } while (segOrd >= 0);
+      int segOrd = (int) subDv.nextOrd();
+      assert segOrd >= 0;
+      
+      FixedBitSet bits = arr[slotNum];
+      if (bits == null) {
+        bits = new FixedBitSet(nTerms);
+        arr[slotNum] = bits;
+      }
+
+      do {
+        int ord = toGlobal == null ? segOrd : (int) toGlobal.get(segOrd);
+        bits.set(ord);
+        segOrd = (int) subDv.nextOrd();
+      } while (segOrd >= 0);
+    }
   }
 }

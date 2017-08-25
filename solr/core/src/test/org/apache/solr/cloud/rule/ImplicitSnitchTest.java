@@ -17,22 +17,28 @@
 
 package org.apache.solr.cloud.rule;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
 import com.google.common.collect.Sets;
+import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.common.SolrException;
+import org.apache.solr.common.cloud.ZkStateReader;
+import org.apache.solr.common.cloud.rule.ImplicitSnitch;
+import org.apache.solr.common.cloud.rule.RemoteCallback;
+import org.apache.solr.common.cloud.rule.SnitchContext;
+import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.zookeeper.KeeperException;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
 import static org.hamcrest.core.Is.is;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertThat;
-import static org.junit.Assert.assertTrue;
 import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.when;
 
-public class ImplicitSnitchTest {
+public class ImplicitSnitchTest extends LuceneTestCase {
 
   private ImplicitSnitch snitch;
   private SnitchContext context;
@@ -45,7 +51,7 @@ public class ImplicitSnitchTest {
   @Before
   public void beforeImplicitSnitchTest() {
     snitch = new ImplicitSnitch();
-    context = new SnitchContext(null, null, new HashMap<>());
+    context = new ServerSnitchContext(null, null, new HashMap<>(),null);
   }
 
 
@@ -82,7 +88,7 @@ public class ImplicitSnitchTest {
   public void testGetTags_withIPv4RequestedTags_ip2_and_ip4_returns_two_tags() throws Exception {
     String node = "192.168.1.2:8983_solr";
 
-    SnitchContext context = new SnitchContext(null, node, new HashMap<>());
+    SnitchContext context = new ServerSnitchContext(null, node, new HashMap<>(),null);
     snitch.getTags(node, Sets.newHashSet(IP_2, IP_4), context);
 
     Map<String, Object> tags = context.getTags();
@@ -95,7 +101,7 @@ public class ImplicitSnitchTest {
   public void testGetTags_with_wrong_ipv4_format_ip_returns_nothing() throws Exception {
     String node = "192.168.1.2.1:8983_solr";
 
-    SnitchContext context = new SnitchContext(null, node, new HashMap<>());
+    SnitchContext context = new ServerSnitchContext(null, node, new HashMap<>(),null);
     snitch.getTags(node, Sets.newHashSet(IP_1), context);
 
     Map<String, Object> tags = context.getTags();
@@ -107,7 +113,7 @@ public class ImplicitSnitchTest {
   public void testGetTags_with_correct_ipv6_format_ip_returns_nothing() throws Exception {
     String node = "[0:0:0:0:0:0:0:1]:8983_solr";
 
-    SnitchContext context = new SnitchContext(null, node, new HashMap<>());
+    SnitchContext context = new ServerSnitchContext(null, node, new HashMap<>(),null);
     snitch.getTags(node, Sets.newHashSet(IP_1), context);
 
     Map<String, Object> tags = context.getTags();
@@ -130,7 +136,7 @@ public class ImplicitSnitchTest {
   public void testGetTags_withAllHostNameRequestedTags_returns_all_Tags() throws Exception {
     String node = "serv01.dc01.london.uk.apache.org:8983_solr";
 
-    SnitchContext context = new SnitchContext(null, node, new HashMap<>());
+    SnitchContext context = new ServerSnitchContext(null, node, new HashMap<>(),null);
     //We need mocking here otherwise, we would need proper DNS entry for this test to pass
     ImplicitSnitch mockedSnitch = Mockito.spy(snitch);
     when(mockedSnitch.getHostIp(anyString())).thenReturn("10.11.12.13");
@@ -149,7 +155,7 @@ public class ImplicitSnitchTest {
   public void testGetTags_withHostNameRequestedTag_ip3_returns_1_tag() throws Exception {
     String node = "serv01.dc01.london.uk.apache.org:8983_solr";
 
-    SnitchContext context = new SnitchContext(null, node, new HashMap<>());
+    SnitchContext context = new ServerSnitchContext(null, node, new HashMap<>(),null);
     //We need mocking here otherwise, we would need proper DNS entry for this test to pass
     ImplicitSnitch mockedSnitch = Mockito.spy(snitch);
     when(mockedSnitch.getHostIp(anyString())).thenReturn("10.11.12.13");
@@ -164,7 +170,7 @@ public class ImplicitSnitchTest {
   public void testGetTags_withHostNameRequestedTag_ip99999_returns_nothing() throws Exception {
     String node = "serv01.dc01.london.uk.apache.org:8983_solr";
 
-    SnitchContext context = new SnitchContext(null, node, new HashMap<>());
+    SnitchContext context = new ServerSnitchContext(null, node, new HashMap<>(),null);
     //We need mocking here otherwise, we would need proper DNS entry for this test to pass
     ImplicitSnitch mockedSnitch = Mockito.spy(snitch);
     when(mockedSnitch.getHostIp(anyString())).thenReturn("10.11.12.13");
@@ -184,4 +190,42 @@ public class ImplicitSnitchTest {
     assertFalse(snitch.isKnownTag("ip_5"));
   }
 
+  @Test
+  public void testExceptions() throws Exception {
+    ImplicitSnitch implicitSnitch = new ImplicitSnitch();
+    ServerSnitchContext noNodeExceptionSnitch = new ServerSnitchContext(null, null, new HashMap<>(), null)  {
+      @Override
+      public Map getZkJson(String path) throws KeeperException, InterruptedException {
+        throw new KeeperException.NoNodeException();
+      }
+    };
+    implicitSnitch.getTags("", Collections.singleton(ImplicitSnitch.ROLE), noNodeExceptionSnitch);
+    Map map = (Map) noNodeExceptionSnitch.retrieve(ZkStateReader.ROLES); // todo it the key really supposed to /roles.json?
+    assertNotNull(map);
+    assertEquals(0, map.size());
+
+    implicitSnitch.getTags("", Collections.singleton(ImplicitSnitch.NODEROLE), noNodeExceptionSnitch);
+    map = (Map) noNodeExceptionSnitch.retrieve(ZkStateReader.ROLES); // todo it the key really supposed to /roles.json?
+    assertNotNull(map);
+    assertEquals(0, map.size());
+
+    ServerSnitchContext keeperExceptionSnitch = new ServerSnitchContext(null, null, new HashMap<>(), null)  {
+      @Override
+      public Map getZkJson(String path) throws KeeperException, InterruptedException {
+        throw new KeeperException.ConnectionLossException();
+      }
+    };
+    expectThrows(SolrException.class, KeeperException.ConnectionLossException.class, () -> implicitSnitch.getTags("", Collections.singleton(ImplicitSnitch.ROLE), keeperExceptionSnitch));
+    expectThrows(SolrException.class, KeeperException.ConnectionLossException.class, () -> implicitSnitch.getTags("", Collections.singleton(ImplicitSnitch.NODEROLE), keeperExceptionSnitch));
+
+    ServerSnitchContext remoteExceptionSnitch = new ServerSnitchContext(null, null, new HashMap<>(), null)  {
+      @Override
+      public void invokeRemote(String node, ModifiableSolrParams params, String klas, RemoteCallback callback) {
+        throw new RuntimeException();
+      }
+    };
+    expectThrows(SolrException.class, RuntimeException.class, () -> implicitSnitch.getTags("", Collections.singleton(ImplicitSnitch.CORES), remoteExceptionSnitch));
+    expectThrows(SolrException.class, RuntimeException.class, () -> implicitSnitch.getTags("", Collections.singleton(ImplicitSnitch.DISK), remoteExceptionSnitch));
+    expectThrows(SolrException.class, RuntimeException.class, () -> implicitSnitch.getTags("", Collections.singleton(ImplicitSnitch.SYSPROP + "xyz"), remoteExceptionSnitch));
+  }
 }

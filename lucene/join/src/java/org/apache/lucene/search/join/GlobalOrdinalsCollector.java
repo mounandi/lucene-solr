@@ -16,17 +16,17 @@
  */
 package org.apache.lucene.search.join;
 
+import java.io.IOException;
+
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.MultiDocValues;
+import org.apache.lucene.index.OrdinalMap;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.util.LongBitSet;
 import org.apache.lucene.util.LongValues;
-
-import java.io.IOException;
 
 /**
  * A collector that collects all ordinals from a specified field matching the query.
@@ -37,9 +37,9 @@ final class GlobalOrdinalsCollector implements Collector {
 
   final String field;
   final LongBitSet collectedOrds;
-  final MultiDocValues.OrdinalMap ordinalMap;
+  final OrdinalMap ordinalMap;
 
-  GlobalOrdinalsCollector(String field, MultiDocValues.OrdinalMap ordinalMap, long valueCount) {
+  GlobalOrdinalsCollector(String field, OrdinalMap ordinalMap, long valueCount) {
     this.field = field;
     this.ordinalMap = ordinalMap;
     this.collectedOrds = new LongBitSet(valueCount);
@@ -77,9 +77,12 @@ final class GlobalOrdinalsCollector implements Collector {
 
     @Override
     public void collect(int doc) throws IOException {
-      final long segmentOrd = docTermOrds.getOrd(doc);
-      if (segmentOrd != -1) {
-        final long globalOrd = segmentOrdToGlobalOrdLookup.get(segmentOrd);
+      if (doc > docTermOrds.docID()) {
+        docTermOrds.advance(doc);
+      }
+      if (doc == docTermOrds.docID()) {
+        long segmentOrd = docTermOrds.ordValue();
+        long globalOrd = segmentOrdToGlobalOrdLookup.get(segmentOrd);
         collectedOrds.set(globalOrd);
       }
     }
@@ -99,9 +102,11 @@ final class GlobalOrdinalsCollector implements Collector {
 
     @Override
     public void collect(int doc) throws IOException {
-      final long segmentOrd = docTermOrds.getOrd(doc);
-      if (segmentOrd != -1) {
-        collectedOrds.set(segmentOrd);
+      if (doc > docTermOrds.docID()) {
+        docTermOrds.advance(doc);
+      }
+      if (doc == docTermOrds.docID()) {
+        collectedOrds.set(docTermOrds.ordValue());
       }
     }
 

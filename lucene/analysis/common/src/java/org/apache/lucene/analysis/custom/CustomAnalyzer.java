@@ -76,17 +76,21 @@ import org.apache.lucene.util.Version;
  */
 public final class CustomAnalyzer extends Analyzer {
   
-  /** Returns a builder for custom analyzers that loads all resources from classpath.
-   * All path names given must be absolute with package prefixes. */
+  /**
+   * Returns a builder for custom analyzers that loads all resources from
+   * Lucene's classloader. All path names given must be absolute with package prefixes. 
+   */
   public static Builder builder() {
-    return builder(new ClasspathResourceLoader());
+    return builder(new ClasspathResourceLoader(CustomAnalyzer.class.getClassLoader()));
   }
   
-  /** Returns a builder for custom analyzers that loads all resources from the given
+  /** 
+   * Returns a builder for custom analyzers that loads all resources from the given
    * file system base directory. Place, e.g., stop word files there.
-   * Files that are not in the given directory are loaded from classpath. */
+   * Files that are not in the given directory are loaded from Lucene's classloader.
+   */
   public static Builder builder(Path configDir) {
-    return builder(new FilesystemResourceLoader(configDir));
+    return builder(new FilesystemResourceLoader(configDir, CustomAnalyzer.class.getClassLoader()));
   }
   
   /** Returns a builder for custom analyzers that loads all resources using the given {@link ResourceLoader}. */
@@ -131,7 +135,7 @@ public final class CustomAnalyzer extends Analyzer {
 
   @Override
   protected TokenStreamComponents createComponents(String fieldName) {
-    final Tokenizer tk = tokenizer.create(attributeFactory());
+    final Tokenizer tk = tokenizer.create(attributeFactory(fieldName));
     TokenStream ts = tk;
     for (final TokenFilterFactory filter : tokenFilters) {
       ts = filter.create(ts);
@@ -145,7 +149,7 @@ public final class CustomAnalyzer extends Analyzer {
     for (TokenFilterFactory filter : tokenFilters) {
       if (filter instanceof MultiTermAwareComponent) {
         filter = (TokenFilterFactory) ((MultiTermAwareComponent) filter).getMultiTermComponent();
-        result = filter.create(in);
+        result = filter.create(result);
       }
     }
     return result;

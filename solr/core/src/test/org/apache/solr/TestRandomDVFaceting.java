@@ -28,6 +28,8 @@ import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.schema.SchemaField;
+import org.apache.solr.schema.TrieIntField;
+import org.apache.solr.schema.IntPointField;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -39,13 +41,36 @@ import org.slf4j.LoggerFactory;
  * to the indexed facet results as if it were just another faceting method.
  */
 @Slow
+@SolrTestCaseJ4.SuppressPointFields(bugUrl="Test explicitly compares Trie to Points, randomization defeats the point")
 public class TestRandomDVFaceting extends SolrTestCaseJ4 {
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
   @BeforeClass
   public static void beforeTests() throws Exception {
+    // This tests explicitly compares Trie DV with non-DV Trie with DV Points
+    // so we don't want randomized DocValues on all Trie fields
+    System.setProperty(NUMERIC_DOCVALUES_SYSPROP, "false");
+    
     initCore("solrconfig-basic.xml","schema-docValuesFaceting.xml");
+
+    assertEquals("DocValues: Schema assumptions are broken",
+                 false, h.getCore().getLatestSchema().getField("foo_i").hasDocValues());
+    assertEquals("DocValues: Schema assumptions are broken",
+                 true, h.getCore().getLatestSchema().getField("foo_i_dv").hasDocValues());
+    assertEquals("DocValues: Schema assumptions are broken",
+                 true, h.getCore().getLatestSchema().getField("foo_i_p").hasDocValues());
+    
+    assertEquals("Type: Schema assumptions are broken",
+                 TrieIntField.class,
+                 h.getCore().getLatestSchema().getField("foo_i").getType().getClass());
+    assertEquals("Type: Schema assumptions are broken",
+                 TrieIntField.class,
+                 h.getCore().getLatestSchema().getField("foo_i_dv").getType().getClass());
+    assertEquals("Type: Schema assumptions are broken",
+                 IntPointField.class,
+                 h.getCore().getLatestSchema().getField("foo_i_p").getType().getClass());
+    
   }
 
   int indexSize;
@@ -62,7 +87,9 @@ public class TestRandomDVFaceting extends SolrTestCaseJ4 {
     types = new ArrayList<>();
     types.add(new FldType("id",ONE_ONE, new SVal('A','Z',4,4)));
     types.add(new FldType("score_f",ONE_ONE, new FVal(1,100)));
+    types.add(new FldType("score_d",ONE_ONE, new FVal(1,100)));
     types.add(new FldType("foo_i",ZERO_ONE, new IRange(0,indexSize)));
+    types.add(new FldType("foo_l",ZERO_ONE, new IRange(0,indexSize)));
     types.add(new FldType("small_s",ZERO_ONE, new SVal('a',(char)('c'+indexSize/3),1,1)));
     types.add(new FldType("small2_s",ZERO_ONE, new SVal('a',(char)('c'+indexSize/3),1,1)));
     types.add(new FldType("small2_ss",ZERO_TWO, new SVal('a',(char)('c'+indexSize/3),1,1)));
@@ -72,6 +99,12 @@ public class TestRandomDVFaceting extends SolrTestCaseJ4 {
     types.add(new FldType("small2_i",ZERO_ONE, new IRange(0,5+indexSize/3)));
     types.add(new FldType("small2_is",ZERO_TWO, new IRange(0,5+indexSize/3)));
     types.add(new FldType("small3_is",new IRange(0,25), new IRange(0,100)));
+    
+    types.add(new FldType("foo_fs", new IRange(0,25), new FVal(0,indexSize)));
+    types.add(new FldType("foo_f", ZERO_ONE, new FVal(0,indexSize)));
+    types.add(new FldType("foo_ds", new IRange(0,25), new FVal(0,indexSize)));
+    types.add(new FldType("foo_d", ZERO_ONE, new FVal(0,indexSize)));
+    types.add(new FldType("foo_ls", new IRange(0,25), new IRange(0,indexSize)));
 
     types.add(new FldType("missing_i",new IRange(0,0), new IRange(0,100)));
     types.add(new FldType("missing_is",new IRange(0,0), new IRange(0,100)));
@@ -154,14 +187,13 @@ public class TestRandomDVFaceting extends SolrTestCaseJ4 {
       Random rand = random();
       boolean validate = validateResponses;
       ModifiableSolrParams params = params("facet","true", "wt","json", "indent","true", "omitHeader","true");
-      params.add("q","*:*", "rows","0");  // TODO: select subsets
+      params.add("q","*:*");  // TODO: select subsets
       params.add("rows","0");
-
 
       SchemaField sf = req.getSchema().getField(ftype.fname);
       boolean multiValued = sf.getType().multiValuedFieldCache();
       boolean indexed = sf.indexed();
-      boolean numeric = sf.getType().getNumericType() != null;
+      boolean numeric = sf.getType().getNumberType() != null;
 
       int offset = 0;
       if (rand.nextInt(100) < 20) {
@@ -171,12 +203,16 @@ public class TestRandomDVFaceting extends SolrTestCaseJ4 {
         params.add("facet.offset", Integer.toString(offset));
       }
 
-      int limit = 100;
       if (rand.nextInt(100) < 20) {
-        if (rand.nextBoolean()) {
-          limit = rand.nextInt(100) < 10 ? rand.nextInt(indexSize/2+1) : rand.nextInt(indexSize*2);
+        if(rarely()) {
+          params.add("facet.limit", "-1");
+        } else {
+          int limit = 100;
+          if (rand.nextBoolean()) {
+            limit = rand.nextInt(100) < 10 ? rand.nextInt(indexSize/2+1) : rand.nextInt(indexSize*2);
+          }
+          params.add("facet.limit", Integer.toString(limit));
         }
-        params.add("facet.limit", Integer.toString(limit));
       }
 
       // the following two situations cannot work for unindexed single-valued numerics:
@@ -229,6 +265,15 @@ public class TestRandomDVFaceting extends SolrTestCaseJ4 {
         // Object realResponse = ObjectBuilder.fromJSON(strResponse);
         // System.out.println(strResponse);
 
+        responses.add(strResponse);
+      }
+      // If there is a PointField option for this test, also test it
+      // Don't check points if facet.mincount=0
+      if (h.getCore().getLatestSchema().getFieldOrNull(facet_field + "_p") != null
+          && params.get("facet.mincount") != null
+          && params.getInt("facet.mincount").intValue() > 0) {
+        params.set("facet.field", "{!key="+facet_field+"}"+facet_field+"_p");
+        String strResponse = h.query(req(params));
         responses.add(strResponse);
       }
 

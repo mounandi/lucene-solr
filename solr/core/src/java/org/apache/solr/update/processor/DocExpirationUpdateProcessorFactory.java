@@ -388,7 +388,7 @@ public final class DocExpirationUpdateProcessorFactory
             // No-Op
             return;
           }
-          log.info("Begining periodic deletion of expired docs");
+          log.info("Beginning periodic deletion of expired docs");
 
           UpdateRequestProcessorChain chain = core.getUpdateProcessingChain(deleteChainName);
           UpdateRequestProcessor proc = chain.createProcessor(req, rsp);
@@ -412,7 +412,11 @@ public final class DocExpirationUpdateProcessorFactory
             proc.processCommit(commit);
             
           } finally {
-            proc.finish();
+            try {
+              proc.finish();
+            } finally {
+              proc.close();
+            }
           }
 
           log.info("Finished periodic deletion of expired docs");
@@ -450,7 +454,7 @@ public final class DocExpirationUpdateProcessorFactory
    * </p>
    */
   private boolean iAmInChargeOfPeriodicDeletes() {
-    ZkController zk = core.getCoreDescriptor().getCoreContainer().getZkController();
+    ZkController zk = core.getCoreContainer().getZkController();
 
     if (null == zk) return true;
     
@@ -465,7 +469,7 @@ public final class DocExpirationUpdateProcessorFactory
     CloudDescriptor desc = core.getCoreDescriptor().getCloudDescriptor();
     String col = desc.getCollectionName();
 
-    List<Slice> slices = new ArrayList<Slice>(zk.getClusterState().getActiveSlices(col));
+    List<Slice> slices = new ArrayList<Slice>(zk.getClusterState().getCollection(col).getActiveSlices());
     Collections.sort(slices, COMPARE_SLICES_BY_NAME);
     if (slices.isEmpty()) {
       log.error("Collection {} has no active Slices?", col);

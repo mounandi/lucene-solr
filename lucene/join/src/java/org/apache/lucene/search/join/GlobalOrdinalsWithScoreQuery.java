@@ -16,15 +16,17 @@
  */
 package org.apache.lucene.search.join;
 
+import java.io.IOException;
+import java.util.Set;
+
 import org.apache.lucene.index.DocValues;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.MultiDocValues;
+import org.apache.lucene.index.OrdinalMap;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.search.FilterWeight;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.Explanation;
+import org.apache.lucene.search.FilterWeight;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Scorer;
@@ -33,36 +35,48 @@ import org.apache.lucene.search.Weight;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.LongValues;
 
-import java.io.IOException;
-import java.util.Set;
-
 final class GlobalOrdinalsWithScoreQuery extends Query {
 
   private final GlobalOrdinalsWithScoreCollector collector;
   private final String joinField;
-  private final MultiDocValues.OrdinalMap globalOrds;
+  private final OrdinalMap globalOrds;
   // Is also an approximation of the docs that will match. Can be all docs that have toField or something more specific.
   private final Query toQuery;
 
   // just for hashcode and equals:
+  private final ScoreMode scoreMode;
   private final Query fromQuery;
   private final int min;
   private final int max;
-  private final IndexReader indexReader;
+  // id of the context rather than the context itself in order not to hold references to index readers
+  private final Object indexReaderContextId;
 
-  GlobalOrdinalsWithScoreQuery(GlobalOrdinalsWithScoreCollector collector, String joinField, MultiDocValues.OrdinalMap globalOrds, Query toQuery, Query fromQuery, int min, int max, IndexReader indexReader) {
+  GlobalOrdinalsWithScoreQuery(GlobalOrdinalsWithScoreCollector collector, ScoreMode scoreMode, String joinField,
+                               OrdinalMap globalOrds, Query toQuery, Query fromQuery, int min, int max,
+                               Object indexReaderContextId) {
     this.collector = collector;
     this.joinField = joinField;
     this.globalOrds = globalOrds;
     this.toQuery = toQuery;
+    this.scoreMode = scoreMode;
     this.fromQuery = fromQuery;
     this.min = min;
     this.max = max;
-    this.indexReader = indexReader;
+    this.indexReaderContextId = indexReaderContextId;
   }
 
   @Override
   public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+    if (searcher.getTopReaderContext().id() != indexReaderContextId) {
+      throw new IllegalStateException("Creating the weight against a different index reader than this query has been built for.");
+    }
+    boolean doNoMinMax = min <= 0 && max == Integer.MAX_VALUE;
+    if (needsScores == false && doNoMinMax) {
+      // We don't need scores then quickly change the query to not uses the scores:
+      GlobalOrdinalsQuery globalOrdinalsQuery = new GlobalOrdinalsQuery(collector.collectedOrds, joinField, globalOrds,
+          toQuery, fromQuery, indexReaderContextId);
+      return globalOrdinalsQuery.createWeight(searcher, false, boost);
+    }
     return new W(this, toQuery.createWeight(searcher, false, 1f));
   }
 
@@ -75,21 +89,23 @@ final class GlobalOrdinalsWithScoreQuery extends Query {
   private boolean equalsTo(GlobalOrdinalsWithScoreQuery other) {
     return min == other.min &&
            max == other.max &&
+           scoreMode.equals(other.scoreMode) &&
            joinField.equals(other.joinField) &&
            fromQuery.equals(other.fromQuery) &&
            toQuery.equals(other.toQuery) &&
-           indexReader.equals(other.indexReader);
+           indexReaderContextId.equals(other.indexReaderContextId);
   }
 
   @Override
   public int hashCode() {
     int result = classHash();
+    result = 31 * result + scoreMode.hashCode();
     result = 31 * result + joinField.hashCode();
     result = 31 * result + toQuery.hashCode();
     result = 31 * result + fromQuery.hashCode();
     result = 31 * result + min;
     result = 31 * result + max;
-    result = 31 * result + indexReader.hashCode();
+    result = 31 * result + indexReaderContextId.hashCode();
     return result;
   }
 
@@ -118,11 +134,11 @@ final class GlobalOrdinalsWithScoreQuery extends Query {
       if (values == null) {
         return Explanation.noMatch("Not a match");
       }
-
-      int segmentOrd = values.getOrd(doc);
-      if (segmentOrd == -1) {
+      if (values.advance(doc) != doc) {
         return Explanation.noMatch("Not a match");
       }
+
+      int segmentOrd = values.ordValue();
       BytesRef joinValue = values.lookupOrd(segmentOrd);
 
       int ord;
@@ -175,8 +191,12 @@ final class GlobalOrdinalsWithScoreQuery extends Query {
 
         @Override
         public boolean matches() throws IOException {
-          final long segmentOrd = values.getOrd(approximation.docID());
-          if (segmentOrd != -1) {
+          int docID = approximation.docID();
+          if (docID > values.docID()) {
+            values.advance(docID);
+          }
+          if (docID == values.docID()) {
+            final long segmentOrd = values.ordValue();
             final int globalOrd = (int) segmentOrdToGlobalOrdLookup.get(segmentOrd);
             if (collector.match(globalOrd)) {
               score = collector.score(globalOrd);
@@ -209,8 +229,12 @@ final class GlobalOrdinalsWithScoreQuery extends Query {
 
         @Override
         public boolean matches() throws IOException {
-          final int segmentOrd = values.getOrd(approximation.docID());
-          if (segmentOrd != -1) {
+          int docID = approximation.docID();
+          if (docID > values.docID()) {
+            values.advance(docID);
+          }
+          if (docID == values.docID()) {
+            final int segmentOrd = values.ordValue();
             if (collector.match(segmentOrd)) {
               score = collector.score(segmentOrd);
               return true;

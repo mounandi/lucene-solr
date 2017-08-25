@@ -213,6 +213,9 @@ def checkAll(dirName):
         elif link.find('lucene.apache.org/solr/quickstart.html') != -1:
           # OK
           pass
+        elif link.find('lucene.apache.org/solr/downloads.html') != -1:
+          # OK
+          pass
         elif (link.find('svn.apache.org') != -1
               or link.find('lucene.apache.org') != -1)\
              and os.path.basename(fullPath) != 'Changes.html':
@@ -263,7 +266,10 @@ def checkAll(dirName):
 if __name__ == '__main__':
   if checkAll(sys.argv[1]):
     print()
-    print('Broken javadocs links were found!')
+    print('Broken javadocs links were found! Common root causes:')
+    # please feel free to add to this list
+    print('* A typo of some sort for manually created links.')
+    print('* Public methods referencing non-public classes in their signature.')
     sys.exit(1)
   sys.exit(0)
   

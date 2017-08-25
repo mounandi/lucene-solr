@@ -28,8 +28,6 @@ import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
-import org.apache.lucene.document.LegacyIntField;
-import org.apache.lucene.document.LegacyLongField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.DocValues;
@@ -45,10 +43,12 @@ import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum.SeekStatus;
+import org.apache.solr.legacy.LegacyIntField;
+import org.apache.solr.legacy.LegacyLongField;
+import org.apache.solr.legacy.LegacyNumericUtils;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.LegacyNumericUtils;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.TestUtil;
@@ -115,25 +115,78 @@ public class TestDocTermOrds extends LuceneTestCase {
     final DocTermOrds dto = new DocTermOrds(ar, ar.getLiveDocs(), "field");
     SortedSetDocValues iter = dto.iterator(ar);
     
-    iter.setDocument(0);
+    assertEquals(0, iter.nextDoc());
     assertEquals(0, iter.nextOrd());
     assertEquals(1, iter.nextOrd());
     assertEquals(2, iter.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, iter.nextOrd());
     
-    iter.setDocument(1);
+    assertEquals(1, iter.nextDoc());
     assertEquals(3, iter.nextOrd());
     assertEquals(4, iter.nextOrd());
     assertEquals(5, iter.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, iter.nextOrd());
 
-    iter.setDocument(2);
+    assertEquals(2, iter.nextDoc());
     assertEquals(0, iter.nextOrd());
     assertEquals(5, iter.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, iter.nextOrd());
 
     r.close();
     dir.close();
+  }
+
+  /* UnInvertedField had a reference block limitation of 2^24. This unit test triggered it.
+   *
+   * With the current code, the test verifies that the old limit no longer applies.
+   * New limit is 2^31, which is not very realistic to unit-test. */
+  @SuppressWarnings({"ConstantConditions", "PointlessBooleanExpression"})
+  @Nightly
+  public void testTriggerUnInvertLimit() throws IOException {
+    final boolean SHOULD_TRIGGER = false; // Set this to true to use the test with the old implementation
+
+    // Ensure enough terms inside of a single UnInvert-pass-structure to trigger the limit
+    final int REF_LIMIT = (int) Math.pow(2, 24); // Maximum number of references within a single pass-structure
+    final int DOCS = (1<<16)-1;                  // The number of documents within a single pass (simplified)
+    final int TERMS = REF_LIMIT/DOCS;            // Each document must have this many references aka terms hit limit
+
+    Directory dir = newDirectory();
+    final RandomIndexWriter w = new RandomIndexWriter(random(), dir,
+        newIndexWriterConfig(new MockAnalyzer(random())).setMergePolicy(newLogMergePolicy()));
+    Document doc = new Document();
+    Field field = newTextField("field", "", Field.Store.NO);
+    doc.add(field);
+
+    StringBuilder sb = new StringBuilder(TERMS*(Integer.toString(TERMS).length()+1));
+    for (int i = 0 ; i < TERMS ; i++) {
+      sb.append(" ").append(Integer.toString(i));
+    }
+    field.setStringValue(sb.toString());
+
+    for (int i = 0 ; i < DOCS ; i++) {
+      w.addDocument(doc);
+    }
+    //System.out.println("\n Finished adding " + DOCS + " documents of " + TERMS + " unique terms");
+    final IndexReader r = w.getReader();
+    w.close();
+    
+    try {
+      final LeafReader ar = SlowCompositeReaderWrapper.wrap(r);
+      TestUtil.checkReader(ar);
+      final DocTermOrds dto = new DocTermOrds(ar, ar.getLiveDocs(), "field"); // bigTerms turned off
+      if (SHOULD_TRIGGER) {
+        fail("DocTermOrds should have failed with a \"Too many values for UnInvertedField\" message");
+      }
+    } catch (IllegalStateException e) {
+      if (!SHOULD_TRIGGER) {
+        fail("DocTermsOrd should not have failed with this implementation, but got exception " +
+            e.getClass().getSimpleName() + " with message " + e.getMessage());
+      }
+      // This is (hopefully) "Too many values for UnInvertedField faceting on field field", so all is as expected
+    } finally {
+      r.close();
+      dir.close();
+    }
   }
 
   public void testRandom() throws Exception {
@@ -218,7 +271,7 @@ public class TestDocTermOrds extends LuceneTestCase {
     TestUtil.checkReader(slowR);
     verify(slowR, idToOrds, termsArray, null);
 
-    FieldCache.DEFAULT.purgeByCacheKey(slowR.getCoreCacheKey());
+    FieldCache.DEFAULT.purgeByCacheKey(slowR.getCoreCacheHelper().getKey());
 
     r.close();
     dir.close();
@@ -338,7 +391,7 @@ public class TestDocTermOrds extends LuceneTestCase {
       verify(slowR, idToOrdsPrefix, termsArray, prefixRef);
     }
 
-    FieldCache.DEFAULT.purgeByCacheKey(slowR.getCoreCacheKey());
+    FieldCache.DEFAULT.purgeByCacheKey(slowR.getCoreCacheHelper().getKey());
 
     r.close();
     dir.close();
@@ -353,7 +406,7 @@ public class TestDocTermOrds extends LuceneTestCase {
                                             TestUtil.nextInt(random(), 2, 10));
                                             
 
-    final NumericDocValues docIDToID = FieldCache.DEFAULT.getNumerics(r, "id", FieldCache.LEGACY_INT_PARSER, false);
+    final NumericDocValues docIDToID = FieldCache.DEFAULT.getNumerics(r, "id", FieldCache.LEGACY_INT_PARSER);
     /*
       for(int docID=0;docID<subR.maxDoc();docID++) {
       System.out.println("  docID=" + docID + " id=" + docIDToID[docID]);
@@ -405,11 +458,20 @@ public class TestDocTermOrds extends LuceneTestCase {
 
     SortedSetDocValues iter = dto.iterator(r);
     for(int docID=0;docID<r.maxDoc();docID++) {
-      if (VERBOSE) {
-        System.out.println("TEST: docID=" + docID + " of " + r.maxDoc() + " (id=" + docIDToID.get(docID) + ")");
+      assertEquals(docID, docIDToID.nextDoc());
+      if (docID > iter.docID()) {
+        iter.nextDoc();
       }
-      iter.setDocument(docID);
-      final int[] answers = idToOrds[(int) docIDToID.get(docID)];
+      if (docID < iter.docID()) {
+        int[] answers = idToOrds[(int) docIDToID.longValue()];
+        assertEquals(0, answers.length);
+        continue;
+      }
+      
+      if (VERBOSE) {
+        System.out.println("TEST: docID=" + docID + " of " + r.maxDoc() + " (id=" + docIDToID.longValue() + ")");
+      }
+      final int[] answers = idToOrds[(int) docIDToID.longValue()];
       int upto = 0;
       long ord;
       while ((ord = iter.nextOrd()) != SortedSetDocValues.NO_MORE_ORDS) {
@@ -447,7 +509,7 @@ public class TestDocTermOrds extends LuceneTestCase {
     
     SortedSetDocValues v = FieldCache.DEFAULT.getDocTermOrds(getOnlyLeafReader(r1), "foo", null);
     assertEquals(3, v.getValueCount());
-    v.setDocument(1);
+    assertEquals(1, v.advance(1));
     assertEquals(1, v.nextOrd());
     
     iw.close();
@@ -477,12 +539,12 @@ public class TestDocTermOrds extends LuceneTestCase {
     
     SortedSetDocValues v = FieldCache.DEFAULT.getDocTermOrds(ar, "foo", FieldCache.INT32_TERM_PREFIX);
     assertEquals(2, v.getValueCount());
-    
-    v.setDocument(0);
+
+    assertEquals(0, v.nextDoc());
     assertEquals(1, v.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, v.nextOrd());
     
-    v.setDocument(1);
+    assertEquals(1, v.nextDoc());
     assertEquals(0, v.nextOrd());
     assertEquals(1, v.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, v.nextOrd());
@@ -519,11 +581,11 @@ public class TestDocTermOrds extends LuceneTestCase {
     SortedSetDocValues v = FieldCache.DEFAULT.getDocTermOrds(ar, "foo", FieldCache.INT64_TERM_PREFIX);
     assertEquals(2, v.getValueCount());
     
-    v.setDocument(0);
+    assertEquals(0, v.nextDoc());
     assertEquals(1, v.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, v.nextOrd());
     
-    v.setDocument(1);
+    assertEquals(1, v.nextDoc());
     assertEquals(0, v.nextOrd());
     assertEquals(1, v.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, v.nextOrd());
@@ -654,18 +716,15 @@ public class TestDocTermOrds extends LuceneTestCase {
     assertNotNull(DocValues.unwrapSingleton(v)); // actually a single-valued field
     assertEquals(2, v.getValueCount());
     
-    v.setDocument(0);
+    assertEquals(0, v.nextDoc());
     assertEquals(0, v.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, v.nextOrd());
     
-    v.setDocument(1);
+    assertEquals(1, v.nextDoc());
     assertEquals(1, v.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, v.nextOrd());
     
-    v.setDocument(2);
-    assertEquals(SortedSetDocValues.NO_MORE_ORDS, v.nextOrd());
-    
-    v.setDocument(3);
+    assertEquals(3, v.nextDoc());
     assertEquals(1, v.nextOrd());
     assertEquals(SortedSetDocValues.NO_MORE_ORDS, v.nextOrd());
     

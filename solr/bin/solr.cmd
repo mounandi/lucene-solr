@@ -42,25 +42,121 @@ REM Select HTTP OR HTTPS related configurations
 set SOLR_URL_SCHEME=http
 set "SOLR_JETTY_CONFIG=--module=http"
 set "SOLR_SSL_OPTS= "
-IF DEFINED SOLR_SSL_KEY_STORE (
+
+IF NOT DEFINED SOLR_SSL_ENABLED (
+  IF DEFINED SOLR_SSL_KEY_STORE (
+    set "SOLR_SSL_ENABLED=true"
+  ) ELSE (
+    set "SOLR_SSL_ENABLED=false"
+  )
+)
+IF "%SOLR_SSL_ENABLED%"=="true" (
   set "SOLR_JETTY_CONFIG=--module=https"
   set SOLR_URL_SCHEME=https
-  set "SCRIPT_ERROR=Solr server directory %SOLR_SERVER_DIR% not found!"
-  set "SOLR_SSL_OPTS=-Dsolr.jetty.keystore=%SOLR_SSL_KEY_STORE% -Dsolr.jetty.keystore.password=%SOLR_SSL_KEY_STORE_PASSWORD% -Dsolr.jetty.truststore=%SOLR_SSL_TRUST_STORE% -Dsolr.jetty.truststore.password=%SOLR_SSL_TRUST_STORE_PASSWORD% -Dsolr.jetty.ssl.needClientAuth=%SOLR_SSL_NEED_CLIENT_AUTH% -Dsolr.jetty.ssl.wantClientAuth=%SOLR_SSL_WANT_CLIENT_AUTH%"
-  IF DEFINED SOLR_SSL_CLIENT_KEY_STORE  (
-    set "SOLR_SSL_OPTS=%SOLR_SSL_OPTS% -Djavax.net.ssl.keyStore=%SOLR_SSL_CLIENT_KEY_STORE% -Djavax.net.ssl.keyStorePassword=%SOLR_SSL_CLIENT_KEY_STORE_PASSWORD% -Djavax.net.ssl.trustStore=%SOLR_SSL_CLIENT_TRUST_STORE% -Djavax.net.ssl.trustStorePassword=%SOLR_SSL_CLIENT_TRUST_STORE_PASSWORD%"
+  IF DEFINED SOLR_SSL_KEY_STORE (
+    set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Dsolr.jetty.keystore=%SOLR_SSL_KEY_STORE%"
+  )
+
+  IF DEFINED SOLR_SSL_KEY_STORE_TYPE (
+    set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Dsolr.jetty.keystore.type=%SOLR_SSL_KEY_STORE_TYPE%"
+  )
+
+  IF DEFINED SOLR_SSL_TRUST_STORE (
+    set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Dsolr.jetty.truststore=%SOLR_SSL_TRUST_STORE%"
+  )
+  IF DEFINED SOLR_SSL_TRUST_STORE_TYPE (
+    set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Dsolr.jetty.truststore.type=%SOLR_SSL_TRUST_STORE_TYPE%"
+  )
+
+  IF DEFINED SOLR_SSL_NEED_CLIENT_AUTH (
+    set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Dsolr.jetty.ssl.needClientAuth=%SOLR_SSL_NEED_CLIENT_AUTH%"
+  )
+  IF DEFINED SOLR_SSL_WANT_CLIENT_AUTH (
+    set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Dsolr.jetty.ssl.wantClientAuth=%SOLR_SSL_WANT_CLIENT_AUTH%"
+  )
+
+  IF DEFINED SOLR_SSL_CLIENT_KEY_STORE (
+    set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Djavax.net.ssl.keyStore=%SOLR_SSL_CLIENT_KEY_STORE%"
+
+    IF DEFINED SOLR_SSL_CLIENT_KEY_STORE_TYPE (
+      set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Djavax.net.ssl.keyStoreType=%SOLR_SSL_CLIENT_KEY_STORE_TYPE%"
+    )
   ) ELSE (
-    set "SOLR_SSL_OPTS=%SOLR_SSL_OPTS% -Djavax.net.ssl.keyStore=%SOLR_SSL_KEY_STORE% -Djavax.net.ssl.keyStorePassword=%SOLR_SSL_KEY_STORE_PASSWORD% -Djavax.net.ssl.trustStore=%SOLR_SSL_TRUST_STORE% -Djavax.net.ssl.trustStorePassword=%SOLR_SSL_TRUST_STORE_PASSWORD%"
+    IF DEFINED SOLR_SSL_KEY_STORE (
+      set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Djavax.net.ssl.keyStore=%SOLR_SSL_KEY_STORE%"
+    )
+    IF DEFINED SOLR_SSL_KEY_STORE_TYPE (
+      set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Djavax.net.ssl.keyStoreType=%SOLR_SSL_KEY_STORE_TYPE%"
+    )
+  )
+
+  IF DEFINED SOLR_SSL_CLIENT_TRUST_STORE (
+    set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Djavax.net.ssl.trustStore=%SOLR_SSL_CLIENT_TRUST_STORE%"
+
+    IF DEFINED SOLR_SSL_CLIENT_TRUST_STORE_TYPE (
+      set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Djavax.net.ssl.trustStoreType=%SOLR_SSL_CLIENT_TRUST_STORE_TYPE%"
+    )
+  ) ELSE (
+    IF DEFINED SOLR_SSL_TRUST_STORE (
+     set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Djavax.net.ssl.trustStore=%SOLR_SSL_TRUST_STORE%"
+    )
+    IF DEFINED SOLR_SSL_TRUST_STORE_TYPE (
+     set "SOLR_SSL_OPTS=!SOLR_SSL_OPTS! -Djavax.net.ssl.trustStoreType=%SOLR_SSL_TRUST_STORE_TYPE%"
+    )
   )
 ) ELSE (
   set SOLR_SSL_OPTS=
 )
+
+REM Authentication options
+
+IF NOT DEFINED SOLR_AUTH_TYPE (
+  IF DEFINED SOLR_AUTHENTICATION_OPTS (
+    echo WARNING: SOLR_AUTHENTICATION_OPTS variable configured without associated SOLR_AUTH_TYPE variable
+    echo          Please configure SOLR_AUTH_TYPE variable with the authentication type to be used.
+    echo          Currently supported authentication types are [kerberos, basic]
+  )
+)
+
+IF DEFINED SOLR_AUTH_TYPE (
+  IF DEFINED SOLR_AUTHENTICATION_CLIENT_BUILDER (
+    echo WARNING: SOLR_AUTHENTICATION_CLIENT_BUILDER and SOLR_AUTH_TYPE variables are configured together
+    echo          Use SOLR_AUTH_TYPE variable to configure authentication type to be used
+    echo          Currently supported authentication types are [kerberos, basic]
+    echo          The value of SOLR_AUTHENTICATION_CLIENT_BUILDER configuration variable will be ignored
+  )
+)
+
+IF DEFINED SOLR_AUTH_TYPE (
+  IF /I "%SOLR_AUTH_TYPE%" == "basic" (
+    set SOLR_AUTHENTICATION_CLIENT_BUILDER="org.apache.solr.client.solrj.impl.PreemptiveBasicAuthClientBuilderFactory"
+  ) ELSE (
+    IF /I "%SOLR_AUTH_TYPE%" == "kerberos" (
+      set SOLR_AUTHENTICATION_CLIENT_BUILDER="org.apache.solr.client.solrj.impl.PreemptiveBasicAuthClientBuilderFactory"
+    ) ELSE (
+      echo ERROR: Value specified for SOLR_AUTH_TYPE configuration variable is invalid.
+      goto err
+    )
+  )
+)
+
+IF DEFINED SOLR_AUTHENTICATION_CLIENT_CONFIGURER (
+  echo WARNING: Found unsupported configuration variable SOLR_AUTHENTICATION_CLIENT_CONFIGURER
+  echo          Please start using SOLR_AUTH_TYPE instead
+)
+IF DEFINED SOLR_AUTHENTICATION_CLIENT_BUILDER (
+  set AUTHC_CLIENT_BUILDER_ARG="-Dsolr.httpclient.builder.factory=%SOLR_AUTHENTICATION_CLIENT_BUILDER%"
+)
+set "AUTHC_OPTS=%AUTHC_CLIENT_BUILDER_ARG% %SOLR_AUTHENTICATION_OPTS%"
 
 REM Set the SOLR_TOOL_HOST variable for use when connecting to a running Solr instance
 IF NOT "%SOLR_HOST%"=="" (
   set "SOLR_TOOL_HOST=%SOLR_HOST%"
 ) ELSE (
   set "SOLR_TOOL_HOST=localhost"
+)
+IF "%SOLR_JETTY_HOST%"=="" (
+  set SOLR_JETTY_HOST=0.0.0.0
 )
 
 REM Verify Java is available
@@ -103,6 +199,7 @@ IF "%1"=="status" goto get_info
 IF "%1"=="version" goto get_version
 IF "%1"=="-v" goto get_version
 IF "%1"=="-version" goto get_version
+IF "%1"=="assert" goto run_assert
 
 REM Only allow the command to be the first argument, assume start if not supplied
 IF "%1"=="start" goto set_script_cmd
@@ -141,6 +238,12 @@ IF "%1"=="zk" (
   goto parse_zk_args
 )
 
+IF "%1"=="auth" (
+  set SCRIPT_CMD=auth
+  SHIFT
+  goto run_auth
+)
+
 goto parse_args
 
 :usage
@@ -165,7 +268,7 @@ goto done
 :script_usage
 @echo.
 @echo Usage: solr COMMAND OPTIONS
-@echo        where COMMAND is one of: start, stop, restart, healthcheck, create, create_core, create_collection, delete, version, zk
+@echo        where COMMAND is one of: start, stop, restart, healthcheck, create, create_core, create_collection, delete, version, zk, auth, assert
 @echo.
 @echo   Standalone server example (start Solr running in the background on port 8984):
 @echo.
@@ -182,7 +285,7 @@ goto done
 
 :start_usage
 @echo.
-@echo Usage: solr %SCRIPT_CMD% [-f] [-c] [-h hostname] [-p port] [-d directory] [-z zkHost] [-m memory] [-e example] [-s solr.solr.home] [-a "additional-options"] [-V]
+@echo Usage: solr %SCRIPT_CMD% [-f] [-c] [-h hostname] [-p port] [-d directory] [-z zkHost] [-m memory] [-e example] [-s solr.solr.home] [-t solr.data.home] [-a "additional-options"] [-V]
 @echo.
 @echo   -f            Start Solr in foreground; default starts Solr in the background
 @echo                   and sends stdout / stderr to solr-PORT-console.log
@@ -194,7 +297,7 @@ goto done
 @echo.
 @echo   -p port       Specify the port to start the Solr HTTP listener on; default is 8983
 @echo.
-@echo   -d dir        Specify the Solr server directory; defaults to example
+@echo   -d dir        Specify the Solr server directory; defaults to server
 @echo.
 @echo   -z zkHost     Zookeeper connection string; only used when running in SolrCloud mode using -c
 @echo                   To launch an embedded Zookeeper instance, don't pass this parameter.
@@ -207,7 +310,11 @@ goto done
 @echo                   while reusing the same server directory set using the -d parameter. If set, the
 @echo                   specified directory should contain a solr.xml file, unless solr.xml exists in Zookeeper.
 @echo                   This parameter is ignored when running examples (-e), as the solr.solr.home depends
-@echo                   on which example is run. The default value is server/solr.
+@echo                   on which example is run. The default value is server/solr. If passed a relative dir
+@echo                   validation with the current dir will be done before trying the default server/<dir>
+@echo.
+@echo   -t dir        Sets the solr.data.home system property, used as root for ^<instance_dir^>/data directories.
+@echo                   If not set, Solr uses solr.solr.home for both config and data.
 @echo.
 @echo   -e example    Name of the example to run; available examples:
 @echo       cloud:          SolrCloud example
@@ -220,7 +327,14 @@ goto done
 @echo                 you could pass: -a "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=18983"
 @echo                 In most cases, you should wrap the additional parameters in double quotes.
 @echo.
+@echo   -j opts       Additional parameters to pass to Jetty when starting Solr.
+@echo                 For example, to add configuration folder that jetty should read
+@echo                 you could pass: -j "--include-jetty-dir=/etc/jetty/custom/server/"
+@echo                 In most cases, you should wrap the additional parameters in double quotes.
+@echo.
 @echo   -noprompt     Don't prompt for input; accept all defaults when running examples that accept user input
+@echo.
+@echo   -v and -q     Verbose (-v) or quiet (-q) logging. Sets default log level to DEBUG or WARN instead of INFO
 @echo.
 @echo   -V            Verbose messages from this script
 @echo.
@@ -246,11 +360,13 @@ goto done
 @echo.
 @echo   -z zkHost      Zookeeper connection string; default is localhost:9983
 @echo.
+@echo   -V             Enable more verbose output
+@echo.
 goto done
 
 :create_usage
 echo.
-echo Usage: solr create [-c name] [-d confdir] [-n confname] [-shards #] [-replicationFactor #] [-p port]
+echo Usage: solr create [-c name] [-d confdir] [-n confname] [-shards #] [-replicationFactor #] [-p port] [-V]
 echo.
 echo   Create a core or collection depending on whether Solr is running in standalone (core) or SolrCloud
 echo   mode (collection). In other words, this action detects which mode Solr is running in, and then takes
@@ -266,7 +382,7 @@ goto done
 
 :delete_usage
 echo.
-echo Usage: solr delete [-c name] [-deleteConfig boolean] [-p port]
+echo Usage: solr delete [-c name] [-deleteConfig boolean] [-p port] [-V]
 echo.
 echo  Deletes a core or collection depending on whether Solr is running in standalone (core) or SolrCloud
 echo  mode (collection). If you're deleting a collection in SolrCloud mode, the default behavior is to also
@@ -281,22 +397,23 @@ echo   -p port     Port of a local Solr instance where you want to create the ne
 echo                 If not specified, the script will search the local system for a running
 echo                 Solr instance and will use the port of the first server it finds.
 echo.
+echo   -V            Enable more verbose output.
+echo.
 goto done
 
 :create_core_usage
 echo.
-echo Usage: solr create_core [-c name] [-d confdir] [-p port]
+echo Usage: solr create_core [-c name] [-d confdir] [-p port] [-V]
 echo.
 echo   -c name     Name of core to create
 echo.
 echo   -d confdir  Configuration directory to copy when creating the new core, built-in options are:
 echo.
-echo       basic_configs: Minimal Solr configuration
-echo       data_driven_schema_configs: Managed schema with field-guessing support enabled
+echo       _default: Minimal configuration, which supports enabling/disabling field-guessing support
 echo       sample_techproducts_configs: Example configuration with many optional features enabled to
 echo          demonstrate the full power of Solr
 echo.
-echo       If not specified, default is: data_driven_schema_configs
+echo       If not specified, default is: _default
 echo.
 echo       Alternatively, you can pass the path to your own configuration directory instead of using
 echo       one of the built-in configurations, such as: bin\solr create_core -c mycore -d c:/tmp/myconfig
@@ -305,22 +422,23 @@ echo   -p port     Port of a local Solr instance where you want to create the ne
 echo                 If not specified, the script will search the local system for a running
 echo                 Solr instance and will use the port of the first server it finds.
 echo.
+echo   -V            Enable more verbose output.
+echo.
 goto done
 
 :create_collection_usage
 echo.
-echo Usage: solr create_collection [-c name] [-d confdir] [-n confname] [-shards #] [-replicationFactor #] [-p port]
+echo Usage: solr create_collection [-c name] [-d confdir] [-n confname] [-shards #] [-replicationFactor #] [-p port] [-V]
 echo.
 echo   -c name               Name of collection to create
 echo.
 echo   -d confdir            Configuration directory to copy when creating the new collection, built-in options are:
 echo.
-echo       basic_configs: Minimal Solr configuration
-echo       data_driven_schema_configs: Managed schema with field-guessing support enabled
+echo       _default: Minimal configuration, which supports enabling/disabling field-guessing support
 echo       sample_techproducts_configs: Example configuration with many optional features enabled to
 echo          demonstrate the full power of Solr
 echo.
-echo       If not specified, default is: data_driven_schema_configs
+echo       If not specified, default is: _default
 echo.
 echo       Alternatively, you can pass the path to your own configuration directory instead of using
 echo       one of the built-in configurations, such as: bin\solr create_collection -c mycoll -d c:/tmp/myconfig
@@ -342,6 +460,8 @@ echo   -p port               Port of a local Solr instance where you want to cre
 echo                           If not specified, the script will search the local system for a running
 echo                           Solr instance and will use the port of the first server it finds.
 echo.
+echo   -V                    Enable more verbose output.
+echo.
 goto done
 
 :zk_usage
@@ -352,6 +472,8 @@ echo         Be sure to check the Solr logs in case of errors.
 echo.
 echo             -z zkHost       Optional Zookeeper connection string for all commands. If specified it
 echo                             overrides the 'ZK_HOST=...'' defined in solr.in.sh.
+echo.
+echo             -V              Enable more verbose output.
 echo.
 echo         upconfig uploads a configset from the local machine to Zookeeper. (Backcompat: -upconfig)
 echo.
@@ -372,23 +494,32 @@ echo.
 echo.             ^<src^>, ^<dest^> : [file:][/]path/to/local/file or zk:/path/to/zk/node
 echo                              NOTE: ^<src^> and ^<dest^> may both be Zookeeper resources prefixed by 'zk:'
 echo             When ^<src^> is a zk resource, ^<dest^> may be '.'
-echo             If ^<dest^> ends with '/', then ^<dest^> will be a local folder or parent znode and the last
-echo             element of the ^<src^> path will be appended.
+echo             element of the ^<src^> path will be appended unless ^<src^> also ends in a slash. 
+echo             ^<dest^> may be zk:, which may be useful when using the cp -r form to backup/restore 
+echo              the entire zk state.
+echo              You must enclose local paths that end in a wildcard in quotes or just
+echo              end the local path in a slash. That is,
+echo              'bin/solr zk cp -r /some/dir/ zk:/ -z localhost:2181' is equivalent to
+echo              'bin/solr zk cp -r ^"/some/dir/*^" zk:/ -z localhost:2181'
+echo              but 'bin/solr zk cp -r /some/dir/* zk:/ -z localhost:2181' will throw an error
+echo .
+echo              here's an example of backup/restore for a ZK configuration:
+echo              to copy to local: 'bin/solr zk cp -r zk:/ /some/dir -z localhost:2181'
+echo              to restore to ZK: 'bin/solr zk cp -r /some/dir/ zk:/ -z localhost:2181'
 echo.
-echo             The 'file:' prefix is stripped, thus 'file:/' specifies an absolute local path and
-echo             'file:somewhere' specifies a relative local path. All paths on Zookeeper are absolute
-echo             so the slash is required.
+echo             The 'file:' prefix is stripped, thus 'file:/wherever' specifies an absolute local path and
+echo             'file:somewhere' specifies a relative local path. All paths on Zookeeper are absolute.
 echo.
 echo             Zookeeper nodes CAN have data, so moving a single file to a parent znode
 echo             will overlay the data on the parent Znode so specifying the trailing slash
-echo             is important.
+echo             can be important.
 echo.
-echo             Wildcards are not supported
+echo             Wildcards are supported when copying from local, trailing only and must be quoted.
 echo.
 echo         rm deletes files or folders on Zookeeper
 echo             -r     Recursively delete if ^<path^> is a directory. Command will fail if ^<path^>
 echo                    has children and -r is not specified. Optional
-echo             ^<path^> : [zk:]/path/to/zk/node. ^<path^> may not be the root ('/')"
+echo             ^<path^> : [zk:]/path/to/zk/node. ^<path^> may not be the root ('/')
 echo.
 echo         mv moves (renames) znodes on Zookeeper
 echo             ^<src^>, ^<dest^> : Zookeeper nodes, the 'zk:' prefix is optional.
@@ -404,6 +535,13 @@ echo             ^<path^>: The Zookeeper path to use as the root.
 echo.
 echo             Only the node names are listed, not data
 echo.
+echo         mkroot makes a znode in Zookeeper with no data. Can be used to make a path of arbitrary
+echo                depth but primarily intended to create a 'chroot'.
+echo.
+echo             ^<path^>: The Zookeeper path to create. Leading slash is assumed if not present.
+echo                       Intermediate nodes are created as needed if not present.
+echo.
+
 goto done
 
 :zk_short_usage
@@ -416,6 +554,7 @@ echo         solr zk cp [-r] ^<src^> ^<dest^> [-z zkHost]
 echo         solr zk rm [-r] ^<path^> [-z zkHost]
 echo         solr zk mv ^<src^> ^<dest^> [-z zkHost]
 echo         solr zk ls [-r] ^<path^> [-z zkHost]
+echo         solr zk mkroot ^<path^> [-z zkHost]
 echo.
 IF "%ZK_FULL%"=="true" (
   goto zk_full_usage
@@ -424,6 +563,37 @@ IF "%ZK_FULL%"=="true" (
 )
 goto done
 
+:auth_usage
+echo Usage: solr auth enable [-type basicAuth] -credentials user:pass [-blockUnknown ^<true|false^>] [-updateIncludeFileOnly ^<true|false^>] [-V]
+echo        solr auth enable [-type basicAuth] -prompt ^<true|false^> [-blockUnknown ^<true|false^>] [-updateIncludeFileOnly ^<true|false^>] [-V]
+echo        solr auth disable [-updateIncludeFileOnly ^<true|false^>] [-V]
+echo
+echo   -type ^<type^>                 The authentication mechanism to enable. Defaults to 'basicAuth'.
+echo
+echo   -credentials ^<user:pass^>     The username and password of the initial user
+echo                                Note: only one of -prompt or -credentials must be provided
+echo
+echo   -prompt ^<true|false^>         Prompts the user to provide the credentials
+echo                                Note: only one of -prompt or -credentials must be provided
+echo
+echo   -blockUnknown ^<true|false^>   When true, this blocks out access to unauthenticated users. When not provided,
+echo                                this defaults to false (i.e. unauthenticated users can access all endpoints, except the
+echo                                operations like collection-edit, security-edit, core-admin-edit etc.). Check the reference
+echo                                guide for Basic Authentication for more details.
+echo
+echo   -updateIncludeFileOnly ^<true|false^>    Only update the solr.in.sh or solr.in.cmd file, and skip actual enabling/disabling"
+echo                                          authentication (i.e. don't update security.json)"
+echo
+echo   -z zkHost                    Zookeeper connection string
+echo
+echo   -d <dir>                     Specify the Solr server directory"
+echo 
+echo   -s <dir>                     Specify the Solr home directory. This is where any credentials or authentication"
+echo                                configuration files (e.g. basicAuth.conf) would be placed."
+echo
+echo   -V                           Enable more verbose output
+echo 
+goto done
 
 REM Really basic command-line arg parsing
 :parse_args
@@ -439,11 +609,14 @@ IF "%1"=="-f" goto set_foreground_mode
 IF "%1"=="-foreground" goto set_foreground_mode
 IF "%1"=="-V" goto set_verbose
 IF "%1"=="-verbose" goto set_verbose
+IF "%1"=="-v" goto set_debug
+IF "%1"=="-q" goto set_warn
 IF "%1"=="-c" goto set_cloud_mode
 IF "%1"=="-cloud" goto set_cloud_mode
 IF "%1"=="-d" goto set_server_dir
 IF "%1"=="-dir" goto set_server_dir
 IF "%1"=="-s" goto set_solr_home_dir
+IF "%1"=="-t" goto set_solr_data_dir
 IF "%1"=="-solr.home" goto set_solr_home_dir
 IF "%1"=="-e" goto set_example
 IF "%1"=="-example" goto set_example
@@ -457,6 +630,8 @@ IF "%1"=="-z" goto set_zookeeper
 IF "%1"=="-zkhost" goto set_zookeeper
 IF "%1"=="-a" goto set_addl_opts
 IF "%1"=="-addlopts" goto set_addl_opts
+IF "%1"=="-j" goto set_addl_jetty_config
+IF "%1"=="-jettyconfig" goto set_addl_jetty_config
 IF "%1"=="-noprompt" goto set_noprompt
 IF "%1"=="-k" goto set_stop_key
 IF "%1"=="-key" goto set_stop_key
@@ -478,6 +653,16 @@ goto parse_args
 :set_verbose
 set verbose=1
 set "PASS_TO_RUN_EXAMPLE=--verbose !PASS_TO_RUN_EXAMPLE!"
+SHIFT
+goto parse_args
+
+:set_debug
+set SOLR_LOG_LEVEL=DEBUG
+SHIFT
+goto parse_args
+
+:set_warn
+set SOLR_LOG_LEVEL=WARN
 SHIFT
 goto parse_args
 
@@ -523,6 +708,24 @@ IF "%firstChar%"=="-" (
   goto invalid_cmd_line
 )
 set "SOLR_HOME=%~2"
+SHIFT
+SHIFT
+goto parse_args
+
+:set_solr_data_dir
+
+set "arg=%~2"
+IF "%arg%"=="" (
+  set SCRIPT_ERROR=Directory name is required!
+  goto invalid_cmd_line
+)
+
+set firstChar=%arg:~0,1%
+IF "%firstChar%"=="-" (
+  set SCRIPT_ERROR=Expected directory but found %2 instead!
+  goto invalid_cmd_line
+)
+set "SOLR_DATA_HOME=%~2"
 SHIFT
 SHIFT
 goto parse_args
@@ -653,6 +856,13 @@ SHIFT
 SHIFT
 goto parse_args
 
+:set_addl_jetty_config
+set "arg=%~2"
+set "SOLR_JETTY_ADDL_CONFIG=%~2"
+SHIFT
+SHIFT
+goto parse_args
+
 :set_passthru
 set "PASSTHRU=%~1=%~2"
 IF NOT "%SOLR_OPTS%"=="" (
@@ -714,7 +924,14 @@ IF "%STOP_KEY%"=="" set STOP_KEY=solrrocks
 
 @REM This is quite hacky, but examples rely on a different log4j.properties
 @REM so that we can write logs for examples to %SOLR_HOME%\..\logs
-set "SOLR_LOGS_DIR=%SOLR_SERVER_DIR%\logs"
+IF [%SOLR_LOGS_DIR%] == [] (
+  set "SOLR_LOGS_DIR=%SOLR_SERVER_DIR%\logs"
+) ELSE (
+  set SOLR_LOGS_DIR=%SOLR_LOGS_DIR:"=%
+)
+set SOLR_LOGS_DIR_QUOTED="%SOLR_LOGS_DIR%"
+set SOLR_DATA_HOME_QUOTED="%SOLR_DATA_HOME%"
+
 set "EXAMPLE_DIR=%SOLR_TIP%\example"
 set TMP=!SOLR_HOME:%EXAMPLE_DIR%=!
 IF NOT "%TMP%"=="%SOLR_HOME%" (
@@ -836,18 +1053,15 @@ IF ERRORLEVEL 1 (
   set IS_64bit=true
 )
 
-REM backup log files (use current timestamp for backup name)
-For /f "tokens=2-4 delims=/ " %%a in ('date /t') do (set mydate=%%c-%%a-%%b)
-For /f "tokens=1-2 delims=/:" %%a in ("%TIME%") do (set mytime=%%a%%b)
-set now_ts=!mydate!_!mytime!
-IF EXIST "!SOLR_LOGS_DIR!\solr.log" (
-  echo Backing up !SOLR_LOGS_DIR!\solr.log
-  move /Y "!SOLR_LOGS_DIR!\solr.log" "!SOLR_LOGS_DIR!\solr_log_!now_ts!"
+REM Clean up and rotate logs
+IF [%SOLR_LOG_PRESTART_ROTATION%] == [] (
+  set SOLR_LOG_PRESTART_ROTATION=true
 )
-
-IF EXIST "!SOLR_LOGS_DIR!\solr_gc.log" (
-  echo Backing up !SOLR_LOGS_DIR!\solr_gc.log
-  move /Y "!SOLR_LOGS_DIR!\solr_gc.log" "!SOLR_LOGS_DIR!\solr_gc_log_!now_ts!"
+IF [%SOLR_LOG_PRESTART_ROTATION%] == [true] (
+  call :run_utils "-remove_old_solr_logs 7" || echo "Failed removing old solr logs"
+  call :run_utils "-archive_gc_logs"        || echo "Failed archiving old GC logs"
+  call :run_utils "-archive_console_logs"   || echo "Failed archiving old console logs"
+  call :run_utils "-rotate_solr_logs 9"     || echo "Failed rotating old solr logs"
 )
 
 IF NOT "%ZK_HOST%"=="" set SOLR_MODE=solrcloud
@@ -889,15 +1103,49 @@ IF "%ENABLE_REMOTE_JMX_OPTS%"=="true" (
 
 IF NOT "%SOLR_HEAP%"=="" set SOLR_JAVA_MEM=-Xms%SOLR_HEAP% -Xmx%SOLR_HEAP%
 IF "%SOLR_JAVA_MEM%"=="" set SOLR_JAVA_MEM=-Xms512m -Xmx512m
+IF "%SOLR_JAVA_STACK_SIZE%"=="" set SOLR_JAVA_STACK_SIZE=-Xss256k
+set SOLR_OPTS=%SOLR_JAVA_STACK_SIZE% %SOLR_OPTS%
 IF "%SOLR_TIMEZONE%"=="" set SOLR_TIMEZONE=UTC
 
-IF "!JAVA_MAJOR_VERSION!"=="7" (
-  set "GC_TUNE=%GC_TUNE% -XX:CMSFullGCsBeforeCompaction=1 -XX:CMSTriggerPermRatio=80"
-  IF !JAVA_BUILD! GEQ 40 (
-    IF !JAVA_BUILD! LEQ 51 (
-      set "GC_TUNE=!GC_TUNE! -XX:-UseSuperWord"
-      @echo WARNING: Java version !JAVA_VERSION_INFO! has known bugs with Lucene and requires the -XX:-UseSuperWord flag. Please consider upgrading your JVM.
-    )
+IF "%GC_TUNE%"=="" (
+  set GC_TUNE=-XX:NewRatio=3 ^
+   -XX:SurvivorRatio=4 ^
+   -XX:TargetSurvivorRatio=90 ^
+   -XX:MaxTenuringThreshold=8 ^
+   -XX:+UseConcMarkSweepGC ^
+   -XX:+UseParNewGC ^
+   -XX:ConcGCThreads=4 -XX:ParallelGCThreads=4 ^
+   -XX:+CMSScavengeBeforeRemark ^
+   -XX:PretenureSizeThreshold=64m ^
+   -XX:+UseCMSInitiatingOccupancyOnly ^
+   -XX:CMSInitiatingOccupancyFraction=50 ^
+   -XX:CMSMaxAbortablePrecleanTime=6000 ^
+   -XX:+CMSParallelRemarkEnabled ^
+   -XX:+ParallelRefProcEnabled ^
+   -XX:-OmitStackTraceInFastThrow
+)
+
+if !JAVA_MAJOR_VERSION! GEQ 9  (
+  IF NOT "%GC_LOG_OPTS%"=="" (
+    echo ERROR: On Java 9 you cannot set GC_LOG_OPTS, only default GC logging is available. Exiting
+    GOTO :eof
+  )
+  set GC_LOG_OPTS="-Xlog:gc*:file=\"!SOLR_LOGS_DIR!\solr_gc.log\":time,uptime:filecount=9,filesize=20000"
+) else (
+  IF "%GC_LOG_OPTS%"=="" (
+    rem Set defaults for Java 8
+    set GC_LOG_OPTS=-verbose:gc ^
+     -XX:+PrintHeapAtGC ^
+     -XX:+PrintGCDetails ^
+     -XX:+PrintGCDateStamps ^
+     -XX:+PrintGCTimeStamps ^
+     -XX:+PrintTenuringDistribution ^
+     -XX:+PrintGCApplicationStoppedTime
+  )
+  if "%JAVA_VENDOR%" == "IBM J9" (
+    set GC_LOG_OPTS=!GC_LOG_OPTS! "-Xverbosegclog:!SOLR_LOGS_DIR!\solr_gc.log" -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=9 -XX:GCLogFileSize=20M
+  ) else (
+    set GC_LOG_OPTS=!GC_LOG_OPTS! "-Xloggc:!SOLR_LOGS_DIR!\solr_gc.log" -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=9 -XX:GCLogFileSize=20M
   )
 )
 
@@ -926,9 +1174,21 @@ IF "%verbose%"=="1" (
     CALL :safe_echo "     SOLR_ADDL_ARGS  = %SOLR_ADDL_ARGS%"
   )
 
+  IF NOT "%SOLR_JETTY_ADDL_CONFIG%"=="" (
+    CALL :safe_echo "     SOLR_JETTY_ADDL_CONFIG  = %SOLR_JETTY_ADDL_CONFIG%"
+  )
+
   IF "%ENABLE_REMOTE_JMX_OPTS%"=="true" (
     @echo     RMI_PORT        = !RMI_PORT!
     @echo     REMOTE_JMX_OPTS = %REMOTE_JMX_OPTS%
+  )
+
+  IF NOT "%SOLR_LOG_LEVEL%"=="" (
+    @echo     SOLR_LOG_LEVEL  = !SOLR_LOG_LEVEL!
+  )
+
+  IF NOT "%SOLR_DATA_HOME%"=="" (
+    @echo     SOLR_DATA_HOME  = !SOLR_DATA_HOME!
   )
 
   @echo.
@@ -941,42 +1201,62 @@ IF NOT "%REMOTE_JMX_OPTS%"=="" set "START_OPTS=%START_OPTS% %REMOTE_JMX_OPTS%"
 IF NOT "%SOLR_ADDL_ARGS%"=="" set "START_OPTS=%START_OPTS% %SOLR_ADDL_ARGS%"
 IF NOT "%SOLR_HOST_ARG%"=="" set "START_OPTS=%START_OPTS% %SOLR_HOST_ARG%"
 IF NOT "%SOLR_OPTS%"=="" set "START_OPTS=%START_OPTS% %SOLR_OPTS%"
-IF NOT "%SOLR_SSL_OPTS%"=="" (
+IF "%SOLR_SSL_ENABLED%"=="true" (
   set "SSL_PORT_PROP=-Dsolr.jetty.https.port=%SOLR_PORT%"
   set "START_OPTS=%START_OPTS% %SOLR_SSL_OPTS% !SSL_PORT_PROP!"
 )
-
+IF NOT "%SOLR_LOG_LEVEL%"=="" set "START_OPTS=%START_OPTS% -Dsolr.log.level=%SOLR_LOG_LEVEL%"
+set "START_OPTS=%START_OPTS% -Dsolr.log.dir=%SOLR_LOGS_DIR_QUOTED%"
+IF NOT "%SOLR_DATA_HOME%"=="" set "START_OPTS=%START_OPTS% -Dsolr.data.home=%SOLR_DATA_HOME_QUOTED%"
 IF NOT DEFINED LOG4J_CONFIG set "LOG4J_CONFIG=file:%SOLR_SERVER_DIR%\resources\log4j.properties"
 
 cd /d "%SOLR_SERVER_DIR%"
 
-IF NOT EXIST "!SOLR_LOGS_DIR!" (
-  mkdir "!SOLR_LOGS_DIR!"
+IF NOT EXIST "%SOLR_LOGS_DIR%" (
+  mkdir "%SOLR_LOGS_DIR%"
+)
+copy /Y NUL "%SOLR_LOGS_DIR%\.writable" > NUL 2>&1 && set WRITEOK=1
+IF DEFINED WRITEOK (
+  del "%SOLR_LOGS_DIR%\.writable"
+) else (
+  echo "ERROR: Logs directory %SOLR_LOGS_DIR% is not writable or could not be created. Exiting"
+  GOTO :eof
+)
+echo " contexts etc lib modules resources scripts solr solr-webapp " > "%TEMP%\solr-pattern.txt"
+findstr /i /C:" %SOLR_LOGS_DIR% " "%TEMP%\solr-pattern.txt" 1>nul
+if %ERRORLEVEL% == 0 (
+  echo "ERROR: Logs directory %SOLR_LOGS_DIR% is invalid. Reserved for the system. Exiting"
+  GOTO :eof
 )
 
 IF NOT EXIST "%SOLR_SERVER_DIR%\tmp" (
   mkdir "%SOLR_SERVER_DIR%\tmp"
 )
 
-IF "%JAVA_VENDOR%" == "IBM J9" (
-  set "GCLOG_OPT=-Xverbosegclog"
-) else (
-  set "GCLOG_OPT=-Xloggc"
-)
+IF "%DEFAULT_CONFDIR%"=="" set "DEFAULT_CONFDIR=%SOLR_SERVER_DIR%\solr\configsets\_default\conf"
 
 IF "%FG%"=="1" (
   REM run solr in the foreground
   title "Solr-%SOLR_PORT%"
   echo %SOLR_PORT%>"%SOLR_TIP%"\bin\solr-%SOLR_PORT%.port
-  "%JAVA%" %SERVEROPT% %SOLR_JAVA_MEM% %START_OPTS% %GCLOG_OPT%:"!SOLR_LOGS_DIR!"/solr_gc.log -Dlog4j.configuration="%LOG4J_CONFIG%" -DSTOP.PORT=!STOP_PORT! -DSTOP.KEY=%STOP_KEY% ^
-    -Djetty.port=%SOLR_PORT% -Dsolr.solr.home="%SOLR_HOME%" -Dsolr.install.dir="%SOLR_TIP%" -Djetty.home="%SOLR_SERVER_DIR%" -Djava.io.tmpdir="%SOLR_SERVER_DIR%\tmp" -jar start.jar "%SOLR_JETTY_CONFIG%"
+  "%JAVA%" %SERVEROPT% %SOLR_JAVA_MEM% %START_OPTS% ^
+    -Dlog4j.configuration="%LOG4J_CONFIG%" -DSTOP.PORT=!STOP_PORT! -DSTOP.KEY=%STOP_KEY% ^
+    -Dsolr.solr.home="%SOLR_HOME%" -Dsolr.install.dir="%SOLR_TIP%" -Dsolr.default.confdir="%DEFAULT_CONFDIR%" ^
+    -Djetty.host=%SOLR_JETTY_HOST% -Djetty.port=%SOLR_PORT% -Djetty.home="%SOLR_SERVER_DIR%" ^
+    -Djava.io.tmpdir="%SOLR_SERVER_DIR%\tmp" -jar start.jar "%SOLR_JETTY_CONFIG%" "%SOLR_JETTY_ADDL_CONFIG%"
 ) ELSE (
-  START /B "Solr-%SOLR_PORT%" /D "%SOLR_SERVER_DIR%" "%JAVA%" %SERVEROPT% %SOLR_JAVA_MEM% %START_OPTS% %GCLOG_OPT%:"!SOLR_LOGS_DIR!"/solr_gc.log -Dlog4j.configuration="%LOG4J_CONFIG%" -DSTOP.PORT=!STOP_PORT! -DSTOP.KEY=%STOP_KEY% ^
-    -Djetty.port=%SOLR_PORT% -Dsolr.solr.home="%SOLR_HOME%" -Dsolr.install.dir="%SOLR_TIP%" -Djetty.home="%SOLR_SERVER_DIR%" -Djava.io.tmpdir="%SOLR_SERVER_DIR%\tmp" -jar start.jar "%SOLR_JETTY_CONFIG%" > "!SOLR_LOGS_DIR!\solr-%SOLR_PORT%-console.log"
+  START /B "Solr-%SOLR_PORT%" /D "%SOLR_SERVER_DIR%" ^
+    "%JAVA%" %SERVEROPT% %SOLR_JAVA_MEM% %START_OPTS% ^
+    -Dlog4j.configuration="%LOG4J_CONFIG%" -DSTOP.PORT=!STOP_PORT! -DSTOP.KEY=%STOP_KEY% ^
+    -Dsolr.log.muteconsole ^
+    -Dsolr.solr.home="%SOLR_HOME%" -Dsolr.install.dir="%SOLR_TIP%" -Dsolr.default.confdir="%DEFAULT_CONFDIR%" ^
+    -Djetty.host=%SOLR_JETTY_HOST% -Djetty.port=%SOLR_PORT% -Djetty.home="%SOLR_SERVER_DIR%" ^
+    -Djava.io.tmpdir="%SOLR_SERVER_DIR%\tmp" -jar start.jar "%SOLR_JETTY_CONFIG%" "%SOLR_JETTY_ADDL_CONFIG%" > "!SOLR_LOGS_DIR!\solr-%SOLR_PORT%-console.log"
   echo %SOLR_PORT%>"%SOLR_TIP%"\bin\solr-%SOLR_PORT%.port
 
   REM now wait to see Solr come online ...
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dsolr.default.confdir="%DEFAULT_CONFDIR%"^
+    -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
     -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
     org.apache.solr.util.SolrCLI status -maxWaitSecs 30 -solr !SOLR_URL_SCHEME!://%SOLR_TOOL_HOST%:%SOLR_PORT%/solr
 )
@@ -986,9 +1266,11 @@ goto done
 :run_example
 REM Run the requested example
 
-"%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+"%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI run_example -script "%SDIR%\solr.cmd" -e %EXAMPLE% -d "%SOLR_SERVER_DIR%" -urlScheme !SOLR_URL_SCHEME! !PASS_TO_RUN_EXAMPLE!
+  org.apache.solr.util.SolrCLI run_example -script "%SDIR%\solr.cmd" -e %EXAMPLE% -d "%SOLR_SERVER_DIR%" ^
+  -urlScheme !SOLR_URL_SCHEME! !PASS_TO_RUN_EXAMPLE!
 
 REM End of run_example
 goto done
@@ -1006,7 +1288,8 @@ for /f "usebackq" %%i in (`dir /b "%SOLR_TIP%\bin" ^| findstr /i "^solr-.*\.port
           @echo.
           set has_info=1
           echo Found Solr process %%k running on port !SOME_SOLR_PORT!
-          "%JAVA%" %SOLR_SSL_OPTS%  %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+          "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+            -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
             -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
             org.apache.solr.util.SolrCLI status -solr !SOLR_URL_SCHEME!://%SOLR_TOOL_HOST%:!SOME_SOLR_PORT!/solr
           @echo.
@@ -1021,6 +1304,7 @@ goto done
 
 :parse_healthcheck_args
 IF [%1]==[] goto run_healthcheck
+IF "%1"=="-V" goto set_healthcheck_verbose
 IF "%1"=="-c" goto set_healthcheck_collection
 IF "%1"=="-collection" goto set_healthcheck_collection
 IF "%1"=="-z" goto set_healthcheck_zk
@@ -1029,6 +1313,11 @@ IF "%1"=="-help" goto usage
 IF "%1"=="-usage" goto usage
 IF "%1"=="/?" goto usage
 goto run_healthcheck
+
+:set_healthcheck_verbose
+set HEALTHCHECK_VERBOSE="-verbose"
+SHIFT
+goto parse_healthcheck_args
 
 :set_healthcheck_collection
 set HEALTHCHECK_COLLECTION=%~2
@@ -1044,20 +1333,47 @@ goto parse_healthcheck_args
 
 :run_healthcheck
 IF NOT DEFINED HEALTHCHECK_COLLECTION goto healthcheck_usage
+IF NOT DEFINED HEALTHCHECK_VERBOSE set "HEALTHCHECK_VERBOSE="
 IF NOT DEFINED HEALTHCHECK_ZK_HOST set "HEALTHCHECK_ZK_HOST=localhost:9983"
-"%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+"%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI healthcheck -collection !HEALTHCHECK_COLLECTION! -zkHost !HEALTHCHECK_ZK_HOST!
+  org.apache.solr.util.SolrCLI healthcheck -collection !HEALTHCHECK_COLLECTION! -zkHost !HEALTHCHECK_ZK_HOST! %HEALTHCHECK_VERBOSE%
+goto done
+
+:run_assert
+"%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
+  org.apache.solr.util.SolrCLI %* 
+if errorlevel 1 (
+   exit /b 1
+)
 goto done
 
 :get_version
-"%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+"%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
   org.apache.solr.util.SolrCLI version
 goto done
 
+:run_utils
+set "TOOL_CMD=%~1"
+set q="-q"
+IF "%verbose%"=="1"  set q=""
+"%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
+  org.apache.solr.util.SolrCLI utils -s "%DEFAULT_SERVER_DIR%" -l "%SOLR_LOGS_DIR%" %q:"=% %TOOL_CMD%
+if errorlevel 1 (
+   exit /b 1
+)
+goto done
+
 :parse_create_args
 IF [%1]==[] goto run_create
+IF "%1"=="-V" goto set_create_verbose
 IF "%1"=="-c" goto set_create_name
 IF "%1"=="-core" goto set_create_name
 IF "%1"=="-collection" goto set_create_name
@@ -1075,6 +1391,12 @@ IF "%1"=="-help" goto usage
 IF "%1"=="-usage" goto usage
 IF "%1"=="/?" goto usage
 goto run_create
+
+
+:set_create_verbose
+set CREATE_VERBOSE="-verbose"
+SHIFT
+goto parse_create_args
 
 :set_create_name
 set CREATE_NAME=%~2
@@ -1117,7 +1439,8 @@ IF "!CREATE_NAME!"=="" (
   set "SCRIPT_ERROR=Name (-c) is a required parameter for %SCRIPT_CMD%"
   goto invalid_cmd_line
 )
-IF "!CREATE_CONFDIR!"=="" set CREATE_CONFDIR=data_driven_schema_configs
+IF NOT DEFINED CREATE_VERBOSE set "CREATE_VERBOSE="
+IF "!CREATE_CONFDIR!"=="" set CREATE_CONFDIR=_default
 IF "!CREATE_NUM_SHARDS!"=="" set CREATE_NUM_SHARDS=1
 IF "!CREATE_REPFACT!"=="" set CREATE_REPFACT=1
 IF "!CREATE_CONFNAME!"=="" set CREATE_CONFNAME=!CREATE_NAME!
@@ -1139,22 +1462,33 @@ if "!CREATE_PORT!"=="" (
   goto err
 )
 
+if "!CREATE_CONFDIR!"=="_default" (
+  echo WARNING: Using _default configset. Data driven schema functionality is enabled by default, which is
+  echo          NOT RECOMMENDED for production use.
+  echo          To turn it off:
+  echo             curl http://%SOLR_TOOL_HOST%:!CREATE_PORT!/solr/!CREATE_NAME!/config -d '{"set-user-property": {"update.autoCreateFields":"false"}}'
+)
+
 if "%SCRIPT_CMD%"=="create_core" (
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+    -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
     -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
     org.apache.solr.util.SolrCLI create_core -name !CREATE_NAME! -solrUrl !SOLR_URL_SCHEME!://%SOLR_TOOL_HOST%:!CREATE_PORT!/solr ^
-    -confdir !CREATE_CONFDIR! -configsetsDir "%SOLR_TIP%\server\solr\configsets"
+    -confdir !CREATE_CONFDIR! -configsetsDir "%SOLR_TIP%\server\solr\configsets" %CREATE_VERBOSE%
 ) else (
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
-  -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI create -name !CREATE_NAME! -shards !CREATE_NUM_SHARDS! -replicationFactor !CREATE_REPFACT! ^
-  -confname !CREATE_CONFNAME! -confdir !CREATE_CONFDIR! -configsetsDir "%SOLR_TIP%\server\solr\configsets" -solrUrl !SOLR_URL_SCHEME!://%SOLR_TOOL_HOST%:!CREATE_PORT!/solr
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dsolr.default.confdir="%DEFAULT_CONFDIR%"^
+    -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+    -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
+    org.apache.solr.util.SolrCLI create -name !CREATE_NAME! -shards !CREATE_NUM_SHARDS! -replicationFactor !CREATE_REPFACT! ^
+    -confname !CREATE_CONFNAME! -confdir !CREATE_CONFDIR! -configsetsDir "%SOLR_TIP%\server\solr\configsets" ^
+    -solrUrl !SOLR_URL_SCHEME!://%SOLR_TOOL_HOST%:!CREATE_PORT!/solr %CREATE_VERBOSE%
 )
 
 goto done
 
 :parse_delete_args
 IF [%1]==[] goto run_delete
+IF "%1"=="-V" goto set_delete_verbose
 IF "%1"=="-c" goto set_delete_name
 IF "%1"=="-core" goto set_delete_name
 IF "%1"=="-collection" goto set_delete_name
@@ -1165,6 +1499,11 @@ IF "%1"=="-help" goto usage
 IF "%1"=="-usage" goto usage
 IF "%1"=="/?" goto usage
 goto run_delete
+
+:set_delete_verbose
+set DELETE_VERBOSE="-verbose"
+SHIFT
+goto parse_delete_args
 
 :set_delete_name
 set DELETE_NAME=%~2
@@ -1185,6 +1524,7 @@ SHIFT
 goto parse_delete_args
 
 :run_delete
+IF NOT DEFINED DELETE_VERBOSE set "DELETE_VERBOSE="
 IF "!DELETE_NAME!"=="" (
   set "SCRIPT_ERROR=Name (-c) is a required parameter for %SCRIPT_CMD%"
   goto invalid_cmd_line
@@ -1211,10 +1551,11 @@ if "!DELETE_CONFIG!"=="" (
   set DELETE_CONFIG=true
 )
 
-"%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+"%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+-Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
 -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
 org.apache.solr.util.SolrCLI delete -name !DELETE_NAME! -deleteConfig !DELETE_CONFIG! ^
--solrUrl !SOLR_URL_SCHEME!://%SOLR_TOOL_HOST%:!DELETE_PORT!/solr
+-solrUrl !SOLR_URL_SCHEME!://%SOLR_TOOL_HOST%:!DELETE_PORT!/solr %DELETE_VERBOSE%
 
 goto done
 
@@ -1222,6 +1563,8 @@ REM Clumsy to do the state machine thing for -d and -n, but that's required for 
 :parse_zk_args
 IF "%1"=="-upconfig" (
   goto set_zk_op
+) ELSE IF "%1"=="-V" (
+  goto set_zk_verbose
 ) ELSE IF "%1"=="upconfig" (
   goto set_zk_op
 ) ELSE IF "%1"=="-downconfig" (
@@ -1235,6 +1578,8 @@ IF "%1"=="-upconfig" (
 ) ELSE IF "%1"=="rm" (
   goto set_zk_op
 ) ELSE IF "%1"=="ls" (
+  goto set_zk_op
+) ELSE IF "%1"=="mkroot" (
   goto set_zk_op
 ) ELSE IF "%1"=="-n" (
   goto set_config_name
@@ -1258,7 +1603,6 @@ IF "%1"=="-upconfig" (
   if not "%~1"=="" (
     goto set_zk_src
   )
-  goto zk_usage
 ) ELSE IF "!ZK_DST!"=="" (
   IF "%ZK_OP%"=="cp" (
     goto set_zk_dst
@@ -1275,6 +1619,11 @@ goto run_zk
 
 :set_zk_op
 set ZK_OP=%~1
+SHIFT
+goto parse_zk_args
+
+:set_zk_verbose
+set ZK_VERBOSE="-verbose"
 SHIFT
 goto parse_zk_args
 
@@ -1338,9 +1687,11 @@ IF "!ZK_OP!"=="upconfig" (
     set ERROR_MSG="The -d option must be set for upconfig."
     goto zk_short_usage
   )
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI !ZK_OP! -confname !CONFIGSET_NAME! -confdir !CONFIGSET_DIR! -zkHost !ZK_HOST! -configsetsDir "%SOLR_TIP%/server/solr/configsets"
+  org.apache.solr.util.SolrCLI !ZK_OP! -confname !CONFIGSET_NAME! -confdir !CONFIGSET_DIR! -zkHost !ZK_HOST! %ZK_VERBOSE%^
+  -configsetsDir "%SOLR_TIP%/server/solr/configsets"
 ) ELSE IF "!ZK_OP!"=="downconfig" (
   IF "!CONFIGSET_NAME!"=="" (
     set ERROR_MSG="-n option must be set for downconfig"
@@ -1350,9 +1701,10 @@ IF "!ZK_OP!"=="upconfig" (
     set ERROR_MSG="The -d option must be set for downconfig."
     goto zk_short_usage
   )
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI !ZK_OP! -confname !CONFIGSET_NAME! -confdir !CONFIGSET_DIR! -zkHost !ZK_HOST!
+  org.apache.solr.util.SolrCLI !ZK_OP! -confname !CONFIGSET_NAME! -confdir !CONFIGSET_DIR! -zkHost !ZK_HOST! %ZK_VERBOSE%
 ) ELSE IF "!ZK_OP!"=="cp" (
   IF "%ZK_SRC%"=="" (
     set ERROR_MSG="<src> must be specified for 'cp' command"
@@ -1368,9 +1720,10 @@ IF "!ZK_OP!"=="upconfig" (
       goto zk_short_usage
   )
   )
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -src !ZK_SRC! -dst !ZK_DST! -recurse !ZK_RECURSE!
+  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -src !ZK_SRC! -dst !ZK_DST! -recurse !ZK_RECURSE! %ZK_VERBOSE%
 ) ELSE IF "!ZK_OP!"=="mv" (
   IF "%ZK_SRC%"=="" (
     set ERROR_MSG="<src> must be specified for 'mv' command"
@@ -1380,30 +1733,101 @@ IF "!ZK_OP!"=="upconfig" (
     set ERROR_MSG="<dest> must be specified for 'mv' command"
     goto zk_short_usage
   )
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -src !ZK_SRC! -dst !ZK_DST!
+  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -src !ZK_SRC! -dst !ZK_DST! %ZK_VERBOSE%
 ) ELSE IF "!ZK_OP!"=="rm" (
   IF "%ZK_SRC"=="" (
     set ERROR_MSG="Zookeeper path to remove must be specified when using the 'rm' command"
     goto zk_short_usage
   )
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -path !ZK_SRC! -recurse !ZK_RECURSE!
+  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -path !ZK_SRC! -recurse !ZK_RECURSE! %ZK_VERBOSE%
 ) ELSE IF "!ZK_OP!"=="ls" (
   IF "%ZK_SRC"=="" (
-    set ERROR_MSG="Zookeeper path to remove must be specified when using the 'rm' command"
+    set ERROR_MSG="Zookeeper path to remove must be specified when using the 'ls' command"
     goto zk_short_usage
   )
-  "%JAVA%" %SOLR_SSL_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
   -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
-  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -path !ZK_SRC! -recurse !ZK_RECURSE!
+  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -path !ZK_SRC! -recurse !ZK_RECURSE! %ZK_VERBOSE%
+) ELSE IF "!ZK_OP!"=="mkroot" (
+  IF "%ZK_SRC"=="" (
+    set ERROR_MSG="Zookeeper path to create must be specified when using the 'mkroot' command"
+    goto zk_short_usage
+  )
+  "%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+  -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+  -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
+  org.apache.solr.util.SolrCLI !ZK_OP! -zkHost !ZK_HOST! -path !ZK_SRC! %ZK_VERBOSE%
 ) ELSE (
   set ERROR_MSG="Unknown zk option !ZK_OP!"
   goto zk_short_usage
 )
 goto done
+
+ 
+:run_auth
+IF "%1"=="-help" goto usage
+IF "%1"=="-usage" goto usage
+
+REM Options parsing.
+REM Note: With the following technique of parsing, it is not possible
+REM       to have an option without a value.
+set "AUTH_PARAMS=%1"
+set "option="
+for %%a in (%*) do (
+   if not defined option (
+      set arg=%%a
+      if "!arg:~0,1!" equ "-" set "option=!arg!"
+   ) else (
+      set "option!option!=%%a"
+      if "!option!" equ "-d" set "SOLR_SERVER_DIR=%%a"
+      if "!option!" equ "-s" set "SOLR_HOME=%%a"
+      if not "!option!" equ "-s" if not "!option!" equ "-d" (
+        set "AUTH_PARAMS=!AUTH_PARAMS! !option! %%a"
+      )
+      set "option="
+   )
+)
+IF "%SOLR_SERVER_DIR%"=="" set "SOLR_SERVER_DIR=%DEFAULT_SERVER_DIR%"
+IF NOT EXIST "%SOLR_SERVER_DIR%" (
+  set "SCRIPT_ERROR=Solr server directory %SOLR_SERVER_DIR% not found!"
+  goto err
+)
+IF "%SOLR_HOME%"=="" set "SOLR_HOME=%SOLR_SERVER_DIR%\solr"
+IF EXIST "%cd%\%SOLR_HOME%" set "SOLR_HOME=%cd%\%SOLR_HOME%"
+IF NOT EXIST "%SOLR_HOME%\" (
+  IF EXIST "%SOLR_SERVER_DIR%\%SOLR_HOME%" (
+    set "SOLR_HOME=%SOLR_SERVER_DIR%\%SOLR_HOME%"
+  ) ELSE (
+    set "SCRIPT_ERROR=Solr home directory %SOLR_HOME% not found!"
+    goto err
+  )
+)
+
+if "!AUTH_PORT!"=="" (
+  for /f "usebackq" %%i in (`dir /b "%SOLR_TIP%\bin" ^| findstr /i "^solr-.*\.port$"`) do (
+    set SOME_SOLR_PORT=
+    For /F "Delims=" %%J In ('type "%SOLR_TIP%\bin\%%i"') do set SOME_SOLR_PORT=%%~J
+    if NOT "!SOME_SOLR_PORT!"=="" (
+      for /f "tokens=2,5" %%j in ('netstat -aon ^| find "TCP " ^| find ":0 " ^| find ":!SOME_SOLR_PORT! "') do (
+        IF NOT "%%k"=="0" set AUTH_PORT=!SOME_SOLR_PORT!
+      )
+    )
+  )
+)
+"%JAVA%" %SOLR_SSL_OPTS% %AUTHC_OPTS% %SOLR_ZK_CREDS_AND_ACLS% -Dsolr.install.dir="%SOLR_TIP%" ^
+    -Dlog4j.configuration="file:%DEFAULT_SERVER_DIR%\scripts\cloud-scripts\log4j.properties" ^
+    -classpath "%DEFAULT_SERVER_DIR%\solr-webapp\webapp\WEB-INF\lib\*;%DEFAULT_SERVER_DIR%\lib\ext\*" ^
+    org.apache.solr.util.SolrCLI auth %AUTH_PARAMS% -solrIncludeFile "%SOLR_INCLUDE%" -authConfDir "%SOLR_HOME%" ^
+    -solrUrl !SOLR_URL_SCHEME!://%SOLR_TOOL_HOST%:!AUTH_PORT!/solr
+goto done
+
 
 :invalid_cmd_line
 @echo.
@@ -1462,18 +1886,18 @@ set JAVA_MAJOR_VERSION=0
 set JAVA_VERSION_INFO=
 set JAVA_BUILD=0
 
-"%JAVA%" -version 2>&1 | findstr /i "version" > javavers
-set /p JAVAVEROUT=<javavers
-del javavers
-
-for /f "tokens=3" %%a in ("!JAVAVEROUT!") do (
+FOR /f "usebackq tokens=3" %%a IN (`^""%JAVA%" -version 2^>^&1 ^| findstr "version"^"`) do (
   set JAVA_VERSION_INFO=%%a
   REM Remove surrounding quotes
   set JAVA_VERSION_INFO=!JAVA_VERSION_INFO:"=!
 
   REM Extract the major Java version, e.g. 7, 8, 9, 10 ...
-  for /f "tokens=2 delims=." %%a in ("!JAVA_VERSION_INFO!") do (
-    set JAVA_MAJOR_VERSION=%%a
+  for /f "tokens=1,2 delims=." %%a in ("!JAVA_VERSION_INFO!") do (
+    if "%%a" GEQ "9" (
+      set JAVA_MAJOR_VERSION=%%a
+    ) else (
+      set JAVA_MAJOR_VERSION=%%b
+    )
   )
 
   REM Don't look for "_{build}" if we're on IBM J9.
@@ -1487,13 +1911,8 @@ GOTO :eof
 
 REM Set which JVM vendor we have
 :resolve_java_vendor
-set "JAVA_VENDOR=Oracle"
-"%JAVA%" -version 2>&1 | findstr /i "IBM J9" > javares
-set /p JAVA_VENDOR_OUT=<javares
-del javares
-if NOT "%JAVA_VENDOR_OUT%" == "" (
-  set "JAVA_VENDOR=IBM J9"
-)
+"%JAVA%" -version 2>&1 | findstr /i "IBM J9" > nul
+if %ERRORLEVEL% == 1 ( set "JAVA_VENDOR=Oracle" ) else ( set "JAVA_VENDOR=IBM J9" )
 
 set JAVA_VENDOR_OUT=
 GOTO :eof

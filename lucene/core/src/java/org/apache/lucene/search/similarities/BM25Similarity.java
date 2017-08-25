@@ -96,20 +96,6 @@ public class BM25Similarity extends Similarity {
     }
   }
   
-  /** The default implementation encodes <code>boost / sqrt(length)</code>
-   * with {@link SmallFloat#floatToByte315(float)}.  This is compatible with 
-   * Lucene's default implementation.  If you change this, then you should 
-   * change {@link #decodeNormValue(byte)} to match. */
-  protected byte encodeNormValue(float boost, int fieldLength) {
-    return SmallFloat.floatToByte315(boost / (float) Math.sqrt(fieldLength));
-  }
-
-  /** The default implementation returns <code>1 / f<sup>2</sup></code>
-   * where <code>f</code> is {@link SmallFloat#byte315ToFloat(byte)}. */
-  protected float decodeNormValue(byte b) {
-    return NORM_TABLE[b & 0xFF];
-  }
-  
   /** 
    * True if overlap tokens (tokens with a position of increment of zero) are
    * discounted from the document's length.
@@ -132,21 +118,19 @@ public class BM25Similarity extends Similarity {
   }
   
   /** Cache of decoded bytes. */
-  private static final float[] NORM_TABLE = new float[256];
+  private static final float[] LENGTH_TABLE = new float[256];
 
   static {
-    for (int i = 1; i < 256; i++) {
-      float f = SmallFloat.byte315ToFloat((byte)i);
-      NORM_TABLE[i] = 1.0f / (f*f);
+    for (int i = 0; i < 256; i++) {
+      LENGTH_TABLE[i] = SmallFloat.byte4ToInt((byte) i);
     }
-    NORM_TABLE[0] = 1.0f / NORM_TABLE[255]; // otherwise inf
   }
 
 
   @Override
   public final long computeNorm(FieldInvertState state) {
     final int numTerms = discountOverlaps ? state.getLength() - state.getNumOverlap() : state.getLength();
-    return encodeNormValue(state.getBoost(), numTerms);
+    return SmallFloat.intToByte4(numTerms);
   }
 
   /**
@@ -175,7 +159,9 @@ public class BM25Similarity extends Similarity {
     final long df = termStats.docFreq();
     final long docCount = collectionStats.docCount() == -1 ? collectionStats.maxDoc() : collectionStats.docCount();
     final float idf = idf(df, docCount);
-    return Explanation.match(idf, "idf(docFreq=" + df + ", docCount=" + docCount + ")");
+    return Explanation.match(idf, "idf, computed as log(1 + (docCount - docFreq + 0.5) / (docFreq + 0.5)) from:",
+        Explanation.match(df, "docFreq"),
+        Explanation.match(docCount, "docCount"));
   }
 
   /**
@@ -192,28 +178,24 @@ public class BM25Similarity extends Similarity {
    *         for each term.
    */
   public Explanation idfExplain(CollectionStatistics collectionStats, TermStatistics termStats[]) {
-    final long docCount = collectionStats.docCount() == -1 ? collectionStats.maxDoc() : collectionStats.docCount();
-    float idf = 0.0f;
+    double idf = 0d; // sum into a double before casting into a float
     List<Explanation> details = new ArrayList<>();
     for (final TermStatistics stat : termStats ) {
-      final long df = stat.docFreq();
-      final float termIdf = idf(df, docCount);
-      details.add(Explanation.match(termIdf, "idf(docFreq=" + df + ", docCount=" + docCount + ")"));
-      idf += termIdf;
+      Explanation idfExplain = idfExplain(collectionStats, stat);
+      details.add(idfExplain);
+      idf += idfExplain.getValue();
     }
-    return Explanation.match(idf, "idf(), sum of:", details);
+    return Explanation.match((float) idf, "idf(), sum of:", details);
   }
 
   @Override
   public final SimWeight computeWeight(float boost, CollectionStatistics collectionStats, TermStatistics... termStats) {
     Explanation idf = termStats.length == 1 ? idfExplain(collectionStats, termStats[0]) : idfExplain(collectionStats, termStats);
-
     float avgdl = avgFieldLength(collectionStats);
 
-    // compute freq-independent part of bm25 equation across all norm values
-    float cache[] = new float[256];
+    float[] cache = new float[256];
     for (int i = 0; i < cache.length; i++) {
-      cache[i] = k1 * ((1 - b) + b * decodeNormValue((byte)i) / avgdl);
+      cache[i] = k1 * ((1 - b) + b * LENGTH_TABLE[i] / avgdl);
     }
     return new BM25Stats(collectionStats.field(), boost, idf, avgdl, cache);
   }
@@ -228,25 +210,38 @@ public class BM25Similarity extends Similarity {
     private final BM25Stats stats;
     private final float weightValue; // boost * idf * (k1 + 1)
     private final NumericDocValues norms;
+    /** precomputed cache for all length values */
+    private final float[] lengthCache;
+    /** precomputed norm[256] with k1 * ((1 - b) + b * dl / avgdl) */
     private final float[] cache;
     
     BM25DocScorer(BM25Stats stats, NumericDocValues norms) throws IOException {
       this.stats = stats;
       this.weightValue = stats.weight * (k1 + 1);
-      this.cache = stats.cache;
       this.norms = norms;
+      lengthCache = LENGTH_TABLE;
+      cache = stats.cache;
     }
     
     @Override
-    public float score(int doc, float freq) {
+    public float score(int doc, float freq) throws IOException {
       // if there are no norms, we act as if b=0
-      float norm = norms == null ? k1 : cache[(byte)norms.get(doc) & 0xFF];
+      float norm;
+      if (norms == null) {
+        norm = k1;
+      } else {
+        if (norms.advanceExact(doc)) {
+          norm = cache[((byte) norms.longValue()) & 0xFF];
+        } else {
+          norm = cache[0];
+        }
+      }
       return weightValue * freq / (freq + norm);
     }
     
     @Override
-    public Explanation explain(int doc, Explanation freq) {
-      return explainScore(doc, freq, stats, norms);
+    public Explanation explain(int doc, Explanation freq) throws IOException {
+      return explainScore(doc, freq, stats, norms, lengthCache);
     }
 
     @Override
@@ -272,21 +267,22 @@ public class BM25Similarity extends Similarity {
     private final float weight;
     /** field name, for pulling norms */
     private final String field;
-    /** precomputed norm[256] with k1 * ((1 - b) + b * dl / avgdl) */
-    private final float cache[];
+    /** precomputed norm[256] with k1 * ((1 - b) + b * dl / avgdl)
+     *  for LENGTH_TABLE */
+    private final float[] cache;
 
-    BM25Stats(String field, float boost, Explanation idf, float avgdl, float cache[]) {
+    BM25Stats(String field, float boost, Explanation idf, float avgdl, float[] cache) {
       this.field = field;
       this.boost = boost;
       this.idf = idf;
       this.avgdl = avgdl;
-      this.cache = cache;
       this.weight = idf.getValue() * boost;
+      this.cache = cache;
     }
 
   }
 
-  private Explanation explainTFNorm(int doc, Explanation freq, BM25Stats stats, NumericDocValues norms) {
+  private Explanation explainTFNorm(int doc, Explanation freq, BM25Stats stats, NumericDocValues norms, float[] lengthCache) throws IOException {
     List<Explanation> subs = new ArrayList<>();
     subs.add(freq);
     subs.add(Explanation.match(k1, "parameter k1"));
@@ -294,25 +290,31 @@ public class BM25Similarity extends Similarity {
       subs.add(Explanation.match(0, "parameter b (norms omitted for field)"));
       return Explanation.match(
           (freq.getValue() * (k1 + 1)) / (freq.getValue() + k1),
-          "tfNorm, computed from:", subs);
+          "tfNorm, computed as (freq * (k1 + 1)) / (freq + k1) from:", subs);
     } else {
-      float doclen = decodeNormValue((byte)norms.get(doc));
+      byte norm;
+      if (norms.advanceExact(doc)) {
+        norm = (byte) norms.longValue();
+      } else {
+        norm = 0;
+      }
+      float doclen = lengthCache[norm & 0xff];
       subs.add(Explanation.match(b, "parameter b"));
       subs.add(Explanation.match(stats.avgdl, "avgFieldLength"));
       subs.add(Explanation.match(doclen, "fieldLength"));
       return Explanation.match(
           (freq.getValue() * (k1 + 1)) / (freq.getValue() + k1 * (1 - b + b * doclen/stats.avgdl)),
-          "tfNorm, computed from:", subs);
+          "tfNorm, computed as (freq * (k1 + 1)) / (freq + k1 * (1 - b + b * fieldLength / avgFieldLength)) from:", subs);
     }
   }
 
-  private Explanation explainScore(int doc, Explanation freq, BM25Stats stats, NumericDocValues norms) {
+  private Explanation explainScore(int doc, Explanation freq, BM25Stats stats, NumericDocValues norms, float[] lengthCache) throws IOException {
     Explanation boostExpl = Explanation.match(stats.boost, "boost");
     List<Explanation> subs = new ArrayList<>();
     if (boostExpl.getValue() != 1.0f)
       subs.add(boostExpl);
     subs.add(stats.idf);
-    Explanation tfNormExpl = explainTFNorm(doc, freq, stats, norms);
+    Explanation tfNormExpl = explainTFNorm(doc, freq, stats, norms, lengthCache);
     subs.add(tfNormExpl);
     return Explanation.match(
         boostExpl.getValue() * stats.idf.getValue() * tfNormExpl.getValue(),

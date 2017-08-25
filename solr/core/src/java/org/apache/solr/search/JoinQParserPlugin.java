@@ -23,8 +23,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 
-import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiPostingsEnum;
 import org.apache.lucene.index.PostingsEnum;
@@ -52,7 +52,9 @@ import org.apache.solr.handler.component.ResponseBuilder;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrRequestInfo;
+import org.apache.solr.schema.SchemaField;
 import org.apache.solr.schema.TrieField;
+import org.apache.solr.search.join.GraphPointsCollector;
 import org.apache.solr.search.join.ScoreJoinQParserPlugin;
 import org.apache.solr.util.RTimer;
 import org.apache.solr.util.RefCounted;
@@ -84,7 +86,7 @@ public class JoinQParserPlugin extends QParserPlugin {
         long fromCoreOpenTime = 0;
 
         if (fromIndex != null && !fromIndex.equals(req.getCore().getCoreDescriptor().getName()) ) {
-          CoreContainer container = req.getCore().getCoreDescriptor().getCoreContainer();
+          CoreContainer container = req.getCore().getCoreContainer();
 
           // if in SolrCloud mode, fromIndex should be the name of a single-sharded collection
           coreName = ScoreJoinQParserPlugin.getCoreName(fromIndex, container);
@@ -98,7 +100,7 @@ public class JoinQParserPlugin extends QParserPlugin {
           RefCounted<SolrIndexSearcher> fromHolder = null;
           LocalSolrQueryRequest otherReq = new LocalSolrQueryRequest(fromCore, params);
           try {
-            QParser parser = QParser.getParser(v, "lucene", otherReq);
+            QParser parser = QParser.getParser(v, otherReq);
             fromQuery = parser.getQuery();
             fromHolder = fromCore.getRegisteredSearcher();
             if (fromHolder != null) fromCoreOpenTime = fromHolder.get().getOpenNanoTime();
@@ -110,6 +112,7 @@ public class JoinQParserPlugin extends QParserPlugin {
         } else {
           coreName = null;
           QParser fromQueryParser = subQuery(v, null);
+          fromQueryParser.setIsFilter(true);
           fromQuery = fromQueryParser.getQuery();
         }
 
@@ -120,21 +123,37 @@ public class JoinQParserPlugin extends QParserPlugin {
     };
   }
 
+  /**
+   * A helper method for other plugins to create (non-scoring) JoinQueries wrapped around arbitrary queries against the same core.
+   * 
+   * @param subQuery the query to define the starting set of documents on the "left side" of the join
+   * @param fromField "left side" field name to use in the join
+   * @param toField "right side" field name to use in the join
+   */
+  public static Query createJoinQuery(Query subQuery, String fromField, String toField) {
+    return new JoinQuery(fromField, toField, null, subQuery);
+  }
+  
 }
 
 
 class JoinQuery extends Query {
   String fromField;
   String toField;
-  String fromIndex;
+  String fromIndex; // TODO: name is missleading here compared to JoinQParserPlugin usage - here it must be a core name
   Query q;
   long fromCoreOpenTime;
 
-  public JoinQuery(String fromField, String toField, String fromIndex, Query subQuery) {
+  public JoinQuery(String fromField, String toField, String coreName, Query subQuery) {
+    assert null != fromField;
+    assert null != toField;
+    assert null != subQuery;
+    
     this.fromField = fromField;
     this.toField = toField;
-    this.fromIndex = fromIndex;
     this.q = subQuery;
+    
+    this.fromIndex = coreName; // may be null
   }
 
   public Query getQuery() { return q; }
@@ -172,7 +191,7 @@ class JoinQuery extends Query {
           throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Cross-core join must have SolrRequestInfo");
         }
 
-        CoreContainer container = searcher.getCore().getCoreDescriptor().getCoreContainer();
+        CoreContainer container = searcher.getCore().getCoreContainer();
         final SolrCore fromCore = container.getCore(fromIndex);
 
         if (fromCore == null) {
@@ -264,6 +283,7 @@ class JoinQuery extends Query {
     }
 
 
+    // most of these statistics are only used for the enum method
     int fromSetSize;          // number of docs in the fromSet (that match the from query)
     long resultListDocs;      // total number of docs collected
     int fromTermCount;
@@ -278,6 +298,33 @@ class JoinQuery extends Query {
 
 
     public DocSet getDocSet() throws IOException {
+      SchemaField fromSchemaField = fromSearcher.getSchema().getField(fromField);
+      SchemaField toSchemaField = toSearcher.getSchema().getField(toField);
+
+      boolean usePoints = false;
+      if (toSchemaField.getType().isPointField()) {
+        if (!fromSchemaField.hasDocValues()) {
+          throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "join from field " + fromSchemaField + " should have docValues to join with points field " + toSchemaField);
+        }
+        usePoints = true;
+      }
+
+      if (!usePoints) {
+        return getDocSetEnumerate();
+      }
+
+      // point fields
+      GraphPointsCollector collector = new GraphPointsCollector(fromSchemaField, null, null);
+      fromSearcher.search(q, collector);
+      Query resultQ = collector.getResultQuery(toSchemaField, false);
+      // don't cache the resulting docSet... the query may be very large.  Better to cache the results of the join query itself
+      DocSet result = resultQ==null ? DocSet.EMPTY : toSearcher.getDocSetNC(resultQ, null);
+      return result;
+    }
+
+
+
+    public DocSet getDocSetEnumerate() throws IOException {
       FixedBitSet resultBits = null;
 
       // minimum docFreq to use the cache
@@ -299,11 +346,11 @@ class JoinQuery extends Query {
         fastForRandomSet = new HashDocSet(sset.getDocs(), 0, sset.size());
       }
 
-      Fields fromFields = fromSearcher.getLeafReader().fields();
-      Fields toFields = fromSearcher==toSearcher ? fromFields : toSearcher.getLeafReader().fields();
-      if (fromFields == null) return DocSet.EMPTY;
-      Terms terms = fromFields.terms(fromField);
-      Terms toTerms = toFields.terms(toField);
+
+      LeafReader fromReader = fromSearcher.getSlowAtomicReader();
+      LeafReader toReader = fromSearcher==toSearcher ? fromReader : toSearcher.getSlowAtomicReader();
+      Terms terms = fromReader.terms(fromField);
+      Terms toTerms = toReader.terms(toField);
       if (terms == null || toTerms==null) return DocSet.EMPTY;
       String prefixStr = TrieField.getMainValuePrefix(fromSearcher.getSchema().getFieldType(fromField));
       BytesRef prefix = prefixStr == null ? null : new BytesRef(prefixStr);
@@ -322,8 +369,8 @@ class JoinQuery extends Query {
         }
       }
 
-      Bits fromLiveDocs = fromSearcher.getLeafReader().getLiveDocs();
-      Bits toLiveDocs = fromSearcher == toSearcher ? fromLiveDocs : toSearcher.getLeafReader().getLiveDocs();
+      Bits fromLiveDocs = fromSearcher.getSlowAtomicReader().getLiveDocs();
+      Bits toLiveDocs = fromSearcher == toSearcher ? fromLiveDocs : toSearcher.getSlowAtomicReader().getLiveDocs();
 
       fromDeState = new SolrIndexSearcher.DocsEnumState();
       fromDeState.fieldName = fromField;

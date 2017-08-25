@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiConsumer;
 
 import org.apache.solr.common.SolrException;
 
@@ -121,12 +122,17 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
    * When using this constructor, runtime type safety is only guaranteed if
    * all even numbered elements of the input list are of type "T".
    * </p>
-   *
-   * @param nameValuePairs underlying List which should be used to implement a NamedList
-   * @deprecated Use {@link #NamedList(java.util.Map.Entry[])} for the NamedList instantiation
+   * <p>
+   * This method is package protected and exists solely so SimpleOrderedMap and clone() can utilize it
+   * </p>
+   * <p>
+   * TODO: this method was formerly public, now that it's not we can change the impl details of 
+   * this class to be based on a Map.Entry[] 
+   * </p>
+   * @lucene.internal
+   * @see #nameValueMapToList
    */
-  @Deprecated
-  public NamedList(List<Object> nameValuePairs) {
+  NamedList(List<Object> nameValuePairs) {
     nvPairs=nameValuePairs;
   }
 
@@ -135,12 +141,14 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
    * indexed elements (0,2,4. ..etc) are Strings and odd elements (1,3,5,) are of
    * the type "T".
    *
-   * @return Modified List as per the above description
-   * @deprecated This a temporary placeholder method until the guts of the class
+   * <p>
+   * NOTE: This a temporary placeholder method until the guts of the class
    * are actually replaced by List&lt;String, ?&gt;.
+   * </p>
+   *
+   * @return Modified List as per the above description
    * @see <a href="https://issues.apache.org/jira/browse/SOLR-912">SOLR-912</a>
    */
-  @Deprecated
   private List<Object> nameValueMapToList(Map.Entry<String, ? extends T>[] nameValuePairs) {
     List<Object> result = new ArrayList<>();
     for (Map.Entry<String, ?> ent : nameValuePairs) {
@@ -392,8 +400,8 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
     return sb.toString();
   }
 
-  public NamedList getImmutableCopy() {
-    NamedList copy = clone();
+  public NamedList<T> getImmutableCopy() {
+    NamedList<T> copy = clone();
     return new NamedList<>( Collections.unmodifiableList(copy.nvPairs));
   }
 
@@ -425,7 +433,12 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
 
       @Override
       public T put(String  key, T value) {
-        NamedList.this.add(key, value);
+        int idx = NamedList.this.indexOf(key, 0);
+        if (idx == -1) {
+          NamedList.this.add(key, value);
+        } else {
+          NamedList.this.setVal(idx, value);
+        }
         return  null;
       }
 
@@ -436,8 +449,15 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
 
       @Override
       public void putAll(Map m) {
-        NamedList.this.addAll(m);
-
+        boolean isEmpty = isEmpty();
+        for (Object o : m.entrySet()) {
+          Map.Entry e = (Entry) o;
+          if (isEmpty) {// we know that there are no duplicates
+            add((String) e.getKey(), (T) e.getValue());
+          } else {
+            put(e.getKey() == null ? null : e.getKey().toString(), (T) e.getValue());
+          }
+        }
       }
 
       @Override
@@ -461,6 +481,11 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
       public Set<Entry<String,T>> entrySet() {
         //TODO implement more efficiently
         return NamedList.this.asMap(1).entrySet();
+      }
+
+      @Override
+      public void forEach(BiConsumer action) {
+        NamedList.this.forEach(action);
       }
     };
   }
@@ -778,5 +803,12 @@ public class NamedList<T> implements Cloneable, Serializable, Iterable<Map.Entry
     if (!(obj instanceof NamedList)) return false;
     NamedList<?> nl = (NamedList<?>) obj;
     return this.nvPairs.equals(nl.nvPairs);
+  }
+
+  public void forEach(BiConsumer<String, T> action) {
+    int sz = size();
+    for (int i = 0; i < sz; i++) {
+      action.accept(getName(i), getVal(i));
+    }
   }
 }

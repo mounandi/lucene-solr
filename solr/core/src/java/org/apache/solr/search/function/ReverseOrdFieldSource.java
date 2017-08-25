@@ -31,6 +31,7 @@ import org.apache.lucene.queries.function.FunctionValues;
 import org.apache.lucene.queries.function.ValueSource;
 import org.apache.lucene.queries.function.docvalues.IntDocValues;
 import org.apache.lucene.search.SortedSetSelector;
+import org.apache.solr.common.SolrException;
 import org.apache.solr.index.SlowCompositeReaderWrapper;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.search.Insanity;
@@ -77,7 +78,11 @@ public class ReverseOrdFieldSource extends ValueSource {
     if (o instanceof SolrIndexSearcher) {
       SolrIndexSearcher is = (SolrIndexSearcher) o;
       SchemaField sf = is.getSchema().getFieldOrNull(field);
-      if (sf != null && sf.hasDocValues() == false && sf.multiValued() == false && sf.getType().getNumericType() != null) {
+      if (sf != null && sf.getType().isPointField()) {
+        throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+            "rord() is not supported over Points based field " + field);
+      }
+      if (sf != null && sf.hasDocValues() == false && sf.multiValued() == false && sf.getType().getNumberType() != null) {
         // it's a single-valued numeric field: we must currently create insanity :(
         List<LeafReaderContext> leaves = is.getIndexReader().leaves();
         LeafReader insaneLeaves[] = new LeafReader[leaves.size()];
@@ -88,7 +93,7 @@ public class ReverseOrdFieldSource extends ValueSource {
         r = SlowCompositeReaderWrapper.wrap(new MultiReader(insaneLeaves));
       } else {
         // reuse ordinalmap
-        r = ((SolrIndexSearcher)o).getLeafReader();
+        r = ((SolrIndexSearcher)o).getSlowAtomicReader();
       }
     } else {
       IndexReader topReader = ReaderUtil.getTopLevelContext(readerContext).reader();
@@ -99,9 +104,16 @@ public class ReverseOrdFieldSource extends ValueSource {
     final int end = sindex.getValueCount();
 
     return new IntDocValues(this) {
-     @Override
-      public int intVal(int doc) {
-        return (end - sindex.getOrd(doc+off) - 1);
+      @Override
+      public int intVal(int doc) throws IOException {
+        if (doc+off > sindex.docID()) {
+          sindex.advance(doc+off);
+        }
+        if (doc+off == sindex.docID()) {
+          return (end - sindex.ordValue() - 1);
+        } else {
+          return end;
+        }
       }
     };
   }

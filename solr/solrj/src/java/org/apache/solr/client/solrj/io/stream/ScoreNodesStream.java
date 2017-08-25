@@ -19,11 +19,11 @@ package org.apache.solr.client.solrj.io.stream;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.HashMap;
 
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.io.SolrClientCache;
@@ -41,6 +41,8 @@ import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.TermsParams;
 import org.apache.solr.common.util.NamedList;
+
+import static org.apache.solr.common.params.CommonParams.DISTRIB;
 
 /**
  *  Iterates over a gatherNodes() expression and scores the Tuples based on tf-idf.
@@ -65,6 +67,10 @@ public class ScoreNodesStream extends TupleStream implements Expressible
   private Map<String, Tuple> nodes = new HashMap();
   private Iterator<Tuple> tuples;
   private String termFreq;
+  private boolean facet;
+
+  private String bucket;
+  private String facetCollection;
 
   public ScoreNodesStream(TupleStream tupleStream, String nodeFreqField) throws IOException {
     init(tupleStream, nodeFreqField);
@@ -98,6 +104,17 @@ public class ScoreNodesStream extends TupleStream implements Expressible
   private void init(TupleStream tupleStream, String termFreq) throws IOException{
     this.stream = tupleStream;
     this.termFreq = termFreq;
+    if(stream instanceof FacetStream) {
+      FacetStream facetStream = (FacetStream) stream;
+
+      if(facetStream.getBuckets().length != 1) {
+        throw new IOException("scoreNodes operates over a single bucket. Num buckets:"+facetStream.getBuckets().length);
+      }
+
+      this.bucket = facetStream.getBuckets()[0].toString();
+      this.facetCollection = facetStream.getCollection();
+      this.facet = true;
+    }
   }
 
   @Override
@@ -164,12 +181,20 @@ public class ScoreNodesStream extends TupleStream implements Expressible
         break;
       }
 
+      if(facet) {
+        //Turn the facet tuple into a node.
+        String nodeId = node.getString(bucket);
+        node.put("node", nodeId);
+        node.remove(bucket);
+        node.put("collection", facetCollection);
+        node.put("field", bucket);
+      }
+
       if(!node.fields.containsKey("node")) {
         throw new IOException("node field not present in the Tuple");
       }
 
       String nodeId = node.getString("node");
-
 
       nodes.put(nodeId, node);
       if(builder.length() > 0) {
@@ -188,7 +213,7 @@ public class ScoreNodesStream extends TupleStream implements Expressible
     params.add(TermsParams.TERMS_STATS, "true");
     params.add(TermsParams.TERMS_LIST, builder.toString());
     params.add(TermsParams.TERMS_LIMIT, Integer.toString(nodes.size()));
-    params.add("distrib", "true");
+    params.add(DISTRIB, "true");
 
     QueryRequest request = new QueryRequest(params);
 
@@ -214,7 +239,7 @@ public class ScoreNodesStream extends TupleStream implements Expressible
             throw new Exception("termFreq field not present in the Tuple");
           }
           Number termFreqValue = (Number)tuple.get(termFreq);
-          float score = termFreqValue.floatValue() * (float) (Math.log((numDocs + 1) / (docFreq.doubleValue() + 1)) + 1.0);
+          float score = (float)(Math.log(termFreqValue.floatValue())+1.0) * (float) (Math.log((numDocs + 1) / (docFreq.doubleValue() + 1)) + 1.0);
           tuple.put("nodeScore", score);
           tuple.put("docFreq", docFreq);
           tuple.put("numDocs", numDocs);

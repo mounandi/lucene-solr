@@ -54,15 +54,14 @@ class FacetQueryProcessor extends FacetProcessor<FacetQuery> {
   }
 
   @Override
-  public Object getResponse() {
-    return response;
-  }
-
-  @Override
   public void process() throws IOException {
     super.process();
+
+    if (fcontext.facetInfo != null) {
+      // FIXME - what needs to be done here?
+    }
     response = new SimpleOrderedMap<>();
-    fillBucket(response, freq.q, null);
+    fillBucket(response, freq.q, null, (fcontext.flags & FacetContext.SKIP_FACET)!=0, fcontext.facetInfo);
   }
 
 
