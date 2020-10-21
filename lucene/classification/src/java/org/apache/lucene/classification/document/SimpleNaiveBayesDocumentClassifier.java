@@ -34,7 +34,7 @@ import org.apache.lucene.classification.SimpleNaiveBayesClassifier;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexableField;
-import org.apache.lucene.index.MultiFields;
+import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -54,7 +54,7 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
   /**
    * {@link org.apache.lucene.analysis.Analyzer} to be used for tokenizing document fields
    */
-  protected Map<String, Analyzer> field2analyzer;
+  protected final Map<String, Analyzer> field2analyzer;
 
   /**
    * Creates a new NaiveBayes classifier.
@@ -62,7 +62,7 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
    * @param indexReader     the reader on the index to be used for classification
    * @param query          a {@link org.apache.lucene.search.Query} to eventually filter the docs used for training the classifier, or {@code null}
    *                       if all the indexed docs should be used
-   * @param classFieldName the name of the field used as the output for the classifier NOTE: must not be havely analyzed
+   * @param classFieldName the name of the field used as the output for the classifier NOTE: must not be heavely analyzed
    *                       as the returned class will be a token indexed for this field
    * @param textFieldNames the name of the fields used as the inputs for the classifier, they can contain boosting indication e.g. title^10
    */
@@ -71,9 +71,6 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
     this.field2analyzer = field2analyzer;
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public ClassificationResult<BytesRef> assignClass(Document document) throws IOException {
     List<ClassificationResult<BytesRef>> assignedClasses = assignNormClasses(document);
@@ -88,9 +85,6 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
     return assignedClass;
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public List<ClassificationResult<BytesRef>> getClasses(Document document) throws IOException {
     List<ClassificationResult<BytesRef>> assignedClasses = assignNormClasses(document);
@@ -98,9 +92,6 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
     return assignedClasses;
   }
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public List<ClassificationResult<BytesRef>> getClasses(Document document, int max) throws IOException {
     List<ClassificationResult<BytesRef>> assignedClasses = assignNormClasses(document);
@@ -112,25 +103,27 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
     List<ClassificationResult<BytesRef>> assignedClasses = new ArrayList<>();
     Map<String, List<String[]>> fieldName2tokensArray = new LinkedHashMap<>();
     Map<String, Float> fieldName2boost = new LinkedHashMap<>();
-    Terms classes = MultiFields.getTerms(indexReader, classFieldName);
-    TermsEnum classesEnum = classes.iterator();
-    BytesRef c;
+    Terms classes = MultiTerms.getTerms(indexReader, classFieldName);
+    if (classes != null) {
+      TermsEnum classesEnum = classes.iterator();
+      BytesRef c;
 
-    analyzeSeedDocument(inputDocument, fieldName2tokensArray, fieldName2boost);
+      analyzeSeedDocument(inputDocument, fieldName2tokensArray, fieldName2boost);
 
-    int docsWithClassSize = countDocsWithClass();
-    while ((c = classesEnum.next()) != null) {
-      double classScore = 0;
-      Term term = new Term(this.classFieldName, c);
-      for (String fieldName : textFieldNames) {
-        List<String[]> tokensArrays = fieldName2tokensArray.get(fieldName);
-        double fieldScore = 0;
-        for (String[] fieldTokensArray : tokensArrays) {
-          fieldScore += calculateLogPrior(term, docsWithClassSize) + calculateLogLikelihood(fieldTokensArray, fieldName, term, docsWithClassSize) * fieldName2boost.get(fieldName);
+      int docsWithClassSize = countDocsWithClass();
+      while ((c = classesEnum.next()) != null) {
+        double classScore = 0;
+        Term term = new Term(this.classFieldName, c);
+        for (String fieldName : textFieldNames) {
+          List<String[]> tokensArrays = fieldName2tokensArray.get(fieldName);
+          double fieldScore = 0;
+          for (String[] fieldTokensArray : tokensArrays) {
+            fieldScore += calculateLogPrior(term, docsWithClassSize) + calculateLogLikelihood(fieldTokensArray, fieldName, term, docsWithClassSize) * fieldName2boost.get(fieldName);
+          }
+          classScore += fieldScore;
         }
-        classScore += fieldScore;
+        assignedClasses.add(new ClassificationResult<>(term.bytes(), classScore));
       }
-      assignedClasses.add(new ClassificationResult<>(term.bytes(), classScore));
     }
     return normClassificationResults(assignedClasses);
   }
@@ -182,7 +175,7 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
     }
     tokenizedText.end();
     tokenizedText.close();
-    return tokens.toArray(new String[tokens.size()]);
+    return tokens.toArray(new String[0]);
   }
 
   /**
@@ -212,8 +205,7 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
     }
 
     // log(P(d|c)) = log(P(w1|c))+...+log(P(wn|c))
-    double normScore = result / (tokenizedText.length); // this is normalized because if not, long text fields will always be more important than short fields
-    return normScore;
+    return result / (tokenizedText.length);
   }
 
   /**
@@ -225,7 +217,7 @@ public class SimpleNaiveBayesDocumentClassifier extends SimpleNaiveBayesClassifi
    */
   private double getTextTermFreqForClass(Term term, String fieldName) throws IOException {
     double avgNumberOfUniqueTerms;
-    Terms terms = MultiFields.getTerms(indexReader, fieldName);
+    Terms terms = MultiTerms.getTerms(indexReader, fieldName);
     long numPostings = terms.getSumDocFreq(); // number of term/doc pairs
     avgNumberOfUniqueTerms = numPostings / (double) terms.getDocCount(); // avg # of unique terms per doc
     int docsWithC = indexReader.docFreq(term);

@@ -43,7 +43,7 @@ import static org.apache.solr.core.CoreContainer.CORE_DISCOVERY_COMPLETE;
 import static org.apache.solr.core.CoreContainer.INITIAL_CORE_LOAD_COMPLETE;
 import static org.apache.solr.core.CoreContainer.LOAD_COMPLETE;
 import static org.hamcrest.CoreMatchers.not;
-import static org.junit.internal.matchers.StringContains.containsString;
+import static org.hamcrest.core.StringContains.containsString;
 
 public class TestCoreDiscovery extends SolrTestCaseJ4 {
 
@@ -114,7 +114,7 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
   }
 
   private CoreContainer init() throws Exception {
-    final CoreContainer container = new CoreContainer();
+    final CoreContainer container = new CoreContainer(SolrPaths.locateSolrHome(), new Properties());
     try {
       container.load();
     } catch (Exception e) {
@@ -141,6 +141,7 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
   // Test the basic setup, create some dirs with core.properties files in them, but solr.xml has discoverCores
   // set and insure that we find all the cores and can load them.
   @Test
+  @SuppressWarnings({"try"})
   public void testDiscovery() throws Exception {
     setMeUp();
 
@@ -228,12 +229,8 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
 
     CoreContainer cc = init();
     try {
-      try {
-        cc.getCore("corep1");
-        fail("Should have thrown exception");
-      } catch (SolrCoreInitializationException scie) {
-        assertTrue(scie.getMessage().contains("init failure"));
-      }
+      Exception thrown = expectThrows(SolrCoreInitializationException.class, () -> cc.getCore("corep1"));
+      assertTrue(thrown.getMessage().contains("init failure"));
       try (SolrCore sc = cc.getCore("corep2")) {
         assertNotNull("Core corep2 should be loaded", sc);
       }
@@ -249,17 +246,15 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
       corePropFile = Paths.get(solrHomeDirectory.toString(), "corep4", "core.properties");
       assertFalse("Should not be a properties file yet for corep4", Files.exists(corePropFile));
 
-      try {
+      thrown = expectThrows(SolrException.class, () -> {
         cc.create("corep4", ImmutableMap.of(
             CoreDescriptor.CORE_NAME, "corep4",
             CoreDescriptor.CORE_SCHEMA, "not-there.xml",
             CoreDescriptor.CORE_CONFIG, "solrconfig-minimal.xml",
             CoreDescriptor.CORE_TRANSIENT, "false",
             CoreDescriptor.CORE_LOADONSTARTUP, "true"));
-        fail("Should have thrown exception getting core ");
-      } catch (SolrException se) {
-        assertTrue(se.getMessage().contains("Can't find resource"));
-      }
+      });
+      assertTrue(thrown.getMessage().contains("Can't find resource"));
       assertFalse("Failed corep4 should not have left a core.properties file around", Files.exists(corePropFile));
 
       // Finally, just for yucks, let's determine that a this create path also leaves a prop file.
@@ -304,7 +299,7 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
     addCoreWithProps("coreT6", makeCoreProperties("coreT6", true, true, "dataDir=coreT6"));
 
     // Do this specially since we need to search.
-    final CoreContainer cc = new CoreContainer(solrHomeDirectory.toString());
+    final CoreContainer cc = new CoreContainer(solrHomeDirectory, new Properties());
     try {
       cc.load();
       // Just check that the proper number of cores are loaded since making the test depend on order would be fragile
@@ -344,23 +339,18 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
     // name, isLazy, loadOnStartup
     addCoreWithProps("core1", makeCoreProperties("core1", false, true));
     addCoreWithProps("core2", makeCoreProperties("core2", false, false, "name=core1"));
-    CoreContainer cc = null;
-    try {
-      cc = init();
-      fail("Should have thrown exception in testDuplicateNames");
-    } catch (SolrException se) {
-      String message = se.getMessage();
-      assertTrue("Wrong exception thrown on duplicate core names",
-          message.indexOf("Found multiple cores with the name [core1]") != -1);
-      assertTrue(File.separator + "core1 should have been mentioned in the message: " + message,
-          message.indexOf(File.separator + "core1") != -1);
-      assertTrue(File.separator + "core2 should have been mentioned in the message:" + message,
-          message.indexOf(File.separator + "core2") != -1);
-    } finally {
-      if (cc != null) {
-        cc.shutdown();
-      }
-    }
+    SolrException thrown = expectThrows(SolrException.class, () -> {
+      CoreContainer cc = null;
+      try { cc = init(); }
+      finally { if (cc != null) cc.shutdown(); }
+    });
+    final String message = thrown.getMessage();
+    assertTrue("Wrong exception thrown on duplicate core names",
+        message.indexOf("Found multiple cores with the name [core1]") != -1);
+    assertTrue(File.separator + "core1 should have been mentioned in the message: " + message,
+        message.indexOf(File.separator + "core1") != -1);
+    assertTrue(File.separator + "core2 should have been mentioned in the message:" + message,
+        message.indexOf(File.separator + "core2") != -1);
   }
 
 
@@ -408,7 +398,7 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
       assertNull(cc.getCore("core0"));
 
       SolrCore core3 = cc.create("core3", ImmutableMap.of("configSet", "minimal"));
-      assertThat(core3.getCoreDescriptor().getInstanceDir().toAbsolutePath().toString(), containsString("relative"));
+      assertThat(core3.getCoreDescriptor().getInstanceDir().toString(), containsString("relative"));
 
     } finally {
       cc.shutdown();
@@ -533,17 +523,12 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
 
     assumeTrue("Cannot make " + homeDir + " non-readable. Test aborted.", homeDir.setReadable(false, false));
     assumeFalse("Appears we are a super user, skip test", homeDir.canRead());
-    CoreContainer cc = null;
-    try {
-      cc = init();
-      fail("Should have thrown an exception here");
-    } catch (Exception ex) {
-      assertThat(ex.getMessage(), containsString("Error reading core root directory"));
-    } finally {
-      if (cc != null) {
-        cc.shutdown();
-      }
-    }
+    Exception thrown = expectThrows(Exception.class, () -> {
+      CoreContainer cc = null;
+      try { cc = init(); }
+      finally { if (cc != null) cc.shutdown(); }
+    });
+    assertThat(thrown.getMessage(), containsString("Error reading core root directory"));
     // So things can be cleaned up by the framework!
     homeDir.setReadable(true, false);
 
@@ -563,13 +548,10 @@ public class TestCoreDiscovery extends SolrTestCaseJ4 {
 
   @Test
   public void testRootDirectoryResolution() {
-
-    SolrResourceLoader loader = new SolrResourceLoader(solrHomeDirectory);
-
-    NodeConfig config = SolrXmlConfig.fromString(loader, "<solr><str name=\"coreRootDirectory\">relative</str></solr>");
+    NodeConfig config = SolrXmlConfig.fromString(solrHomeDirectory, "<solr><str name=\"coreRootDirectory\">relative</str></solr>");
     assertThat(config.getCoreRootDirectory().toString(), containsString(solrHomeDirectory.toAbsolutePath().toString()));
 
-    NodeConfig absConfig = SolrXmlConfig.fromString(loader, "<solr><str name=\"coreRootDirectory\">/absolute</str></solr>");
+    NodeConfig absConfig = SolrXmlConfig.fromString(solrHomeDirectory, "<solr><str name=\"coreRootDirectory\">/absolute</str></solr>");
     assertThat(absConfig.getCoreRootDirectory().toString(), not(containsString(solrHomeDirectory.toAbsolutePath().toString())));
   }
   

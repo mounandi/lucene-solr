@@ -49,8 +49,8 @@
     <bool name="solr.hdfs.blockcache.enabled">${solr.hdfs.blockcache.enabled:true}</bool> 
     <bool name="solr.hdfs.blockcache.global">${solr.hdfs.blockcache.global:true}</bool>
     <bool name="solr.hdfs.blockcache.write.enabled">${solr.hdfs.blockcache.write.enabled:false}</bool>
-    <int name="solr.hdfs.blockcache.blocksperbank">10</int>
-    <int name="solr.hdfs.blockcache.slab.count">1</int>
+    <int name="solr.hdfs.blockcache.blocksperbank">${solr.hdfs.blockcache.blocksperbank:10}</int>
+    <int name="solr.hdfs.blockcache.slab.count">${solr.hdfs.blockcache.slab.count:1}</int>
   </directoryFactory>
 
   <schemaFactory class="ClassicIndexSchemaFactory"/>
@@ -73,23 +73,6 @@
       <maxTime>3600000</maxTime>
     </autoCommit>
     -->
-
-    <!-- The RunExecutableListener executes an external command.
-         exe - the name of the executable to run
-         dir - dir to use as the current working directory. default="."
-         wait - the calling thread waits until the executable returns. default="true"
-         args - the arguments to pass to the program.  default=nothing
-         env - environment variables to set.  default=nothing
-      -->
-    <!-- A postCommit event is fired after every commit
-    <listener event="postCommit" class="solr.RunExecutableListener">
-      <str name="exe">/var/opt/resin3/__PORT__/scripts/solr/snapshooter</str>
-      <str name="dir">/var/opt/resin3/__PORT__</str>
-      <bool name="wait">true</bool>
-      <arr name="args"> <str>arg1</str> <str>arg2</str> </arr>
-      <arr name="env"> <str>MYVAR=val1</str> </arr>
-    </listener>
-    -->
     
     <updateLog enable="${enable.update.log:true}">
       <str name="dir">${solr.ulog.dir:}</str>
@@ -106,31 +89,28 @@
         range or wildcard queries that expand to big boolean
         queries.  An exception is thrown if exceeded.
     -->
-    <maxBooleanClauses>1024</maxBooleanClauses>
+    <maxBooleanClauses>${solr.max.booleanClauses:1024}</maxBooleanClauses>
 
     <!-- Cache specification for Filters or DocSets - unordered set of *all* documents
          that match a particular query.
       -->
     <filterCache
-      class="solr.search.FastLRUCache"
       size="512"
       initialSize="512"
       autowarmCount="2"/>
 
     <queryResultCache
-      class="solr.search.LRUCache"
       size="512"
       initialSize="512"
       autowarmCount="2"/>
 
     <documentCache
-      class="solr.search.LRUCache"
       size="512"
       initialSize="512"
       autowarmCount="0"/>
 
     <cache name="perSegFilter"
-      class="solr.search.LRUCache"
+      class="solr.CaffeineCache"
       size="10"
       initialSize="0"
       autowarmCount="10" />
@@ -142,7 +122,6 @@
     <!--
 
     <cache name="myUserCache"
-      class="solr.search.LRUCache"
       size="4096"
       initialSize="1024"
       autowarmCount="1024"
@@ -155,9 +134,6 @@
     -->
 
     <queryResultWindowSize>10</queryResultWindowSize>
-
-    <!-- set maxSize artificially low to exercise both types of sets -->
-    <HashDocSet maxSize="3" loadFactor="0.75"/>
 
     <!-- boolToFilterOptimizer converts boolean clauses with zero boost
          into cached filters if the number of docs selected by the clause exceeds
@@ -195,10 +171,6 @@
   
   <queryResponseWriter name="xml" default="true"
                        class="solr.XMLResponseWriter" />
-
-  <!-- An alternate set representation that uses an integer hash to store filters (sets of docids).
-       If the set cardinality <= maxSize elements, then HashDocSet will be used instead of the bitset
-       based HashBitset. -->
 
   <!-- requestHandler plugins
   -->
@@ -322,6 +294,7 @@
     </lst>
   </searchComponent>
 
+    <!-- This is now part of the implicit configuration together with terms=true and distrib=false defaults
   <searchComponent name="termsComp" class="org.apache.solr.handler.component.TermsComponent"/>
 
   <requestHandler name="/terms" class="org.apache.solr.handler.component.SearchHandler">
@@ -329,6 +302,7 @@
       <str>termsComp</str>
     </arr>
   </requestHandler>
+  -->
   
   
   <!--
@@ -480,7 +454,7 @@
   
   <admin>
     <defaultQuery>solr</defaultQuery>
-    <gettableFiles>solrconfig.xml schema.xml admin-extra.html</gettableFiles>
+    <gettableFiles>solrconfig.xml schema.xml</gettableFiles>
   </admin>
 
   <!-- test getting system property -->
@@ -489,9 +463,6 @@
 
   <queryParser name="foo" class="FooQParserPlugin"/>
 
-  <!-- deprecated parser, delete once class is deleted in Solr 8.0 -->
-  <queryParser name="lucenePlusSort" class="solr.OldLuceneQParserPlugin"/>
-  
   <updateRequestProcessorChain name="dedupe">
     <processor class="org.apache.solr.update.processor.SignatureUpdateProcessorFactory">
       <bool name="enabled">false</bool>
@@ -575,13 +546,19 @@
   </restManager>
 
   <!-- warning: not a best practice; requests generally ought to be explicit to thus not require this -->
-  <initParams path="/select,/dismax,/defaults,/lazy,/spellCheckCompRH,/spellCheckWithWordbreak,/spellCheckCompRH_Direct,/spellCheckCompRH1,/mltrh,/tvrh,/search-facet-def,/search-facet-invariants,/terms">
+  <initParams path="/select,/dismax,/defaults,/lazy,/spellCheckCompRH,/spellCheckWithWordbreak,/spellCheckCompRH_Direct,/spellCheckCompRH1,/mltrh,/tvrh,/search-facet-def,/search-facet-invariants">
     <lst name="defaults">
       <str name="df">text</str>
     </lst>
   </initParams>
-  
-  
+
+  <transformer name="explain1" class="org.apache.solr.response.transform.ExplainAugmenterFactory" />
+  <transformer name="explainText" class="org.apache.solr.response.transform.ExplainAugmenterFactory" >
+    <str name="args">text</str>
+  </transformer>
+  <transformer name="explainNL" class="org.apache.solr.response.transform.ExplainAugmenterFactory" >
+    <str name="args">nl</str>
+  </transformer>
 
 </config>
 

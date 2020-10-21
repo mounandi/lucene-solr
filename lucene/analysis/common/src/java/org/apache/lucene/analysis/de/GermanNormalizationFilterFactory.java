@@ -20,10 +20,7 @@ package org.apache.lucene.analysis.de;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.de.GermanNormalizationFilter;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link GermanNormalizationFilter}.
@@ -35,8 +32,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.GermanNormalizationFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre> 
+ * @since 3.6.0
+ * @lucene.spi {@value #NAME}
  */
-public class GermanNormalizationFilterFactory extends TokenFilterFactory implements MultiTermAwareComponent {
+public class GermanNormalizationFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "germanNormalization";
 
   /** Creates a new GermanNormalizationFilterFactory */
   public GermanNormalizationFilterFactory(Map<String,String> args) {
@@ -46,13 +48,18 @@ public class GermanNormalizationFilterFactory extends TokenFilterFactory impleme
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public GermanNormalizationFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new GermanNormalizationFilter(input);
   }
-  
+
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

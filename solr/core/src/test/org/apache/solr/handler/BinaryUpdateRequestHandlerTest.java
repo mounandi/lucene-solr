@@ -16,11 +16,15 @@
  */
 package org.apache.solr.handler;
 
+import java.io.ByteArrayOutputStream;
+
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.client.solrj.impl.BinaryRequestWriter;
+import org.apache.solr.client.solrj.request.RequestWriter;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.params.UpdateParams;
+import org.apache.solr.common.util.ContentStreamBase;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.handler.loader.ContentStreamLoader;
 import org.apache.solr.request.SolrQueryRequest;
@@ -38,6 +42,7 @@ public class BinaryUpdateRequestHandlerTest extends SolrTestCaseJ4 {
   }
 
   @Test
+  @SuppressWarnings({"rawtypes"})
   public void testRequestParams() throws Exception {
     SolrInputDocument doc = new SolrInputDocument();
     doc.addField("id", "1");
@@ -49,18 +54,18 @@ public class BinaryUpdateRequestHandlerTest extends SolrTestCaseJ4 {
     BinaryRequestWriter brw = new BinaryRequestWriter();
     BufferingRequestProcessor p = new BufferingRequestProcessor(null);
     SolrQueryResponse rsp = new SolrQueryResponse();
-    UpdateRequestHandler handler = new UpdateRequestHandler();
-    handler.init(new NamedList());
-    SolrQueryRequest req = req();
-    ContentStreamLoader csl = handler.newLoader(req, p);
-
-    csl.load(req, rsp, brw.getContentStream(ureq), p);
-
-    AddUpdateCommand add = p.addCommands.get(0);
-    System.out.println(add.solrDoc);
-    assertEquals(false, add.overwrite);
-    assertEquals(100, add.commitWithin);
-
-    req.close();
+    try (SolrQueryRequest req = req(); UpdateRequestHandler handler = new UpdateRequestHandler()) {
+      handler.init(new NamedList());
+      ContentStreamLoader csl = handler.newLoader(req, p);
+      RequestWriter.ContentWriter cw = brw.getContentWriter(ureq);
+      ByteArrayOutputStream baos = new ByteArrayOutputStream();
+      cw.write(baos);
+      ContentStreamBase.ByteArrayStream cs = new ContentStreamBase.ByteArrayStream(baos.toByteArray(), null, "application/javabin");
+      csl.load(req, rsp, cs, p);
+      AddUpdateCommand add = p.addCommands.get(0);
+      System.out.println(add.solrDoc);
+      assertEquals(false, add.overwrite);
+      assertEquals(100, add.commitWithin);
+    }
   }
 }

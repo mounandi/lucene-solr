@@ -52,7 +52,7 @@ import org.apache.lucene.util.automaton.Automaton;
 import org.apache.lucene.util.automaton.LimitedFiniteStringsIterator;
 import org.apache.lucene.util.automaton.Operations;
 import org.apache.lucene.util.automaton.Transition;
-import org.apache.lucene.util.fst.Builder;
+import org.apache.lucene.util.fst.FSTCompiler;
 import org.apache.lucene.util.fst.ByteSequenceOutputs;
 import org.apache.lucene.util.fst.FST.BytesReader;
 import org.apache.lucene.util.fst.FST;
@@ -390,9 +390,11 @@ public class AnalyzingSuggester extends Lookup implements Accountable {
       } else {
         scratchA.offset = readerA.getPosition();
         scratchB.offset = readerB.getPosition();
-        scratchA.length = a.length - scratchA.offset;
-        scratchB.length = b.length - scratchB.offset;
+        scratchA.length = readerA.length() - readerA.getPosition();
+        scratchB.length = readerB.length() - readerB.getPosition();
       }
+      assert scratchA.isValid();
+      assert scratchB.isValid();
    
       return scratchA.compareTo(scratchB);
     }
@@ -494,7 +496,7 @@ public class AnalyzingSuggester extends Lookup implements Accountable {
       reader = new OfflineSorter.ByteSequencesReader(tempDir.openChecksumInput(tempSortedFileName, IOContext.READONCE), tempSortedFileName);
      
       PairOutputs<Long,BytesRef> outputs = new PairOutputs<>(PositiveIntOutputs.getSingleton(), ByteSequenceOutputs.getSingleton());
-      Builder<Pair<Long,BytesRef>> builder = new Builder<>(FST.INPUT_TYPE.BYTE1, outputs);
+      FSTCompiler<Pair<Long,BytesRef>> fstCompiler = new FSTCompiler<>(FST.INPUT_TYPE.BYTE1, outputs);
 
       // Build FST:
       BytesRefBuilder previousAnalyzed = null;
@@ -568,7 +570,7 @@ public class AnalyzingSuggester extends Lookup implements Accountable {
         Util.toIntsRef(analyzed.get(), scratchInts);
         //System.out.println("ADD: " + scratchInts + " -> " + cost + ": " + surface.utf8ToString());
         if (!hasPayloads) {
-          builder.add(scratchInts.get(), outputs.newPair(cost, BytesRef.deepCopyOf(surface)));
+          fstCompiler.add(scratchInts.get(), outputs.newPair(cost, BytesRef.deepCopyOf(surface)));
         } else {
           int payloadOffset = input.getPosition() + surface.length;
           int payloadLength = bytes.length - payloadOffset;
@@ -577,10 +579,10 @@ public class AnalyzingSuggester extends Lookup implements Accountable {
           br.bytes[surface.length] = PAYLOAD_SEP;
           System.arraycopy(bytes.bytes, payloadOffset, br.bytes, surface.length+1, payloadLength);
           br.length = br.bytes.length;
-          builder.add(scratchInts.get(), outputs.newPair(cost, br));
+          fstCompiler.add(scratchInts.get(), outputs.newPair(cost, br));
         }
       }
-      fst = builder.finish();
+      fst = fstCompiler.compile();
 
       //Util.dotToFile(fst, "/tmp/suggest.dot");
     } finally {
@@ -596,7 +598,7 @@ public class AnalyzingSuggester extends Lookup implements Accountable {
       return false;
     }
 
-    fst.save(output);
+    fst.save(output, output);
     output.writeVInt(maxAnalyzedPathsForOneInput);
     output.writeByte((byte) (hasPayloads ? 1 : 0));
     return true;
@@ -605,7 +607,7 @@ public class AnalyzingSuggester extends Lookup implements Accountable {
   @Override
   public boolean load(DataInput input) throws IOException {
     count = input.readVLong();
-    this.fst = new FST<>(input, new PairOutputs<>(PositiveIntOutputs.getSingleton(), ByteSequenceOutputs.getSingleton()));
+    this.fst = new FST<>(input, input, new PairOutputs<>(PositiveIntOutputs.getSingleton(), ByteSequenceOutputs.getSingleton()));
     maxAnalyzedPathsForOneInput = input.readVInt();
     hasPayloads = input.readByte() == 1;
     return true;
@@ -725,7 +727,7 @@ public class AnalyzingSuggester extends Lookup implements Accountable {
           if (fst.findTargetArc(END_BYTE, path.fstNode, scratchArc, bytesReader) != null) {
             // This node has END_BYTE arc leaving, meaning it's an
             // "exact" match:
-            searcher.addStartPaths(scratchArc, fst.outputs.add(path.output, scratchArc.output), false, path.input);
+            searcher.addStartPaths(scratchArc, fst.outputs.add(path.output, scratchArc.output()), false, path.input);
           }
         }
 

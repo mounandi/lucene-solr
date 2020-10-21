@@ -22,18 +22,21 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.index.TermContext;
+import org.apache.lucene.index.TermStates;
+import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.DisiPriorityQueue;
 import org.apache.lucene.search.DisiWrapper;
 import org.apache.lucene.search.DisjunctionDISIApproximation;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.TwoPhaseIterator;
+import org.apache.lucene.search.Weight;
 
 
 /** Matches the union of its clauses.
@@ -87,6 +90,17 @@ public final class SpanOrQuery extends SpanQuery {
   }
 
   @Override
+  public void visit(QueryVisitor visitor) {
+    if (visitor.acceptField(getField()) == false) {
+      return;
+    }
+    QueryVisitor v = visitor.getSubVisitor(BooleanClause.Occur.SHOULD, this);
+    for (SpanQuery q : clauses) {
+      q.visit(v);
+    }
+  }
+
+  @Override
   public String toString(String field) {
     StringBuilder buffer = new StringBuilder();
     buffer.append("spanOr([");
@@ -114,34 +128,40 @@ public final class SpanOrQuery extends SpanQuery {
   }
 
   @Override
-  public SpanWeight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+  public SpanWeight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
     List<SpanWeight> subWeights = new ArrayList<>(clauses.size());
     for (SpanQuery q : clauses) {
-      subWeights.add(q.createWeight(searcher, false, boost));
+      subWeights.add(q.createWeight(searcher, scoreMode, boost));
     }
-    return new SpanOrWeight(searcher, needsScores ? getTermContexts(subWeights) : null, subWeights, boost);
+    return new SpanOrWeight(searcher, scoreMode.needsScores() ? getTermStates(subWeights) : null, subWeights, boost);
   }
 
+  /**
+   * Creates SpanOrQuery scorer instances
+   * @lucene.internal
+   */
   public class SpanOrWeight extends SpanWeight {
 
     final List<SpanWeight> subWeights;
 
-    public SpanOrWeight(IndexSearcher searcher, Map<Term, TermContext> terms, List<SpanWeight> subWeights, float boost) throws IOException {
+    public SpanOrWeight(IndexSearcher searcher, Map<Term, TermStates> terms, List<SpanWeight> subWeights, float boost) throws IOException {
       super(SpanOrQuery.this, searcher, terms, boost);
       this.subWeights = subWeights;
     }
 
     @Override
-    public void extractTerms(Set<Term> terms) {
-      for (final SpanWeight w: subWeights) {
-        w.extractTerms(terms);
+    public boolean isCacheable(LeafReaderContext ctx) {
+      for (Weight w : subWeights) {
+        if (w.isCacheable(ctx) == false)
+          return false;
       }
+      return true;
     }
 
     @Override
-    public void extractTermContexts(Map<Term, TermContext> contexts) {
+    public void extractTermStates(Map<Term, TermStates> contexts) {
       for (SpanWeight w : subWeights) {
-        w.extractTermContexts(contexts);
+        w.extractTermStates(contexts);
       }
     }
 

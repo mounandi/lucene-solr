@@ -17,16 +17,26 @@
 package org.apache.lucene.search;
 
 
-import java.io.*;
-import java.util.*;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 import org.apache.lucene.analysis.MockAnalyzer;
-import org.apache.lucene.document.*;
-import org.apache.lucene.index.*;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.index.FieldInvertState;
+import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.RandomIndexWriter;
+import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause.Occur;
-import org.apache.lucene.search.Scorer.ChildScorer;
-import org.apache.lucene.store.*;
-import org.apache.lucene.util.*;
+import org.apache.lucene.search.similarities.Similarity;
+import org.apache.lucene.store.ByteBuffersDirectory;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.util.LuceneTestCase;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -38,7 +48,7 @@ public class TestSubScorerFreqs extends LuceneTestCase {
 
   @BeforeClass
   public static void makeIndex() throws Exception {
-    dir = new RAMDirectory();
+    dir = new ByteBuffersDirectory();
     RandomIndexWriter w = new RandomIndexWriter(
         random(), dir, newIndexWriterConfig(new MockAnalyzer(random())).setMergePolicy(newLogMergePolicy()));
     // make sure we have more than one segment occationally
@@ -54,6 +64,7 @@ public class TestSubScorerFreqs extends LuceneTestCase {
     }
 
     s = newSearcher(w.getReader());
+    s.setSimilarity(new CountingSimilarity());
     w.close();
   }
 
@@ -68,7 +79,7 @@ public class TestSubScorerFreqs extends LuceneTestCase {
   private static class CountingCollector extends FilterCollector {
     public final Map<Integer, Map<Query, Float>> docCounts = new HashMap<>();
 
-    private final Map<Query, Scorer> subScorers = new HashMap<>();
+    private final Map<Query, Scorable> subScorers = new HashMap<>();
     private final Set<String> relationships;
 
     public CountingCollector(Collector other) {
@@ -80,13 +91,14 @@ public class TestSubScorerFreqs extends LuceneTestCase {
       this.relationships = relationships;
     }
     
-    public void setSubScorers(Scorer scorer, String relationship) throws IOException {
-      for (ChildScorer child : scorer.getChildren()) {
-        if (scorer instanceof AssertingScorer || relationships.contains(child.relationship)) {
-          setSubScorers(child.child, child.relationship);
+    public void setSubScorers(Scorable scorer) throws IOException {
+      scorer = AssertingScorable.unwrap(scorer);
+      for (Scorable.ChildScorable child : scorer.getChildren()) {
+        if (relationships.contains(child.relationship)) {
+          setSubScorers(child.child);
         }
       }
-      subScorers.put(scorer.getWeight().getQuery(), scorer);
+      subScorers.put(((Scorer)scorer).getWeight().getQuery(), scorer);
     }
     
     public LeafCollector getLeafCollector(LeafReaderContext context)
@@ -97,20 +109,20 @@ public class TestSubScorerFreqs extends LuceneTestCase {
         @Override
         public void collect(int doc) throws IOException {
           final Map<Query, Float> freqs = new HashMap<Query, Float>();
-          for (Map.Entry<Query, Scorer> ent : subScorers.entrySet()) {
-            Scorer value = ent.getValue();
+          for (Map.Entry<Query, Scorable> ent : subScorers.entrySet()) {
+            Scorable value = ent.getValue();
             int matchId = value.docID();
-            freqs.put(ent.getKey(), matchId == doc ? value.freq() : 0.0f);
+            freqs.put(ent.getKey(), matchId == doc ? value.score() : 0.0f);
           }
           docCounts.put(doc + docBase, freqs);
           super.collect(doc);
         }
         
         @Override
-        public void setScorer(Scorer scorer) throws IOException {
+        public void setScorer(Scorable scorer) throws IOException {
           super.setScorer(scorer);
           subScorers.clear();
-          setSubScorers(scorer, "TOP");
+          setSubScorers(scorer);
         }
         
       };
@@ -123,7 +135,7 @@ public class TestSubScorerFreqs extends LuceneTestCase {
   @Test
   public void testTermQuery() throws Exception {
     TermQuery q = new TermQuery(new Term("f", "d"));
-    CountingCollector c = new CountingCollector(TopScoreDocCollector.create(10));
+    CountingCollector c = new CountingCollector(TopScoreDocCollector.create(10, Integer.MAX_VALUE));
     s.search(q, c);
     final int maxDocs = s.getIndexReader().maxDoc();
     assertEquals(maxDocs, c.docCounts.size());
@@ -163,7 +175,7 @@ public class TestSubScorerFreqs extends LuceneTestCase {
     
     for (final Set<String> occur : occurList) {
       CountingCollector c = new CountingCollector(TopScoreDocCollector.create(
-          10), occur);
+          10, Integer.MAX_VALUE), occur);
       s.search(query.build(), c);
       final int maxDocs = s.getIndexReader().maxDoc();
       assertEquals(maxDocs, c.docCounts.size());
@@ -193,7 +205,7 @@ public class TestSubScorerFreqs extends LuceneTestCase {
   @Test
   public void testPhraseQuery() throws Exception {
     PhraseQuery q = new PhraseQuery("f", "b", "c");
-    CountingCollector c = new CountingCollector(TopScoreDocCollector.create(10));
+    CountingCollector c = new CountingCollector(TopScoreDocCollector.create(10, Integer.MAX_VALUE));
     s.search(q, c);
     final int maxDocs = s.getIndexReader().maxDoc();
     assertEquals(maxDocs, c.docCounts.size());
@@ -207,5 +219,24 @@ public class TestSubScorerFreqs extends LuceneTestCase {
       assertEquals(1.0F, doc1.get(q), FLOAT_TOLERANCE);
     }
 
+  }
+
+  // Similarity that just returns the frequency as the score
+  private static class CountingSimilarity extends Similarity {
+
+    @Override
+    public long computeNorm(FieldInvertState state) {
+      return 1;
+    }
+
+    @Override
+    public SimScorer scorer(float boost, CollectionStatistics collectionStats, TermStatistics... termStats) {
+      return new SimScorer() {
+        @Override
+        public float score(float freq, long norm) {
+          return freq;
+        }
+      };
+    }
   }
 }

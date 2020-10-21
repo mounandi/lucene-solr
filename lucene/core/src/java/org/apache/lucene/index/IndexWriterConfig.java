@@ -19,20 +19,21 @@ package org.apache.lucene.index;
 
 import java.io.PrintStream;
 import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.stream.Collectors;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.codecs.Codec;
+import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexWriter.IndexReaderWarmer;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.PrintStreamInfoStream;
-import org.apache.lucene.util.SetOnce.AlreadySetException;
 import org.apache.lucene.util.SetOnce;
+import org.apache.lucene.util.SetOnce.AlreadySetException;
+import org.apache.lucene.util.Version;
 
 /**
  * Holds all the configuration that is used to create an {@link IndexWriter}.
@@ -108,6 +109,9 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
   
   /** Default value for whether calls to {@link IndexWriter#close()} include a commit. */
   public final static boolean DEFAULT_COMMIT_ON_CLOSE = true;
+
+  /** Default value for time to wait for merges on commit or getReader (when using a {@link MergePolicy} that implements {@link MergePolicy#findFullFlushMerges}). */
+  public static final long DEFAULT_MAX_FULL_FLUSH_MERGE_WAIT_MILLIS = 0;
   
   // indicates whether this config instance is already attached to a writer.
   // not final so that it can be cloned properly.
@@ -169,6 +173,35 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
   @Override
   public OpenMode getOpenMode() {
     return openMode;
+  }
+
+  /**
+   * Expert: set the compatibility version to use for this index. In case the
+   * index is created, it will use the given major version for compatibility.
+   * It is sometimes useful to set the previous major version for compatibility
+   * due to the fact that {@link IndexWriter#addIndexes} only accepts indices
+   * that have been written with the same major version as the current index.
+   * If the index already exists, then this value is ignored.
+   * Default value is the {@link Version#major major} of the
+   * {@link Version#LATEST latest version}.
+   * <p><b>NOTE</b>: Changing the creation version reduces backward
+   * compatibility guarantees. For instance an index created with Lucene 8 with
+   * a compatibility version of 7 can't be read with Lucene 9 due to the fact
+   * that Lucene only supports reading indices created with the current or
+   * previous major release.
+   * @param indexCreatedVersionMajor the major version to use for compatibility
+   */
+  public IndexWriterConfig setIndexCreatedVersionMajor(int indexCreatedVersionMajor) {
+    if (indexCreatedVersionMajor > Version.LATEST.major) {
+      throw new IllegalArgumentException("indexCreatedVersionMajor may not be in the future: current major version is " +
+          Version.LATEST.major + ", but got: " + indexCreatedVersionMajor);
+    }
+    if (indexCreatedVersionMajor < Version.LATEST.major - 1) {
+      throw new IllegalArgumentException("indexCreatedVersionMajor may not be less than the minimum supported version: " +
+          (Version.LATEST.major-1) + ", but got: " + indexCreatedVersionMajor);
+    }
+    this.createdVersionMajor = indexCreatedVersionMajor;
+    return this;
   }
 
   /**
@@ -281,28 +314,6 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
     return mergePolicy;
   }
 
-  /** Expert: Sets the {@link DocumentsWriterPerThreadPool} instance used by the
-   * IndexWriter to assign thread-states to incoming indexing threads.
-   * <p>
-   * NOTE: The given {@link DocumentsWriterPerThreadPool} instance must not be used with
-   * other {@link IndexWriter} instances once it has been initialized / associated with an
-   * {@link IndexWriter}.
-   * </p>
-   * <p>
-   * NOTE: This only takes effect when IndexWriter is first created.</p>*/
-  IndexWriterConfig setIndexerThreadPool(DocumentsWriterPerThreadPool threadPool) {
-    if (threadPool == null) {
-      throw new IllegalArgumentException("threadPool must not be null");
-    }
-    this.indexerThreadPool = threadPool;
-    return this;
-  }
-
-  @Override
-  DocumentsWriterPerThreadPool getIndexerThreadPool() {
-    return indexerThreadPool;
-  }
-
   /** By default, IndexWriter does not pool the
    *  SegmentReaders it must open for deletions and
    *  merging, unless a near-real-time reader has been
@@ -396,7 +407,7 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
    * Information about merges, deletes and a
    * message when maxFieldLength is reached will be printed
    * to this. Must not be null, but {@link InfoStream#NO_OUTPUT} 
-   * may be used to supress output.
+   * may be used to suppress output.
    */
   public IndexWriterConfig setInfoStream(InfoStream infoStream) {
     if (infoStream == null) {
@@ -451,21 +462,29 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
     return this;
   }
 
-  /** We only allow sorting on these types */
-  private static final EnumSet<SortField.Type> ALLOWED_INDEX_SORT_TYPES = EnumSet.of(SortField.Type.STRING,
-                                                                                     SortField.Type.LONG,
-                                                                                     SortField.Type.INT,
-                                                                                     SortField.Type.DOUBLE,
-                                                                                     SortField.Type.FLOAT);
+  /**
+   * Expert: sets the amount of time to wait for merges (during {@link IndexWriter#commit}
+   * or {@link IndexWriter#getReader(boolean, boolean)}) returned by
+   * MergePolicy.findFullFlushMerges(...).
+   * If this time is reached, we proceed with the commit based on segments merged up to that point.
+   * The merges are not aborted, and will still run to completion independent of the commit or getReader call,
+   * like natural segment merges. The default is <code>{@value IndexWriterConfig#DEFAULT_MAX_FULL_FLUSH_MERGE_WAIT_MILLIS}</code>.
+   *
+   * Note: This settings has no effect unless {@link MergePolicy#findFullFlushMerges(MergeTrigger, SegmentInfos, MergePolicy.MergeContext)}
+   * has an implementation that actually returns merges which by default doesn't return any merges.
+   */
+  public IndexWriterConfig setMaxFullFlushMergeWaitMillis(long maxFullFlushMergeWaitMillis) {
+    this.maxFullFlushMergeWaitMillis = maxFullFlushMergeWaitMillis;
+    return this;
+  }
 
   /**
-   * Set the {@link Sort} order to use when merging segments.
+   * Set the {@link Sort} order to use for all (flushed and merged) segments.
    */
   public IndexWriterConfig setIndexSort(Sort sort) {
-    for(SortField sortField : sort.getSort()) {
-      final SortField.Type sortType = Sorter.getSortFieldType(sortField);
-      if (ALLOWED_INDEX_SORT_TYPES.contains(sortType) == false) {
-        throw new IllegalArgumentException("invalid SortField type: must be one of " + ALLOWED_INDEX_SORT_TYPES + " but got: " + sortField);
+    for (SortField sortField : sort.getSort()) {
+      if (sortField.getIndexSorter() == null) {
+        throw new IllegalArgumentException("Cannot sort index with sort field " + sortField);
       }
     }
     this.indexSort = sort;
@@ -479,5 +498,37 @@ public final class IndexWriterConfig extends LiveIndexWriterConfig {
     sb.append("writer=").append(writer.get()).append("\n");
     return sb.toString();
   }
-  
+
+  @Override
+  public IndexWriterConfig setCheckPendingFlushUpdate(boolean checkPendingFlushOnUpdate) {
+    return (IndexWriterConfig) super.setCheckPendingFlushUpdate(checkPendingFlushOnUpdate);
+  }
+
+  /**
+   * Sets the soft deletes field. A soft delete field in lucene is a doc-values field that marks a document as soft-deleted if a
+   * document has at least one value in that field. If a document is marked as soft-deleted the document is treated as
+   * if it has been hard-deleted through the IndexWriter API ({@link IndexWriter#deleteDocuments(Term...)}.
+   * Merges will reclaim soft-deleted as well as hard-deleted documents and index readers obtained from the IndexWriter
+   * will reflect all deleted documents in it's live docs. If soft-deletes are used documents must be indexed via
+   * {@link IndexWriter#softUpdateDocument(Term, Iterable, Field...)}. Deletes are applied via
+   * {@link IndexWriter#updateDocValues(Term, Field...)}.
+   *
+   * Soft deletes allow to retain documents across merges if the merge policy modifies the live docs of a merge reader.
+   * {@link SoftDeletesRetentionMergePolicy} for instance allows to specify an arbitrary query to mark all documents
+   * that should survive the merge. This can be used to for example keep all document modifications for a certain time
+   * interval or the last N operations if some kind of sequence ID is available in the index.
+   *
+   * Currently there is no API support to un-delete a soft-deleted document. In oder to un-delete the document must be
+   * re-indexed using {@link IndexWriter#softUpdateDocument(Term, Iterable, Field...)}.
+   *
+   * The default value for this is <code>null</code> which disables soft-deletes. If soft-deletes are enabled documents
+   * can still be hard-deleted. Hard-deleted documents will won't considered as soft-deleted even if they have
+   * a value in the soft-deletes field.
+   *
+   * @see #getSoftDeletesField()
+   */
+  public IndexWriterConfig setSoftDeletesField(String softDeletesField) {
+    this.softDeletesField = softDeletesField;
+    return this;
+  }
 }

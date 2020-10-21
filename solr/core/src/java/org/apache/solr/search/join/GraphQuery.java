@@ -20,7 +20,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.TreeSet;
 
 import org.apache.lucene.index.LeafReaderContext;
@@ -34,6 +33,8 @@ import org.apache.lucene.search.DocValuesFieldExistsQuery;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.WildcardQuery;
@@ -109,7 +110,7 @@ public class GraphQuery extends Query {
   }
   
   @Override
-  public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+  public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
     Weight graphWeight = new GraphQueryWeight((SolrIndexSearcher)searcher, boost);
     return graphWeight;
   }
@@ -117,14 +118,14 @@ public class GraphQuery extends Query {
   @Override
   public String toString(String field) {
     StringBuilder sb = new StringBuilder();
-    sb.append("[[" + q.toString() + "]," + fromField + "=" + toField + "]");
+    sb.append("[[").append(q.toString()).append("],").append(fromField).append('=').append(toField).append(']');
     if (traversalFilter != null) {
-      sb.append(" [TraversalFilter: " + traversalFilter.toString() + "]");
+      sb.append(" [TraversalFilter: ").append(traversalFilter.toString()).append(']');
     }
-    sb.append("[maxDepth=" + maxDepth + "]");
-    sb.append("[returnRoot=" + returnRoot + "]");
-    sb.append("[onlyLeafNodes=" + onlyLeafNodes + "]");
-    sb.append("[useAutn=" + useAutn + "]");
+    sb.append("[maxDepth=").append(maxDepth).append(']');
+    sb.append("[returnRoot=").append(returnRoot).append(']');
+    sb.append("[onlyLeafNodes=").append(onlyLeafNodes).append(']');
+    sb.append("[useAutn=").append(useAutn).append(']');
     return sb.toString();
   }
   
@@ -199,7 +200,7 @@ public class GraphQuery extends Query {
           // Create the graph result collector for this level
           GraphEdgeCollector graphResultCollector = collectSchemaField.getType().isPointField()
               ? new GraphPointsCollector(collectSchemaField, new BitDocSet(resultBits), leafNodes)
-              : new GraphTermsCollector(collectSchemaField, new BitDocSet(resultBits), leafNodes);
+              : new GraphEdgeCollector.GraphTermsCollector(collectSchemaField, new BitDocSet(resultBits), leafNodes);
 
           fromSet = new BitDocSet(new FixedBitSet(capacity));
           graphResultCollector.setCollectDocs(fromSet.getBits());
@@ -275,10 +276,10 @@ public class GraphQuery extends Query {
       // create a scrorer on the result set, if results from right query are empty, use empty iterator.
       return new GraphScorer(this, readerSet == null ? DocIdSetIterator.empty() : readerSet.iterator(), 1);
     }
-    
+
     @Override
-    public void extractTerms(Set<Term> terms) {
-      // NoOp for now , not used.. / supported
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return true;
     }
     
   }
@@ -301,6 +302,11 @@ public class GraphQuery extends Query {
     }
 
     @Override
+    public float getMaxScore(int upTo) throws IOException {
+      return score;
+    }
+
+    @Override
     public DocIdSetIterator iterator() {
       return iter;
     }
@@ -310,11 +316,7 @@ public class GraphQuery extends Query {
       // current position of the doc iterator.
       return iter.docID();
     }
-    
-    @Override
-    public int freq() throws IOException {
-      return 1;
-    }
+
   }
   
   /**
@@ -434,5 +436,10 @@ public class GraphQuery extends Query {
            Objects.equals(toField, other.toField) &&
            Objects.equals(traversalFilter, other.traversalFilter);
   }
-  
+
+  @Override
+  public void visit(QueryVisitor visitor) {
+    visitor.visitLeaf(this);
+  }
+
 }

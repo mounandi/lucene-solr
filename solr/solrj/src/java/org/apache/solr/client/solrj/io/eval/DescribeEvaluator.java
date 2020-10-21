@@ -17,76 +17,50 @@
 package org.apache.solr.client.solrj.io.eval;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
 import org.apache.solr.client.solrj.io.Tuple;
-import org.apache.solr.client.solrj.io.stream.expr.Explanation;
-import org.apache.solr.client.solrj.io.stream.expr.Explanation.ExpressionType;
-import org.apache.solr.client.solrj.io.stream.expr.Expressible;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpression;
-import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionParameter;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 
-public class DescribeEvaluator extends ComplexEvaluator implements Expressible {
-
-  private static final long serialVersionUID = 1;
-
-  public DescribeEvaluator(StreamExpression expression, StreamFactory factory) throws IOException {
+public class DescribeEvaluator extends RecursiveNumericEvaluator implements OneValueWorker {
+  protected static final long serialVersionUID = 1L;
+  
+  public DescribeEvaluator(StreamExpression expression, StreamFactory factory) throws IOException{
     super(expression, factory);
     
-    if(1 != subEvaluators.size()){
-      throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - expecting one column but found %d",expression,subEvaluators.size()));
+    if(1 != containedEvaluators.size()){
+      throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - expecting exactly one value but found %d",expression,containedEvaluators.size()));
     }
-
   }
-
-  public Tuple evaluate(Tuple tuple) throws IOException {
-
-    StreamEvaluator colEval = subEvaluators.get(0);
-
-    List<Number> numbers = (List<Number>)colEval.evaluate(tuple);
+  
+  @Override
+  public Object doWork(Object value) throws IOException {
+    
+    if(!(value instanceof List<?>)){
+      throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - expecting a numeric list but found %s", toExpression(constructingFactory), value.getClass().getSimpleName()));
+    }
+    
+    // we know each value is a BigDecimal or a list of BigDecimals
     DescriptiveStatistics descriptiveStatistics = new DescriptiveStatistics();
+    ((List<?>)value).stream().mapToDouble(innerValue -> ((Number)innerValue).doubleValue()).forEach(innerValue -> descriptiveStatistics.addValue(innerValue));
 
-    for(Number n : numbers) {
-      descriptiveStatistics.addValue(n.doubleValue());
-    }
+    Tuple tuple = new Tuple();
+    tuple.put("max", descriptiveStatistics.getMax());
+    tuple.put("mean", descriptiveStatistics.getMean());
+    tuple.put("min", descriptiveStatistics.getMin());
+    tuple.put("stdev", descriptiveStatistics.getStandardDeviation());
+    tuple.put("sum", descriptiveStatistics.getSum());
+    tuple.put("N", descriptiveStatistics.getN());
+    tuple.put("var", descriptiveStatistics.getVariance());
+    tuple.put("kurtosis", descriptiveStatistics.getKurtosis());
+    tuple.put("skewness", descriptiveStatistics.getSkewness());
+    tuple.put("popVar", descriptiveStatistics.getPopulationVariance());
+    tuple.put("geometricMean", descriptiveStatistics.getGeometricMean());
+    tuple.put("sumsq", descriptiveStatistics.getSumsq());
 
-
-    Map map = new HashMap();
-
-    map.put("max", descriptiveStatistics.getMax());
-    map.put("mean", descriptiveStatistics.getMean());
-    map.put("min", descriptiveStatistics.getMin());
-    map.put("stdev", descriptiveStatistics.getStandardDeviation());
-    map.put("sum", descriptiveStatistics.getSum());
-    map.put("N", descriptiveStatistics.getN());
-    map.put("var", descriptiveStatistics.getVariance());
-    map.put("kurtosis", descriptiveStatistics.getKurtosis());
-    map.put("skewness", descriptiveStatistics.getSkewness());
-    map.put("popVar", descriptiveStatistics.getPopulationVariance());
-    map.put("geometricMean", descriptiveStatistics.getGeometricMean());
-    map.put("sumsq", descriptiveStatistics.getSumsq());
-
-    return new Tuple(map);
-  }
-
-
-  @Override
-  public StreamExpressionParameter toExpression(StreamFactory factory) throws IOException {
-    StreamExpression expression = new StreamExpression(factory.getFunctionName(getClass()));
-    return expression;
-  }
-
-  @Override
-  public Explanation toExplanation(StreamFactory factory) throws IOException {
-    return new Explanation(nodeId.toString())
-        .withExpressionType(ExpressionType.EVALUATOR)
-        .withFunctionName(factory.getFunctionName(getClass()))
-        .withImplementingClass(getClass().getName())
-        .withExpression(toExpression(factory).toString());
-  }
+    return tuple;
+  }  
 }

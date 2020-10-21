@@ -15,23 +15,21 @@
  * limitations under the License.
  */
 package org.apache.solr.servlet;
-
-import org.apache.commons.io.IOUtils;
-import org.apache.commons.io.output.CloseShieldOutputStream;
-import org.apache.commons.lang.StringEscapeUtils;
-import org.apache.commons.lang.StringUtils;
-import org.apache.solr.common.params.CommonParams;
-import org.apache.solr.core.CoreContainer;
-import org.apache.solr.core.SolrCore;
-
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.StandardCharsets;
+
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.io.output.CloseShieldOutputStream;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.text.StringEscapeUtils;
+import org.apache.solr.common.params.CommonParams;
+import org.apache.solr.core.CoreContainer;
+import org.apache.solr.core.SolrCore;
 
 /**
  * A simple servlet to load the Solr Admin UI
@@ -40,10 +38,19 @@ import java.nio.charset.StandardCharsets;
  */
 public final class LoadAdminUiServlet extends BaseSolrServlet {
 
+  // check system properties for whether or not admin UI is disabled, default is false
+  private static final boolean disabled = Boolean.parseBoolean(System.getProperty("disableAdminUI", "false"));
+
   @Override
-  public void doGet(HttpServletRequest request,
-                    HttpServletResponse response)
-      throws IOException {
+  public void doGet(HttpServletRequest _request, HttpServletResponse _response) throws IOException {
+    if(disabled){
+      _response.sendError(404, "Solr Admin UI is disabled. To enable it, change the default value of SOLR_ADMIN_UI_" +
+          "ENABLED in bin/solr.in.sh or solr.in.cmd.");
+      return;
+    }
+    HttpServletRequest request = SolrDispatchFilter.closeShield(_request, false);
+    HttpServletResponse response = SolrDispatchFilter.closeShield(_response, false);
+
 
     response.addHeader("X-Frame-Options", "DENY"); // security: SOLR-7966 - avoid clickjacking for admin interface
 
@@ -57,7 +64,7 @@ public final class LoadAdminUiServlet extends BaseSolrServlet {
         response.setCharacterEncoding("UTF-8");
         response.setContentType("text/html");
 
-        // Protect container owned streams from being closed by us, see SOLR-8933
+        // We have to close this to flush OutputStreamWriter buffer
         out = new OutputStreamWriter(new CloseShieldOutputStream(response.getOutputStream()), StandardCharsets.UTF_8);
 
         String html = IOUtils.toString(in, "UTF-8");
@@ -69,9 +76,9 @@ public final class LoadAdminUiServlet extends BaseSolrServlet {
             "${version}" 
         };
         String[] replace = new String[] {
-            StringEscapeUtils.escapeJavaScript(request.getContextPath()),
-            StringEscapeUtils.escapeJavaScript(CommonParams.CORES_HANDLER_PATH),
-            StringEscapeUtils.escapeJavaScript(pack.getSpecificationVersion())
+            StringEscapeUtils.escapeEcmaScript(request.getContextPath()),
+            StringEscapeUtils.escapeEcmaScript(CommonParams.CORES_HANDLER_PATH),
+            StringEscapeUtils.escapeEcmaScript(pack.getSpecificationVersion())
         };
         
         out.write( StringUtils.replaceEach(html, search, replace) );

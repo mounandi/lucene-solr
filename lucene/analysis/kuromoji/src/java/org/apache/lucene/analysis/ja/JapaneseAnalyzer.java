@@ -34,6 +34,8 @@ import org.apache.lucene.analysis.ja.dict.UserDictionary;
 /**
  * Analyzer for Japanese that uses morphological analysis.
  * @see JapaneseTokenizer
+ *
+ * @since 3.6.0
  */
 public class JapaneseAnalyzer extends StopwordAnalyzerBase {
   private final Mode mode;
@@ -85,7 +87,7 @@ public class JapaneseAnalyzer extends StopwordAnalyzerBase {
   
   @Override
   protected TokenStreamComponents createComponents(String fieldName) {
-    Tokenizer tokenizer = new JapaneseTokenizer(userDict, true, mode);
+    Tokenizer tokenizer = new JapaneseTokenizer(userDict, true, true, mode);
     TokenStream stream = new JapaneseBaseFormFilter(tokenizer);
     stream = new JapanesePartOfSpeechStopFilter(stream, stoptags);
     stream = new CJKWidthFilter(stream);

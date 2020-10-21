@@ -16,7 +16,7 @@
  */
 package org.apache.lucene.analysis.core;
 
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.util.AttributeFactory;
 
 import java.util.Map;
@@ -38,8 +38,15 @@ import static org.apache.lucene.analysis.standard.StandardTokenizer.MAX_TOKEN_LE
  *        MAX_TOKEN_LENGTH_LIMIT (1024*1024). It is rare to need to change this
  *      else {@link KeywordTokenizer}::DEFAULT_BUFFER_SIZE</li>
  * </ul>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class KeywordTokenizerFactory extends TokenizerFactory {
+
+  /** SPI name */
+  public static final String NAME = "keyword";
+
   private final int maxTokenLen;
   
   /** Creates a new KeywordTokenizerFactory */
@@ -54,6 +61,11 @@ public class KeywordTokenizerFactory extends TokenizerFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public KeywordTokenizerFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public KeywordTokenizer create(AttributeFactory factory) {
     return new KeywordTokenizer(factory, maxTokenLen);

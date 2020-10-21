@@ -21,8 +21,7 @@ import java.util.Map;
 
 import org.apache.lucene.analysis.TokenFilter;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.en.KStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link KStemFilter}.
@@ -34,8 +33,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.KStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.3.0
+ * @lucene.spi {@value #NAME}
  */
 public class KStemFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "kStem";
 
   /** Creates a new KStemFilterFactory */
   public KStemFilterFactory(Map<String,String> args) {
@@ -45,6 +49,11 @@ public class KStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public KStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenFilter create(TokenStream input) {
     return new KStemFilter(input);

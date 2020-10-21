@@ -23,7 +23,7 @@ import java.util.Locale;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link DateRecognizerFilter}.
@@ -41,8 +41,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * The {@code datePattern} is optional. If omitted, {@link DateRecognizerFilter} will be created with the default date
  * format of the system. The {@code locale} is optional and if omitted the filter will be created with
  * {@link Locale#ENGLISH}.
+ * @since 5.5.0
+ * @lucene.spi {@value #NAME}
  */
 public class DateRecognizerFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "dateRecognizer";
 
   public static final String DATE_PATTERN = "datePattern";
   public static final String LOCALE = "locale";
@@ -58,6 +63,11 @@ public class DateRecognizerFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public DateRecognizerFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

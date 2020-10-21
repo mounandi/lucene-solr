@@ -18,8 +18,6 @@ package org.apache.lucene.search;
 
 
 import java.io.IOException;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.Objects;
 
 import org.apache.lucene.index.IndexReader;
@@ -64,6 +62,11 @@ public final class ConstantScoreQuery extends Query {
     return super.rewrite(reader);
   }
 
+  @Override
+  public void visit(QueryVisitor visitor) {
+    query.visit(visitor.getSubVisitor(BooleanClause.Occur.FILTER, this));
+  }
+
   /** We return this as our {@link BulkScorer} so that if the CSQ
    *  wraps a query with its own optimized top-level
    *  scorer (e.g. BooleanScorer) we can use that
@@ -87,16 +90,12 @@ public final class ConstantScoreQuery extends Query {
     private LeafCollector wrapCollector(LeafCollector collector) {
       return new FilterLeafCollector(collector) {
         @Override
-        public void setScorer(Scorer scorer) throws IOException {
+        public void setScorer(Scorable scorer) throws IOException {
           // we must wrap again here, but using the scorer passed in as parameter:
-          in.setScorer(new FilterScorer(scorer) {
+          in.setScorer(new FilterScorable(scorer) {
             @Override
-            public float score() throws IOException {
+            public float score() {
               return theScore;
-            }
-            @Override
-            public int freq() throws IOException {
-              return 1;
             }
           });
         }
@@ -110,13 +109,15 @@ public final class ConstantScoreQuery extends Query {
   }
 
   @Override
-  public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
-    final Weight innerWeight = searcher.createWeight(query, false, 1f);
-    if (needsScores) {
+  public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
+    final Weight innerWeight = searcher.createWeight(query, ScoreMode.COMPLETE_NO_SCORES, 1f);
+    if (scoreMode.needsScores()) {
       return new ConstantScoreWeight(this, boost) {
-
         @Override
         public BulkScorer bulkScorer(LeafReaderContext context) throws IOException {
+          if (scoreMode.isExhaustive() == false) {
+            return super.bulkScorer(context);
+          }
           final BulkScorer innerScorer = innerWeight.bulkScorer(context);
           if (innerScorer == null) {
             return null;
@@ -134,21 +135,12 @@ public final class ConstantScoreQuery extends Query {
             @Override
             public Scorer get(long leadCost) throws IOException {
               final Scorer innerScorer = innerScorerSupplier.get(leadCost);
-              final float score = score();
-              return new FilterScorer(innerScorer) {
-                @Override
-                public float score() throws IOException {
-                  return score;
-                }
-                @Override
-                public int freq() throws IOException {
-                  return 1;
-                }
-                @Override
-                public Collection<ChildScorer> getChildren() {
-                  return Collections.singleton(new ChildScorer(innerScorer, "constant"));
-                }
-              };
+              final TwoPhaseIterator twoPhaseIterator = innerScorer.twoPhaseIterator();
+              if (twoPhaseIterator == null) {
+                return new ConstantScoreScorer(innerWeight, score(), scoreMode, innerScorer.iterator());
+              } else {
+                return new ConstantScoreScorer(innerWeight, score(), scoreMode, twoPhaseIterator);
+              }
             }
 
             @Override
@@ -159,12 +151,22 @@ public final class ConstantScoreQuery extends Query {
         }
 
         @Override
+        public Matches matches(LeafReaderContext context, int doc) throws IOException {
+          return innerWeight.matches(context, doc);
+        }
+
+        @Override
         public Scorer scorer(LeafReaderContext context) throws IOException {
           ScorerSupplier scorerSupplier = scorerSupplier(context);
           if (scorerSupplier == null) {
             return null;
           }
           return scorerSupplier.get(Long.MAX_VALUE);
+        }
+
+        @Override
+        public boolean isCacheable(LeafReaderContext ctx) {
+          return innerWeight.isCacheable(ctx);
         }
 
       };

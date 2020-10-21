@@ -23,6 +23,7 @@ import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.queries.function.ValueSource;
 import org.apache.lucene.search.SortField;
 import org.apache.solr.common.SolrException;
+import org.apache.solr.request.SolrRequestInfo;
 import org.apache.solr.response.TextResponseWriter;
 import org.apache.solr.search.QParser;
 import org.apache.solr.search.function.FileFloatSource;
@@ -54,7 +55,6 @@ import org.apache.solr.uninverting.UninvertingReader.Type;
  * @see ExternalFileFieldReloader
  */
 public class ExternalFileField extends FieldType implements SchemaAware {
-  private FieldType ftype;
   private String keyFieldName;
   private IndexSchema schema;
   private float defVal;
@@ -96,7 +96,7 @@ public class ExternalFileField extends FieldType implements SchemaAware {
    * @return a FileFloatSource
    */
   public FileFloatSource getFileFloatSource(SchemaField field) {
-    return getFileFloatSource(field, schema.getResourceLoader().getDataDir());
+    return getFileFloatSource(field, SolrRequestInfo.getRequestInfo().getReq().getCore().getDataDir());
   }
 
   /**

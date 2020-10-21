@@ -53,7 +53,7 @@ public class TextLogisticRegressionQParserPlugin extends QParserPlugin {
   public static final String NAME = "tlogit";
 
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
   }
 
   @Override
@@ -150,12 +150,8 @@ public class TextLogisticRegressionQParserPlugin extends QParserPlugin {
     }
 
     public void collect(int doc) throws IOException{
-      int valuesDocID = leafOutcomeValue.docID();
-      if (valuesDocID < doc) {
-        valuesDocID = leafOutcomeValue.advance(doc);
-      }
       int outcome;
-      if (valuesDocID == doc) {
+      if (leafOutcomeValue.advanceExact(doc)) {
         outcome = (int) leafOutcomeValue.longValue();
       } else {
         outcome = 0;
@@ -169,6 +165,7 @@ public class TextLogisticRegressionQParserPlugin extends QParserPlugin {
 
     }
 
+    @SuppressWarnings({"unchecked"})
     public void finish() throws IOException {
 
       Map<Integer, double[]> docVectors = new HashMap<>();
@@ -215,6 +212,7 @@ public class TextLogisticRegressionQParserPlugin extends QParserPlugin {
         }
       }
 
+      @SuppressWarnings({"rawtypes"})
       NamedList analytics = new NamedList();
       rbsp.rsp.add("logit", analytics);
 

@@ -113,29 +113,6 @@ public final class DocValues {
   }
 
   /** 
-   * An empty SortedDocValues which returns {@link BytesRef#EMPTY_BYTES} for every document 
-   */
-  public static final LegacySortedDocValues emptyLegacySorted() {
-    final BytesRef empty = new BytesRef();
-    return new LegacySortedDocValues() {
-      @Override
-      public int getOrd(int docID) {
-        return -1;
-      }
-
-      @Override
-      public BytesRef lookupOrd(int ord) {
-        return empty;
-      }
-
-      @Override
-      public int getValueCount() {
-        return 0;
-      }
-    };
-  }
-
-  /** 
    * An empty SortedDocValues which returns {@link BytesRef#EMPTY_BYTES} for every document
    */
   public static final SortedDocValues emptySorted() {
@@ -191,7 +168,7 @@ public final class DocValues {
   /**
    * An empty SortedNumericDocValues which returns zero values for every document 
    */
-  public static final SortedNumericDocValues emptySortedNumeric(int maxDoc) {
+  public static final SortedNumericDocValues emptySortedNumeric() {
     return new SortedNumericDocValues() {
       
       private int doc = -1;
@@ -410,7 +387,7 @@ public final class DocValues {
       NumericDocValues single = reader.getNumericDocValues(field);
       if (single == null) {
         checkField(reader, field, DocValuesType.SORTED_NUMERIC, DocValuesType.NUMERIC);
-        return emptySortedNumeric(reader.maxDoc());
+        return emptySortedNumeric();
       }
       return singleton(single);
     }
@@ -436,5 +413,17 @@ public final class DocValues {
       dv = singleton(sorted);
     }
     return dv;
+  }
+
+  /**
+   * Returns {@code true} if the specified docvalues fields have not been updated
+   */
+  public static boolean isCacheable(LeafReaderContext ctx, String... fields) {
+    for (String field : fields) {
+      FieldInfo fi = ctx.reader().getFieldInfos().fieldInfo(field);
+      if (fi != null && fi.getDocValuesGen() > -1)
+        return false;
+    }
+    return true;
   }
 }

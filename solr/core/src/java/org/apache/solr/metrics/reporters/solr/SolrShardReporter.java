@@ -28,9 +28,10 @@ import org.apache.solr.cloud.CloudDescriptor;
 import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
+import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.handler.admin.MetricsCollectorHandler;
-import org.apache.solr.metrics.FilteringSolrMetricReporter;
+import org.apache.solr.metrics.SolrCoreReporter;
 import org.apache.solr.metrics.SolrMetricManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,27 +48,27 @@ import com.codahale.metrics.MetricFilter;
  *   to 0 disables the reporter.</li>
  *   <li>filter - (optional multiple str) regex expression(s) matching selected metrics to be reported.</li>
  * </ul>
- * NOTE: this reporter uses predefined "replica" group, and it's always created even if explicit configuration
+ * NOTE: this reporter uses predefined "shard" group, and it's always created even if explicit configuration
  * is missing. Default configuration uses filters defined in {@link #DEFAULT_FILTERS}.
  * <p>Example configuration:</p>
  * <pre>
- *    &lt;reporter name="test" group="replica"&gt;
+ *    &lt;reporter name="test" group="shard" class="solr.SolrShardReporter"&gt;
  *      &lt;int name="period"&gt;11&lt;/int&gt;
  *      &lt;str name="filter"&gt;UPDATE\./update/.*requests&lt;/str&gt;
  *      &lt;str name="filter"&gt;QUERY\./select.*requests&lt;/str&gt;
  *    &lt;/reporter&gt;
  * </pre>
  */
-public class SolrShardReporter extends FilteringSolrMetricReporter {
+public class SolrShardReporter extends SolrCoreReporter {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-  public static final List<String> DEFAULT_FILTERS = new ArrayList(){{
+  public static final List<String> DEFAULT_FILTERS = new ArrayList<>(){{
     add("TLOG.*");
     add("CORE\\.fs.*");
     add("REPLICATION.*");
     add("INDEX\\.flush.*");
     add("INDEX\\.merge\\.major.*");
-    add("UPDATE\\./update/.*requests");
+    add("UPDATE\\./update.*requests");
     add("QUERY\\./select.*requests");
   }};
 
@@ -116,21 +117,23 @@ public class SolrShardReporter extends FilteringSolrMetricReporter {
     }
   }
 
-  public void setCore(SolrCore core) {
+  @Override
+  public void init(PluginInfo pluginInfo, SolrCore core) {
+    super.init(pluginInfo, core);
     if (reporter != null) {
       reporter.close();
     }
     if (!enabled) {
-      log.info("Reporter disabled for registry " + registryName);
+      log.info("Reporter disabled for registry {}", registryName);
       return;
     }
     if (core.getCoreDescriptor().getCloudDescriptor() == null) {
       // not a cloud core
-      log.warn("Not initializing shard reporter for non-cloud core " + core.getName());
+      log.warn("Not initializing shard reporter for non-cloud core {}", core.getName());
       return;
     }
     if (period < 1) { // don't start it
-      log.warn("period=" + period + ", not starting shard reporter ");
+      log.warn("period={}, not starting shard reporter ", period);
       return;
     }
     // our id is coreNodeName
@@ -138,7 +141,7 @@ public class SolrShardReporter extends FilteringSolrMetricReporter {
     // target registry is the leaderRegistryName
     String groupId = core.getCoreMetricManager().getLeaderRegistryName();
     if (groupId == null) {
-      log.warn("No leaderRegistryName for core " + core + ", not starting the reporter...");
+      log.warn("No leaderRegistryName for core {}, not starting the reporter...", core);
       return;
     }
     SolrReporter.Report spec = new SolrReporter.Report(groupId, null, registryName, filters);
@@ -151,7 +154,7 @@ public class SolrShardReporter extends FilteringSolrMetricReporter {
         .cloudClient(false) // we want to send reports specifically to a selected leader instance
         .skipAggregateValues(true) // we don't want to transport details of aggregates
         .skipHistograms(true) // we don't want to transport histograms
-        .build(core.getCoreContainer().getUpdateShardHandler().getHttpClient(), new LeaderUrlSupplier(core));
+        .build(core.getCoreContainer().getSolrClientCache(), new LeaderUrlSupplier(core));
 
     reporter.start(period, TimeUnit.SECONDS);
   }
@@ -173,12 +176,12 @@ public class SolrShardReporter extends FilteringSolrMetricReporter {
       DocCollection collection = state.getCollection(core.getCoreDescriptor().getCollectionName());
       Replica replica = collection.getLeader(core.getCoreDescriptor().getCloudDescriptor().getShardId());
       if (replica == null) {
-        log.warn("No leader for " + collection.getName() + "/" + core.getCoreDescriptor().getCloudDescriptor().getShardId());
+        log.warn("No leader for {}/{}", collection.getName(), core.getCoreDescriptor().getCloudDescriptor().getShardId());
         return null;
       }
       String baseUrl = replica.getStr("base_url");
       if (baseUrl == null) {
-        log.warn("No base_url for replica " + replica);
+        log.warn("No base_url for replica {}", replica);
       }
       return baseUrl;
     }

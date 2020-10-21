@@ -17,9 +17,9 @@
 package org.apache.solr.handler;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.invoke.MethodHandles;
-import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.util.Collection;
@@ -27,6 +27,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.codec.binary.Hex;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.Term;
@@ -79,6 +80,7 @@ public class BlobHandler extends RequestHandlerBase implements PluginInfoInitial
   private long maxSize = DEFAULT_MAX_SIZE;
 
   @Override
+  @SuppressWarnings({"unchecked"})
   public void handleRequestBody(final SolrQueryRequest req, SolrQueryResponse rsp) throws Exception {
     String httpMethod = req.getHttpMethod();
     String path = (String) req.getContext().get("path");
@@ -107,20 +109,23 @@ public class BlobHandler extends RequestHandlerBase implements PluginInfoInitial
 
 
       for (ContentStream stream : req.getContentStreams()) {
-        ByteBuffer payload = SimplePostTool.inputStreamToByteArray(stream.getStream(), maxSize);
+        ByteBuffer payload;
+        try (InputStream is = stream.getStream()) {
+          payload = SimplePostTool.inputStreamToByteArray(is, maxSize);
+        }
         MessageDigest m = MessageDigest.getInstance("MD5");
         m.update(payload.array(), payload.position(), payload.limit());
-        String md5 = new BigInteger(1, m.digest()).toString(16);
+        String md5 = new String(Hex.encodeHex(m.digest()));
 
-        TopDocs duplicate = req.getSearcher().search(new TermQuery(new Term("md5", md5)), 1);
-        if (duplicate.totalHits > 0) {
+        int duplicateCount = req.getSearcher().count(new TermQuery(new Term("md5", md5)));
+        if (duplicateCount > 0) {
           rsp.add("error", "duplicate entry");
           forward(req, null,
               new MapSolrParams((Map) makeMap(
                   "q", "md5:" + md5,
                   "fl", "id,size,version,timestamp,blobName")),
               rsp);
-          log.warn("duplicate entry for blob :" + blobName);
+          log.warn("duplicate entry for blob : {}", blobName);
           return;
         }
 
@@ -128,7 +133,7 @@ public class BlobHandler extends RequestHandlerBase implements PluginInfoInitial
             1, new Sort(new SortField("version", SortField.Type.LONG, true)));
 
         long version = 0;
-        if (docs.totalHits > 0) {
+        if (docs.totalHits.value > 0) {
           Document doc = req.getSearcher().doc(docs.scoreDocs[0].doc);
           Number n = doc.getField("version").numericValue();
           version = n.longValue();
@@ -137,6 +142,7 @@ public class BlobHandler extends RequestHandlerBase implements PluginInfoInitial
         String id = blobName + "/" + version;
         Map<String, Object> doc = makeMap(
             ID, id,
+            CommonParams.TYPE, "blob",
             "md5", md5,
             "blobName", blobName,
             VERSION, version,
@@ -144,9 +150,13 @@ public class BlobHandler extends RequestHandlerBase implements PluginInfoInitial
             "size", payload.limit(),
             "blob", payload);
         verifyWithRealtimeGet(blobName, version, req, doc);
-        log.info(StrUtils.formatString("inserting new blob {0} ,size {1}, md5 {2}", doc.get(ID), String.valueOf(payload.limit()), md5));
+        if (log.isInfoEnabled()) {
+          log.info(StrUtils.formatString("inserting new blob {0} ,size {1}, md5 {2}", doc.get(ID), String.valueOf(payload.limit()), md5));
+        }
         indexMap(req, rsp, doc);
-        log.info(" Successfully Added and committed a blob with id {} and size {} ", id, payload.limit());
+        if (log.isInfoEnabled()) {
+          log.info(" Successfully Added and committed a blob with id {} and size {} ", id, payload.limit());
+        }
 
         break;
       }
@@ -170,7 +180,7 @@ public class BlobHandler extends RequestHandlerBase implements PluginInfoInitial
           if (version != -1) q = "id:{0}/{1}";
           QParser qparser = QParser.getParser(StrUtils.formatString(q, blobName, version), req);
           final TopDocs docs = req.getSearcher().search(qparser.parse(), 1, new Sort(new SortField("version", SortField.Type.LONG, true)));
-          if (docs.totalHits > 0) {
+          if (docs.totalHits.value > 0) {
             rsp.add(ReplicationHandler.FILE_STREAM, new SolrCore.RawWriter() {
 
               @Override
@@ -239,9 +249,9 @@ public class BlobHandler extends RequestHandlerBase implements PluginInfoInitial
     try (UpdateRequestProcessor processor = processorChain.createProcessor(req, rsp)) {
       AddUpdateCommand cmd = new AddUpdateCommand(req);
       cmd.solrDoc = solrDoc;
-      log.info("Adding doc: " + doc);
+      log.info("Adding doc: {}", doc);
       processor.processAdd(cmd);
-      log.info("committing doc: " + doc);
+      log.info("committing doc: {}", doc);
       processor.processCommit(new CommitUpdateCommand(req, false));
       processor.finish();
     }
@@ -266,6 +276,7 @@ public class BlobHandler extends RequestHandlerBase implements PluginInfoInitial
   public void init(PluginInfo info) {
     super.init(info.initArgs);
     if (info.initArgs != null) {
+      @SuppressWarnings({"rawtypes"})
       NamedList invariants = (NamedList) info.initArgs.get(PluginInfo.INVARIANTS);
       if (invariants != null) {
         Object o = invariants.get("maxSize");

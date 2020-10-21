@@ -44,6 +44,7 @@ import org.apache.solr.common.util.Utils;
 import org.apache.solr.core.backup.repository.BackupRepository;
 import org.apache.solr.core.backup.repository.BackupRepository.PathType;
 import org.apache.solr.util.PropertiesInputStream;
+import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,6 +62,7 @@ public class BackupManager {
 
   // Backup properties
   public static final String COLLECTION_NAME_PROP = "collection";
+  public static final String COLLECTION_ALIAS_PROP = "collectionAlias";
   public static final String BACKUP_NAME_PROP = "backupName";
   public static final String INDEX_VERSION_PROP = "index.version";
   public static final String START_TIME_PROP = "startTime";
@@ -137,7 +139,7 @@ public class BackupManager {
     try (IndexInput is = repository.openInput(zkStateDir, COLLECTION_PROPS_FILE, IOContext.DEFAULT)) {
       byte[] arr = new byte[(int) is.length()]; // probably ok since the json file should be small.
       is.readBytes(arr, 0, (int) is.length());
-      ClusterState c_state = ClusterState.load(-1, arr, Collections.emptySet());
+      ClusterState c_state = ClusterState.createFromJson(-1, arr, Collections.emptySet());
       return c_state.getCollection(collectionName);
     }
   }
@@ -192,6 +194,46 @@ public class BackupManager {
     downloadFromZK(zkStateReader.getZkClient(), ZkConfigManager.CONFIGS_ZKNODE + "/" + configName, dest);
   }
 
+  public void uploadCollectionProperties(URI backupLoc, String backupId, String collectionName) throws IOException {
+    URI sourceDir = repository.resolve(backupLoc, backupId, ZK_STATE_DIR);
+    URI source = repository.resolve(sourceDir, ZkStateReader.COLLECTION_PROPS_ZKNODE);
+    if (!repository.exists(source)) {
+      // No collection properties to restore
+      return;
+    }
+    String zkPath = ZkStateReader.COLLECTIONS_ZKNODE + '/' + collectionName + '/' + ZkStateReader.COLLECTION_PROPS_ZKNODE;
+
+    try (IndexInput is = repository.openInput(sourceDir, ZkStateReader.COLLECTION_PROPS_ZKNODE, IOContext.DEFAULT)) {
+      byte[] arr = new byte[(int) is.length()];
+      is.readBytes(arr, 0, (int) is.length());
+      zkStateReader.getZkClient().create(zkPath, arr, CreateMode.PERSISTENT, true);
+    } catch (KeeperException | InterruptedException e) {
+      throw new IOException("Error uploading file to zookeeper path " + source.toString() + " to " + zkPath,
+          SolrZkClient.checkInterrupted(e));
+    }
+  }
+
+  public void downloadCollectionProperties(URI backupLoc, String backupId, String collectionName) throws IOException {
+    URI dest = repository.resolve(backupLoc, backupId, ZK_STATE_DIR, ZkStateReader.COLLECTION_PROPS_ZKNODE);
+    String zkPath = ZkStateReader.COLLECTIONS_ZKNODE + '/' + collectionName + '/' + ZkStateReader.COLLECTION_PROPS_ZKNODE;
+
+
+    try {
+      if (!zkStateReader.getZkClient().exists(zkPath, true)) {
+        // Nothing to back up
+        return;
+      }
+
+      try (OutputStream os = repository.createOutput(dest)) {
+        byte[] data = zkStateReader.getZkClient().getData(zkPath, null, null, true);
+        os.write(data);
+      }
+    } catch (KeeperException | InterruptedException e) {
+      throw new IOException("Error downloading file from zookeeper path " + zkPath + " to " + dest.toString(),
+          SolrZkClient.checkInterrupted(e));
+    }
+  }
+
   private void downloadFromZK(SolrZkClient zkClient, String zkPath, URI dir) throws IOException {
     try {
       if (!repository.exists(dir)) {
@@ -201,7 +243,7 @@ public class BackupManager {
       for (String file : files) {
         List<String> children = zkClient.getChildren(zkPath + "/" + file, null, true);
         if (children.size() == 0) {
-          log.info("Writing file {}", file);
+          log.debug("Writing file {}", file);
           byte[] data = zkClient.getData(zkPath + "/" + file, null, null, true);
           try (OutputStream os = repository.createOutput(repository.resolve(dir, file))) {
             os.write(data);
@@ -232,7 +274,7 @@ public class BackupManager {
             is.readBytes(arr, 0, (int) is.length());
             zkClient.makePath(zkNodePath, arr, true);
           } catch (KeeperException | InterruptedException e) {
-            throw new IOException(e);
+            throw new IOException(SolrZkClient.checkInterrupted(e));
           }
           break;
         }

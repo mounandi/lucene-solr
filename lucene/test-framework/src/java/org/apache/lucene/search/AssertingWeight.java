@@ -20,15 +20,25 @@ import java.io.IOException;
 import java.util.Random;
 import org.apache.lucene.index.LeafReaderContext;
 
+import static org.apache.lucene.util.LuceneTestCase.usually;
+
 class AssertingWeight extends FilterWeight {
 
   final Random random;
-  final boolean needsScores;
+  final ScoreMode scoreMode;
 
-  AssertingWeight(Random random, Weight in, boolean needsScores) {
+  AssertingWeight(Random random, Weight in, ScoreMode scoreMode) {
     super(in);
     this.random = random;
-    this.needsScores = needsScores;
+    this.scoreMode = scoreMode;
+  }
+
+  @Override
+  public Matches matches(LeafReaderContext context, int doc) throws IOException {
+    Matches matches = in.matches(context, doc);
+    if (matches == null)
+      return null;
+    return new AssertingMatches(matches);
   }
 
   @Override
@@ -36,7 +46,7 @@ class AssertingWeight extends FilterWeight {
     if (random.nextBoolean()) {
       final Scorer inScorer = in.scorer(context);
       assert inScorer == null || inScorer.docID() == -1;
-      return AssertingScorer.wrap(new Random(random.nextLong()), inScorer, needsScores);
+      return AssertingScorer.wrap(new Random(random.nextLong()), inScorer, scoreMode);
     } else {
       final ScorerSupplier scorerSupplier = scorerSupplier(context);
       if (scorerSupplier == null) {
@@ -63,7 +73,7 @@ class AssertingWeight extends FilterWeight {
         assert getCalled == false;
         getCalled = true;
         assert leadCost >= 0 : leadCost;
-        return AssertingScorer.wrap(new Random(random.nextLong()), inScorerSupplier.get(leadCost), needsScores);
+        return AssertingScorer.wrap(new Random(random.nextLong()), inScorerSupplier.get(leadCost), scoreMode);
       }
 
       @Override
@@ -77,11 +87,18 @@ class AssertingWeight extends FilterWeight {
 
   @Override
   public BulkScorer bulkScorer(LeafReaderContext context) throws IOException {
-    BulkScorer inScorer = in.bulkScorer(context);
+    BulkScorer inScorer;
+    // We explicitly test both the delegate's bulk scorer, and also the normal scorer.
+    // This ensures that normal scorers are sometimes tested with an asserting wrapper.
+    if (usually(random)) {
+      inScorer = in.bulkScorer(context);
+    } else {
+      inScorer = super.bulkScorer(context);
+    }
+
     if (inScorer == null) {
       return null;
     }
-
-    return AssertingBulkScorer.wrap(new Random(random.nextLong()), inScorer, context.reader().maxDoc());
+    return AssertingBulkScorer.wrap(new Random(random.nextLong()), inScorer, context.reader().maxDoc(), scoreMode);
   }
 }

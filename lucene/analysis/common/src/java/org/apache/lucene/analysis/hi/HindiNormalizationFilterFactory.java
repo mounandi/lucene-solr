@@ -20,10 +20,7 @@ package org.apache.lucene.analysis.hi;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.hi.HindiNormalizationFilter;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link HindiNormalizationFilter}. 
@@ -34,8 +31,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.HindiNormalizationFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
-public class HindiNormalizationFilterFactory extends TokenFilterFactory implements MultiTermAwareComponent {
+public class HindiNormalizationFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "hindiNormalization";
   
   /** Creates a new HindiNormalizationFilterFactory */
   public HindiNormalizationFilterFactory(Map<String,String> args) {
@@ -45,13 +47,18 @@ public class HindiNormalizationFilterFactory extends TokenFilterFactory implemen
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public HindiNormalizationFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new HindiNormalizationFilter(input);
   }
-  
+
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

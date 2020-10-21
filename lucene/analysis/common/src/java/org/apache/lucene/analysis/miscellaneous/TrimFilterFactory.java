@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.miscellaneous;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.miscellaneous.TrimFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link TrimFilter}.
@@ -34,8 +33,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * &lt;/fieldType&gt;</pre>
  *
  * @see TrimFilter
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class TrimFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "trim";
   
   /** Creates a new TrimFilterFactory */
   public TrimFilterFactory(Map<String,String> args) {
@@ -45,9 +50,18 @@ public class TrimFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public TrimFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
-  public TrimFilter create(TokenStream input) {
-    final TrimFilter filter = new TrimFilter(input);
-    return filter;
+  public TokenStream create(TokenStream input) {
+    return new TrimFilter(input);
+  }
+
+  @Override
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

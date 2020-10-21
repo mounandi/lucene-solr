@@ -57,7 +57,9 @@ import org.slf4j.LoggerFactory;
  *  This would also allow to not log document data for requests with commit=true
  *  in them (since we know that if the request succeeds, all docs will be committed)
  *
+ * @deprecated since 8.6
  */
+@Deprecated
 public class HdfsTransactionLog extends TransactionLog {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
   private static boolean debug = log.isDebugEnabled();
@@ -82,9 +84,6 @@ public class HdfsTransactionLog extends TransactionLog {
     this.fs = fs;
 
     try {
-      if (debug) {
-        //log.debug("New TransactionLog file=" + tlogFile + ", exists=" + tlogFile.exists() + ", size=" + tlogFile.length() + ", openExisting=" + openExisting);
-      }
       this.tlogFile = tlogFile;
       
       if (fs.exists(tlogFile) && openExisting) {
@@ -121,7 +120,7 @@ public class HdfsTransactionLog extends TransactionLog {
         }
       } else {
         if (start > 0) {
-          log.error("New transaction log already exists:" + tlogFile + " size=" + tlogOutStream.size());
+          log.error("New transaction log already exists:{} size={}", tlogFile, tlogOutStream.size());
         }
 
         addGlobalStrings(globalStrings);
@@ -166,21 +165,8 @@ public class HdfsTransactionLog extends TransactionLog {
     }
     return true;
   }
-  
-  // This could mess with any readers or reverse readers that are open, or anything that might try to do a log lookup.
-  // This should only be used to roll back buffered updates, not actually applied updates.
-  @Override
-  public void rollback(long pos) throws IOException {
-    synchronized (this) {
-      assert snapshot_size == pos;
-      ensureFlushed();
-      // TODO: how do we rollback with hdfs?? We need HDFS-3107
-      fos.setWritten(pos);
-      assert fos.size() == pos;
-      numRecords = snapshot_numRecords;
-    }
-  }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   private void readHeader(FastInputStream fis) throws IOException {
     // read existing header
     boolean closeFis = false;
@@ -188,8 +174,9 @@ public class HdfsTransactionLog extends TransactionLog {
     fis = fis != null ? fis : new FSDataFastInputStream(fs.open(tlogFile), 0);
     Map header = null;
     try {
-      LogCodec codec = new LogCodec(resolver);
-      header = (Map) codec.unmarshal(fis);
+      try (LogCodec codec = new LogCodec(resolver)) {
+        header = (Map) codec.unmarshal(fis);
+      }
       
       fis.readInt(); // skip size
     } finally {
@@ -209,7 +196,7 @@ public class HdfsTransactionLog extends TransactionLog {
   }
 
   @Override
-  public long writeCommit(CommitUpdateCommand cmd, int flags) {
+  public long writeCommit(CommitUpdateCommand cmd) {
     LogCodec codec = new LogCodec(resolver);
     synchronized (this) {
       try {
@@ -222,7 +209,7 @@ public class HdfsTransactionLog extends TransactionLog {
         
         codec.init(fos);
         codec.writeTag(JavaBinCodec.ARR, 3);
-        codec.writeInt(UpdateLog.COMMIT | flags);  // should just take one byte
+        codec.writeInt(UpdateLog.COMMIT);  // should just take one byte
         codec.writeLong(cmd.getVersion());
         codec.writeStr(END_MESSAGE);  // ensure these bytes are (almost) last in the file
 
@@ -258,8 +245,9 @@ public class HdfsTransactionLog extends TransactionLog {
           pos);
       try {
         dis.seek(pos);
-        LogCodec codec = new LogCodec(resolver);
-        return codec.readVal(new FastInputStream(dis));
+        try (LogCodec codec = new LogCodec(resolver)) {
+          return codec.readVal(new FastInputStream(dis));
+        }
       } finally {
         dis.close();
       }
@@ -282,7 +270,7 @@ public class HdfsTransactionLog extends TransactionLog {
     synchronized (this) {
       if (fos == null) return;
       if (debug) {
-        log.debug("Closing output for " + tlogFile);
+        log.debug("Closing output for {}", tlogFile);
       }
       fos.flushBuffer();
       finalLogSize = fos.size();
@@ -417,7 +405,7 @@ public class HdfsTransactionLog extends TransactionLog {
 
       synchronized (HdfsTransactionLog.this) {
         if (trace) {
-          log.trace("Reading log record.  pos="+pos+" currentSize="+getLogSize());
+          log.trace("Reading log record.  pos={} currentSize={}", pos, getLogSize());
         }
 
         if (pos >= getLogSize()) {
@@ -503,6 +491,7 @@ public class HdfsTransactionLog extends TransactionLog {
 
         long lastVersion = Long.MIN_VALUE;
         while ( (o = super.next()) != null) {
+          @SuppressWarnings({"rawtypes"})
           List entry = (List) o;
           long version = (Long) entry.get(UpdateLog.VERSION_IDX);
           version = Math.abs(version);

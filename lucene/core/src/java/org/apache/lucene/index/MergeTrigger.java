@@ -19,7 +19,7 @@ package org.apache.lucene.index;
 
 /**
  * MergeTrigger is passed to
- * {@link org.apache.lucene.index.MergePolicy#findMerges(MergeTrigger, org.apache.lucene.index.SegmentInfos, IndexWriter)} to indicate the
+ * {@link MergePolicy#findMerges(MergeTrigger, SegmentInfos, MergePolicy.MergeContext)} to indicate the
  * event that triggered the merge.
  */
 public enum MergeTrigger {
@@ -47,5 +47,14 @@ public enum MergeTrigger {
   /**
    * Merge was triggered by a closing IndexWriter.
    */
-  CLOSING
+  CLOSING,
+
+  /**
+   * Merge was triggered on commit.
+   */
+  COMMIT,
+  /**
+   * Merge was triggered on opening NRT readers.
+   */
+  GET_READER,
 }

@@ -27,9 +27,9 @@ import morfologik.stemming.DictionaryMetadata;
 import morfologik.stemming.polish.PolishStemmer;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.ResourceLoader;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Filter factory for {@link MorfologikFilter}. 
@@ -48,8 +48,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * and used by default. 
  * 
  * @see <a href="http://morfologik.blogspot.com/">Morfologik web site</a>
+ * @since 4.0.0
+ * @lucene.spi {@value #NAME}
  */
 public class MorfologikFilterFactory extends TokenFilterFactory implements ResourceLoaderAware {
+
+  /** SPI name */
+  public static final String NAME = "morfologik";
+
   /** Dictionary resource attribute (should have {@code ".dict"} suffix), loaded from {@link ResourceLoader}. */
   public static final String DICTIONARY_ATTRIBUTE = "dictionary";
 
@@ -76,6 +82,11 @@ public class MorfologikFilterFactory extends TokenFilterFactory implements Resou
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public MorfologikFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

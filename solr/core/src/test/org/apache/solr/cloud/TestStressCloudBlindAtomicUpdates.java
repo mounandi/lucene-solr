@@ -17,6 +17,7 @@
 package org.apache.solr.cloud;
 
 import java.lang.invoke.MethodHandles;
+import java.net.URL;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -51,11 +52,13 @@ import org.apache.solr.common.SolrInputField;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.ExecutorUtil;
-import org.apache.solr.util.DefaultSolrThreadFactory;
+import org.apache.solr.common.util.IOUtils;
+import org.apache.solr.common.util.SolrNamedThreadFactory;
 import org.apache.solr.util.TestInjection;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,7 +81,7 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
   /** A basic client for operations at the cloud level, default collection will be set */
   private static CloudSolrClient CLOUD_CLIENT;
   /** One client per node */
-  private static ArrayList<HttpSolrClient> CLIENTS = new ArrayList<>(5);
+  private static final ArrayList<HttpSolrClient> CLIENTS = new ArrayList<>(5);
 
   /** Service to execute all parallel work 
    * @see #NUM_THREADS
@@ -102,8 +105,9 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
    * initial index seeding has finished (we're focusing on testing atomic updates, not basic indexing).
    */
   private String testInjection = null;
-  
+
   @BeforeClass
+  @SuppressWarnings({"unchecked"})
   private static void createMiniSolrCloudCluster() throws Exception {
     // NOTE: numDocsToCheck uses atLeast, so nightly & multiplier are alreayd a factor in index size
     // no need to redundently factor them in here as well
@@ -111,7 +115,7 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
     
     NUM_THREADS = atLeast(3);
     EXEC_SERVICE = ExecutorUtil.newMDCAwareFixedThreadPool
-      (NUM_THREADS, new DefaultSolrThreadFactory(DEBUG_LABEL));
+      (NUM_THREADS, new SolrNamedThreadFactory(DEBUG_LABEL));
     
     // at least 2, but don't go crazy on nightly/test.multiplier with "atLeast()"
     final int numShards = TEST_NIGHTLY ? 5 : 2; 
@@ -133,11 +137,13 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
 
     waitForRecoveriesToFinish(CLOUD_CLIENT);
 
+    CLIENTS.clear();
     for (JettySolrRunner jetty : cluster.getJettySolrRunners()) {
-      CLIENTS.add(getHttpSolrClient(jetty.getBaseUrl() + "/" + COLLECTION_NAME + "/"));
+      assertNotNull("Cluster contains null jetty?", jetty);
+      final URL baseUrl = jetty.getBaseUrl();
+      assertNotNull("Jetty has null baseUrl: " + jetty.toString(), baseUrl);
+      CLIENTS.add(getHttpSolrClient(baseUrl + "/" + COLLECTION_NAME + "/"));
     }
-
-    final boolean usingPoints = Boolean.getBoolean(NUMERIC_POINTS_SYSPROP);
 
     // sanity check no one broke the assumptions we make about our schema
     checkExpectedSchemaType( map("name","long",
@@ -151,22 +157,34 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
   @AfterClass
   private static void afterClass() throws Exception {
     TestInjection.reset();
-    ExecutorUtil.shutdownAndAwaitTermination(EXEC_SERVICE);
-    EXEC_SERVICE = null;
-    CLOUD_CLIENT.close(); CLOUD_CLIENT = null;
-    for (HttpSolrClient client : CLIENTS) {
-      client.close();
+    if (null != EXEC_SERVICE) {
+      ExecutorUtil.shutdownAndAwaitTermination(EXEC_SERVICE);
+      EXEC_SERVICE = null;
     }
-    CLIENTS = null;
+    if (null != CLOUD_CLIENT) {
+      IOUtils.closeQuietly(CLOUD_CLIENT);
+      CLOUD_CLIENT = null;
+    }
+    for (HttpSolrClient client : CLIENTS) {
+      if (null == client) {
+        log.error("CLIENTS contains a null SolrClient???");
+      }
+      IOUtils.closeQuietly(client);
+    }
+    CLIENTS.clear();
   }
   
   @Before
   private void clearCloudCollection() throws Exception {
+    TestInjection.reset();
+    waitForRecoveriesToFinish(CLOUD_CLIENT);
+    
     assertEquals(0, CLOUD_CLIENT.deleteByQuery("*:*").getStatus());
     assertEquals(0, CLOUD_CLIENT.optimize().getStatus());
-
-    TestInjection.reset();
     
+    assertEquals("Collection should be empty!",
+                 0, CLOUD_CLIENT.query(params("q", "*:*")).getResults().getNumFound());
+
     final int injectionPercentage = (int)Math.ceil(atLeast(1) / 2);
     testInjection = usually() ? "false:0" : ("true:" + injectionPercentage);
   }
@@ -175,15 +193,20 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
    * Assigns {@link #testInjection} to various TestInjection variables.  Calling this 
    * method multiple times in the same method should always result in the same setting being applied 
    * (even if {@link TestInjection#reset} was called in between.
+   *
+   * NOTE: method is currently a No-Op pending SOLR-13189
    */
   private void startTestInjection() {
-    log.info("TestInjection: fail replica, update pause, tlog pauses: " + testInjection);
-    TestInjection.failReplicaRequests = testInjection;
-    TestInjection.updateLogReplayRandomPause = testInjection;
-    TestInjection.updateRandomPause = testInjection;
+    log.info("TODO: TestInjection disabled pending solution to SOLR-13189");
+    //log.info("TestInjection: fail replica, update pause, tlog pauses: " + testInjection);
+    //TestInjection.failReplicaRequests = testInjection;
+    //TestInjection.updateLogReplayRandomPause = testInjection;
+    //TestInjection.updateRandomPause = testInjection;
   }
 
 
+  @Test
+  @SuppressWarnings({"unchecked"})
   public void test_dv() throws Exception {
     String field = "long_dv";
     checkExpectedSchemaField(map("name", field,
@@ -194,6 +217,9 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
     
     checkField(field);
   }
+  
+  @Test
+  @SuppressWarnings({"unchecked"})
   public void test_dv_stored() throws Exception {
     String field = "long_dv_stored";
     checkExpectedSchemaField(map("name", field,
@@ -205,6 +231,7 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
     checkField(field);
 
   }
+  @SuppressWarnings({"unchecked"})
   public void test_dv_stored_idx() throws Exception {
     String field = "long_dv_stored_idx";
     checkExpectedSchemaField(map("name", field,
@@ -215,6 +242,8 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
     
     checkField(field);
   }
+
+  @SuppressWarnings({"unchecked"})
   public void test_dv_idx() throws Exception {
     String field = "long_dv_idx";
     checkExpectedSchemaField(map("name", field,
@@ -225,6 +254,7 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
     
     checkField(field);
   }
+  @SuppressWarnings({"unchecked"})
   public void test_stored_idx() throws Exception {
     String field = "long_stored_idx";
     checkExpectedSchemaField(map("name", field,
@@ -244,7 +274,8 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
     final int numDocsInIndex = (numDocsToCheck * DOC_ID_INCR);
     final AtomicLong[] expected = new AtomicLong[numDocsToCheck];
 
-    log.info("Testing " + numericFieldName + ": numDocsToCheck=" + numDocsToCheck + ", numDocsInIndex=" + numDocsInIndex + ", incr=" + DOC_ID_INCR);
+    log.info("Testing {}: numDocsToCheck={}, numDocsInIndex={}, incr={}"
+        , numericFieldName,  numDocsToCheck, numDocsInIndex, DOC_ID_INCR);
     
     // seed the index & keep track of what docs exist and with what values
     for (int id = 0; id < numDocsInIndex; id++) {
@@ -255,7 +286,7 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
       UpdateResponse rsp = update(doc).process(CLOUD_CLIENT);
       assertEquals(doc.toString() + " => " + rsp.toString(), 0, rsp.getStatus());
       if (0 == id % DOC_ID_INCR) {
-        expected[(int)(id / DOC_ID_INCR)] = new AtomicLong(initValue);
+        expected[id / DOC_ID_INCR] = new AtomicLong(initValue);
       }
     }
     assertNotNull("Sanity Check no off-by-one in expected init: ", expected[expected.length-1]);
@@ -310,7 +341,7 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
     for (int id = 0; id < numDocsInIndex; id += DOC_ID_INCR) {
       assert 0 == id % DOC_ID_INCR : "WTF? " + id;
       
-      final long expect = expected[(int)(id / DOC_ID_INCR)].longValue();
+      final long expect = expected[id / DOC_ID_INCR].longValue();
       
       final String docId = "" + id;
       
@@ -370,7 +401,7 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
       UpdateResponse rsp = update(doc).process(client);
       assertEquals(doc + " => " + rsp, 0, rsp.getStatus());
       
-      AtomicLong counter = expected[(int)(docId / DOC_ID_INCR)];
+      AtomicLong counter = expected[docId / DOC_ID_INCR];
       assertNotNull("null counter for " + docId + "/" + DOC_ID_INCR, counter);
       counter.getAndAdd(delta);
 
@@ -458,6 +489,7 @@ public class TestStressCloudBlindAtomicUpdates extends SolrCloudTestCase {
 
   public static void waitForRecoveriesToFinish(CloudSolrClient client) throws Exception {
     assert null != client.getDefaultCollection();
+    client.getZkStateReader().forceUpdateCollection(client.getDefaultCollection());
     AbstractDistribZkTestBase.waitForRecoveriesToFinish(client.getDefaultCollection(),
                                                         client.getZkStateReader(),
                                                         true, true, 330);

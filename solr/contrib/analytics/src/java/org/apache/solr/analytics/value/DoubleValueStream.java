@@ -28,13 +28,13 @@ import java.util.function.DoubleConsumer;
 public interface DoubleValueStream extends AnalyticsValueStream {
   /**
    * Stream the double representations of all current values, if any exist.
-   * 
+   *
    * @param cons The consumer to accept the values
    */
   void streamDoubles(DoubleConsumer cons);
 
   /**
-   * An interface that represents all of the types a {@link DoubleValueStream} should be able to cast to. 
+   * An interface that represents all of the types a {@link DoubleValueStream} should be able to cast to.
    */
   public static interface CastingDoubleValueStream extends DoubleValueStream, StringValueStream {}
 
@@ -49,6 +49,10 @@ public interface DoubleValueStream extends AnalyticsValueStream {
     @Override
     public void streamObjects(Consumer<Object> cons) {
       streamDoubles((double val) -> cons.accept(val));
+    }
+    @Override
+    public AnalyticsValueStream convertToConstant() {
+      return this;
     }
   }
 }

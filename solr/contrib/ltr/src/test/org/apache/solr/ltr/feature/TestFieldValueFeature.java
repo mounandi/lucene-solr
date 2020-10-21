@@ -16,20 +16,22 @@
  */
 package org.apache.solr.ltr.feature;
 
+import java.util.LinkedHashMap;
+
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.ltr.FeatureLoggerTestUtils;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestFieldValueFeature extends TestRerankBase {
 
   private static final float FIELD_VALUE_FEATURE_DEFAULT_VAL = 0.0f;
 
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1", "description", "w1", "popularity",
@@ -54,15 +56,15 @@ public class TestFieldValueFeature extends TestRerankBase {
 
     assertU(commit());
 
-    loadFeature("popularity", FieldValueFeature.class.getCanonicalName(),
+    loadFeature("popularity", FieldValueFeature.class.getName(),
             "{\"field\":\"popularity\"}");
 
-    loadModel("popularity-model", LinearModel.class.getCanonicalName(),
+    loadModel("popularity-model", LinearModel.class.getName(),
             new String[] {"popularity"}, "{\"weights\":{\"popularity\":1.0}}");
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
@@ -127,7 +129,7 @@ public class TestFieldValueFeature extends TestRerankBase {
 
     final String fstore = "testIfADocumentDoesntHaveAFieldASetDefaultValueIsReturned";
 
-    loadFeature("popularity42", FieldValueFeature.class.getCanonicalName(), fstore,
+    loadFeature("popularity42", FieldValueFeature.class.getName(), fstore,
             "{\"field\":\"popularity\",\"defaultValue\":\"42.0\"}");
 
     SolrQuery query = new SolrQuery();
@@ -135,7 +137,7 @@ public class TestFieldValueFeature extends TestRerankBase {
     query.add("fl", "*, score");
     query.add("rows", "4");
 
-    loadModel("popularity-model42", LinearModel.class.getCanonicalName(),
+    loadModel("popularity-model42", LinearModel.class.getName(),
             new String[] {"popularity42"}, fstore, "{\"weights\":{\"popularity42\":1.0}}");
 
     assertJQ("/query" + query.toQueryString(), "/response/numFound/==1");
@@ -154,10 +156,10 @@ public class TestFieldValueFeature extends TestRerankBase {
   public void testThatIfaFieldDoesNotExistDefaultValueIsReturned() throws Exception {
     // using a different fstore to avoid a clash with the other tests
     final String fstore = "testThatIfaFieldDoesNotExistDefaultValueIsReturned";
-    loadFeature("not-existing-field", FieldValueFeature.class.getCanonicalName(), fstore,
+    loadFeature("not-existing-field", FieldValueFeature.class.getName(), fstore,
             "{\"field\":\"cowabunga\"}");
 
-    loadModel("not-existing-field-model", LinearModel.class.getCanonicalName(),
+    loadModel("not-existing-field-model", LinearModel.class.getName(),
             new String[] {"not-existing-field"}, fstore, "{\"weights\":{\"not-existing-field\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -173,10 +175,10 @@ public class TestFieldValueFeature extends TestRerankBase {
   @Test
   public void testBooleanValue() throws Exception {
     final String fstore = "test_boolean_store";
-    loadFeature("trendy", FieldValueFeature.class.getCanonicalName(), fstore,
+    loadFeature("trendy", FieldValueFeature.class.getName(), fstore,
             "{\"field\":\"isTrendy\"}");
 
-    loadModel("trendy-model", LinearModel.class.getCanonicalName(),
+    loadModel("trendy-model", LinearModel.class.getName(),
             new String[] {"trendy"}, fstore, "{\"weights\":{\"trendy\":1.0}}");
 
     SolrQuery query = new SolrQuery();
@@ -204,5 +206,11 @@ public class TestFieldValueFeature extends TestRerankBase {
 
   }
 
+  @Test
+  public void testParamsToMap() throws Exception {
+    final LinkedHashMap<String,Object> params = new LinkedHashMap<String,Object>();
+    params.put("field", "field"+random().nextInt(10));
+    doTestParamsToMap(FieldValueFeature.class.getName(), params);
+  }
 
 }

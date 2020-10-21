@@ -54,7 +54,7 @@ import org.apache.lucene.util.Version;
  * segments in relation to the file system.
  * <p>
  * The active segments in the index are stored in the segment info file,
- * <tt>segments_N</tt>. There may be one or more <tt>segments_N</tt> files in
+ * <code>segments_N</code>. There may be one or more <code>segments_N</code> files in
  * the index; however, the one with the largest generation is the active one
  * (when older segments_N files are present it's because they temporarily cannot
  * be deleted, or a custom {@link IndexDeletionPolicy} is in
@@ -64,7 +64,7 @@ import org.apache.lucene.util.Version;
  * <p>
  * Files:
  * <ul>
- * <li><tt>segments_N</tt>: Header, LuceneVersion, Version, NameCounter, SegCount, MinSegmentLuceneVersion, &lt;SegName,
+ * <li><code>segments_N</code>: Header, LuceneVersion, Version, NameCounter, SegCount, MinSegmentLuceneVersion, &lt;SegName,
  * SegID, SegCodec, DelGen, DeletionCount, FieldInfosGen, DocValuesGen,
  * UpdatesFiles&gt;<sup>SegCount</sup>, CommitUserData, Footer
  * </ul>
@@ -120,12 +120,19 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
   /** The version that added information about the Lucene version at the time when the index has been created. */
   public static final int VERSION_70 = 7;
+  /** The version that updated segment name counter to be long instead of int. */
+  public static final int VERSION_72 = 8;
+  /** The version that recorded softDelCount */
+  public static final int VERSION_74 = 9;
+  /** The version that recorded SegmentCommitInfo IDs */
+  public static final int VERSION_86 = 10;
+  static final int VERSION_CURRENT = VERSION_86;
 
-  static final int VERSION_CURRENT = VERSION_70;
+  /** Name of the generation reference file name */
+  private static final String OLD_SEGMENTS_GEN = "segments.gen";
 
   /** Used to name new segments. */
-  // TODO: should this be a long ...?
-  public int counter;
+  public long counter;
   
   /** Counts how often the index has been changed.  */
   public long version;
@@ -185,7 +192,9 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   public static long getLastCommitGeneration(String[] files) {
     long max = -1;
     for (String file : files) {
-      if (file.startsWith(IndexFileNames.SEGMENTS) && !file.equals(IndexFileNames.OLD_SEGMENTS_GEN)) {
+      if (file.startsWith(IndexFileNames.SEGMENTS) &&
+          // skipping this file here helps deliver the right exception when opening an old index
+          file.startsWith(OLD_SEGMENTS_GEN) == false) {
         long gen = generationFromSegmentsFileName(file);
         if (gen > max) {
           max = gen;
@@ -244,7 +253,9 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
    * return it.
    */
   public static long generationFromSegmentsFileName(String fileName) {
-    if (fileName.equals(IndexFileNames.SEGMENTS)) {
+    if (fileName.equals(OLD_SEGMENTS_GEN)) {
+      throw new IllegalArgumentException("\"" + OLD_SEGMENTS_GEN + "\" is not a valid segment file name since 4.0");
+    } else if (fileName.equals(IndexFileNames.SEGMENTS)) {
       return 0;
     } else if (fileName.startsWith(IndexFileNames.SEGMENTS)) {
       return Long.parseLong(fileName.substring(1+IndexFileNames.SEGMENTS.length()),
@@ -293,108 +304,146 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
   /** Read the commit from the provided {@link ChecksumIndexInput}. */
   public static final SegmentInfos readCommit(Directory directory, ChecksumIndexInput input, long generation) throws IOException {
-
-    // NOTE: as long as we want to throw indexformattooold (vs corruptindexexception), we need
-    // to read the magic ourselves.
-    int magic = input.readInt();
-    if (magic != CodecUtil.CODEC_MAGIC) {
-      throw new IndexFormatTooOldException(input, magic, CodecUtil.CODEC_MAGIC, CodecUtil.CODEC_MAGIC);
-    }
-    int format = CodecUtil.checkHeaderNoMagic(input, "segments", VERSION_70, VERSION_CURRENT);
-    byte id[] = new byte[StringHelper.ID_LENGTH];
-    input.readBytes(id, 0, id.length);
-    CodecUtil.checkIndexHeaderSuffix(input, Long.toString(generation, Character.MAX_RADIX));
-
-    Version luceneVersion = Version.fromBits(input.readVInt(), input.readVInt(), input.readVInt());
-    int indexCreatedVersion = input.readVInt();
-    if (luceneVersion.major < indexCreatedVersion) {
-      throw new CorruptIndexException("Creation version [" + indexCreatedVersion
-          + ".x] can't be greater than the version that wrote the segment infos: [" + luceneVersion + "]" , input);
-    }
-
-    if (indexCreatedVersion < Version.LATEST.major - 1) {
-      throw new IndexFormatTooOldException(input, "This index was initially created with Lucene "
-          + indexCreatedVersion + ".x while the current version is " + Version.LATEST
-          + " and Lucene only supports reading the current and previous major versions.");
-    }
-
-    SegmentInfos infos = new SegmentInfos(indexCreatedVersion);
-    infos.id = id;
-    infos.generation = generation;
-    infos.lastGeneration = generation;
-    infos.luceneVersion = luceneVersion;
-
-    infos.version = input.readLong();
-    //System.out.println("READ sis version=" + infos.version);
-    infos.counter = input.readInt();
-    int numSegments = input.readInt();
-    if (numSegments < 0) {
-      throw new CorruptIndexException("invalid segment count: " + numSegments, input);
-    }
-
-    if (numSegments > 0) {
-      infos.minSegmentLuceneVersion = Version.fromBits(input.readVInt(), input.readVInt(), input.readVInt());
-    } else {
-      // else leave as null: no segments
-    }
-
-    long totalDocs = 0;
-    for (int seg = 0; seg < numSegments; seg++) {
-      String segName = input.readString();
-      byte[] segmentID = new byte[StringHelper.ID_LENGTH];
-      input.readBytes(segmentID, 0, segmentID.length);
-      Codec codec = readCodec(input);
-      SegmentInfo info = codec.segmentInfoFormat().read(directory, segName, segmentID, IOContext.READ);
-      info.setCodec(codec);
-      totalDocs += info.maxDoc();
-      long delGen = input.readLong();
-      int delCount = input.readInt();
-      if (delCount < 0 || delCount > info.maxDoc()) {
-        throw new CorruptIndexException("invalid deletion count: " + delCount + " vs maxDoc=" + info.maxDoc(), input);
+    Throwable priorE = null;
+    int format = -1;
+    try {
+      // NOTE: as long as we want to throw indexformattooold (vs corruptindexexception), we need
+      // to read the magic ourselves.
+      int magic = input.readInt();
+      if (magic != CodecUtil.CODEC_MAGIC) {
+        throw new IndexFormatTooOldException(input, magic, CodecUtil.CODEC_MAGIC, CodecUtil.CODEC_MAGIC);
       }
-      long fieldInfosGen = input.readLong();
-      long dvGen = input.readLong();
-      SegmentCommitInfo siPerCommit = new SegmentCommitInfo(info, delCount, delGen, fieldInfosGen, dvGen);
-      siPerCommit.setFieldInfosFiles(input.readSetOfStrings());
-      final Map<Integer,Set<String>> dvUpdateFiles;
-      final int numDVFields = input.readInt();
-      if (numDVFields == 0) {
-        dvUpdateFiles = Collections.emptyMap();
+      format = CodecUtil.checkHeaderNoMagic(input, "segments", VERSION_70, VERSION_CURRENT);
+      byte id[] = new byte[StringHelper.ID_LENGTH];
+      input.readBytes(id, 0, id.length);
+      CodecUtil.checkIndexHeaderSuffix(input, Long.toString(generation, Character.MAX_RADIX));
+
+      Version luceneVersion = Version.fromBits(input.readVInt(), input.readVInt(), input.readVInt());
+      int indexCreatedVersion = input.readVInt();
+      if (luceneVersion.major < indexCreatedVersion) {
+        throw new CorruptIndexException("Creation version [" + indexCreatedVersion
+            + ".x] can't be greater than the version that wrote the segment infos: [" + luceneVersion + "]" , input);
+      }
+
+      if (indexCreatedVersion < Version.LATEST.major - 1) {
+        throw new IndexFormatTooOldException(input, "This index was initially created with Lucene "
+            + indexCreatedVersion + ".x while the current version is " + Version.LATEST
+            + " and Lucene only supports reading the current and previous major versions.");
+      }
+
+      SegmentInfos infos = new SegmentInfos(indexCreatedVersion);
+      infos.id = id;
+      infos.generation = generation;
+      infos.lastGeneration = generation;
+      infos.luceneVersion = luceneVersion;
+
+      infos.version = input.readLong();
+      //System.out.println("READ sis version=" + infos.version);
+      if (format > VERSION_70) {
+        infos.counter = input.readVLong();
       } else {
-        Map<Integer,Set<String>> map = new HashMap<>(numDVFields);
-        for (int i = 0; i < numDVFields; i++) {
-          map.put(input.readInt(), input.readSetOfStrings());
+        infos.counter = input.readInt();
+      }
+      int numSegments = input.readInt();
+      if (numSegments < 0) {
+        throw new CorruptIndexException("invalid segment count: " + numSegments, input);
+      }
+
+      if (numSegments > 0) {
+        infos.minSegmentLuceneVersion = Version.fromBits(input.readVInt(), input.readVInt(), input.readVInt());
+      } else {
+        // else leave as null: no segments
+      }
+
+      long totalDocs = 0;
+      for (int seg = 0; seg < numSegments; seg++) {
+        String segName = input.readString();
+        byte[] segmentID = new byte[StringHelper.ID_LENGTH];
+        input.readBytes(segmentID, 0, segmentID.length);
+        Codec codec = readCodec(input);
+        SegmentInfo info = codec.segmentInfoFormat().read(directory, segName, segmentID, IOContext.READ);
+        info.setCodec(codec);
+        totalDocs += info.maxDoc();
+        long delGen = input.readLong();
+        int delCount = input.readInt();
+        if (delCount < 0 || delCount > info.maxDoc()) {
+          throw new CorruptIndexException("invalid deletion count: " + delCount + " vs maxDoc=" + info.maxDoc(), input);
         }
-        dvUpdateFiles = Collections.unmodifiableMap(map);
+        long fieldInfosGen = input.readLong();
+        long dvGen = input.readLong();
+        int softDelCount = format > VERSION_72 ? input.readInt() : 0;
+        if (softDelCount < 0 || softDelCount > info.maxDoc()) {
+          throw new CorruptIndexException("invalid deletion count: " + softDelCount + " vs maxDoc=" + info.maxDoc(), input);
+        }
+        if (softDelCount + delCount > info.maxDoc()) {
+          throw new CorruptIndexException("invalid deletion count: " + (softDelCount + delCount) + " vs maxDoc=" + info.maxDoc(), input);
+        }
+        final byte[] sciId;
+        if (format > VERSION_74) {
+          byte marker = input.readByte();
+          switch (marker) {
+            case 1:
+              sciId = new byte[StringHelper.ID_LENGTH];
+              input.readBytes(sciId, 0, sciId.length);
+              break;
+            case 0:
+              sciId = null;
+              break;
+            default:
+              throw new CorruptIndexException("invalid SegmentCommitInfo ID marker: " + marker, input);
+          }
+        } else {
+          sciId = null;
+        }
+        SegmentCommitInfo siPerCommit = new SegmentCommitInfo(info, delCount, softDelCount, delGen, fieldInfosGen, dvGen, sciId);
+        siPerCommit.setFieldInfosFiles(input.readSetOfStrings());
+        final Map<Integer,Set<String>> dvUpdateFiles;
+        final int numDVFields = input.readInt();
+        if (numDVFields == 0) {
+          dvUpdateFiles = Collections.emptyMap();
+        } else {
+          Map<Integer,Set<String>> map = new HashMap<>(numDVFields);
+          for (int i = 0; i < numDVFields; i++) {
+            map.put(input.readInt(), input.readSetOfStrings());
+          }
+          dvUpdateFiles = Collections.unmodifiableMap(map);
+        }
+        siPerCommit.setDocValuesUpdatesFiles(dvUpdateFiles);
+        infos.add(siPerCommit);
+
+        Version segmentVersion = info.getVersion();
+
+        if (segmentVersion.onOrAfter(infos.minSegmentLuceneVersion) == false) {
+          throw new CorruptIndexException("segments file recorded minSegmentLuceneVersion=" + infos.minSegmentLuceneVersion + " but segment=" + info + " has older version=" + segmentVersion, input);
+        }
+
+        if (infos.indexCreatedVersionMajor >= 7 && segmentVersion.major < infos.indexCreatedVersionMajor) {
+          throw new CorruptIndexException("segments file recorded indexCreatedVersionMajor=" + infos.indexCreatedVersionMajor + " but segment=" + info + " has older version=" + segmentVersion, input);
+        }
+
+        if (infos.indexCreatedVersionMajor >= 7 && info.getMinVersion() == null) {
+          throw new CorruptIndexException("segments infos must record minVersion with indexCreatedVersionMajor=" + infos.indexCreatedVersionMajor, input);
+        }
       }
-      siPerCommit.setDocValuesUpdatesFiles(dvUpdateFiles);
-      infos.add(siPerCommit);
 
-      Version segmentVersion = info.getVersion();
+      infos.userData = input.readMapOfStrings();
 
-      if (segmentVersion.onOrAfter(infos.minSegmentLuceneVersion) == false) {
-        throw new CorruptIndexException("segments file recorded minSegmentLuceneVersion=" + infos.minSegmentLuceneVersion + " but segment=" + info + " has older version=" + segmentVersion, input);
+      // LUCENE-6299: check we are in bounds
+      if (totalDocs > IndexWriter.getActualMaxDocs()) {
+        throw new CorruptIndexException("Too many documents: an index cannot exceed " + IndexWriter.getActualMaxDocs() + " but readers have total maxDoc=" + totalDocs, input);
       }
 
-      if (infos.indexCreatedVersionMajor >= 7 && segmentVersion.major < infos.indexCreatedVersionMajor) {
-        throw new CorruptIndexException("segments file recorded indexCreatedVersionMajor=" + infos.indexCreatedVersionMajor + " but segment=" + info + " has older version=" + segmentVersion, input);
-      }
-
-      if (infos.indexCreatedVersionMajor >= 7 && info.getMinVersion() == null) {
-        throw new CorruptIndexException("segments infos must record minVersion with indexCreatedVersionMajor=" + infos.indexCreatedVersionMajor, input);
+      return infos;
+    } catch (Throwable t) {
+      priorE = t;
+    } finally {
+      if (format >= VERSION_70) { // oldest supported version
+        CodecUtil.checkFooter(input, priorE);
+      } else {
+        throw IOUtils.rethrowAlways(priorE);
       }
     }
-
-    infos.userData = input.readMapOfStrings();
-
-    CodecUtil.checkFooter(input);
-
-    // LUCENE-6299: check we are in bounds
-    if (totalDocs > IndexWriter.getActualMaxDocs()) {
-      throw new CorruptIndexException("Too many documents: an index cannot exceed " + IndexWriter.getActualMaxDocs() + " but readers have total maxDoc=" + totalDocs, input);
-    }
-
-    return infos;
+    throw new Error("Unreachable code");
   }
 
   private static Codec readCodec(DataInput input) throws IOException {
@@ -440,7 +489,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
     try {
       segnOutput = directory.createOutput(segmentFileName, IOContext.DEFAULT);
-      write(directory, segnOutput);
+      write(segnOutput);
       segnOutput.close();
       directory.sync(Collections.singleton(segmentFileName));
       success = true;
@@ -459,7 +508,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   }
 
   /** Write ourselves to the provided {@link IndexOutput} */
-  public void write(Directory directory, IndexOutput out) throws IOException {
+  public void write(IndexOutput out) throws IOException {
     CodecUtil.writeIndexHeader(out, "segments", VERSION_CURRENT, 
                                StringHelper.randomId(), Long.toString(generation, Character.MAX_RADIX));
     out.writeVInt(Version.LATEST.major);
@@ -469,8 +518,8 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
     out.writeVInt(indexCreatedVersionMajor);
 
-    out.writeLong(version); 
-    out.writeInt(counter); // write counter
+    out.writeLong(version);
+    out.writeVLong(counter); // write counter
     out.writeInt(size());
 
     if (size() > 0) {
@@ -512,6 +561,22 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
       out.writeInt(delCount);
       out.writeLong(siPerCommit.getFieldInfosGen());
       out.writeLong(siPerCommit.getDocValuesGen());
+      int softDelCount = siPerCommit.getSoftDelCount();
+      if (softDelCount < 0 || softDelCount > si.maxDoc()) {
+        throw new IllegalStateException("cannot write segment: invalid maxDoc segment=" + si.name + " maxDoc=" + si.maxDoc() + " softDelCount=" + softDelCount);
+      }
+      out.writeInt(softDelCount);
+      // we ensure that there is a valid ID for this SCI just in case
+      // this is manually upgraded outside of IW
+      byte[] sciId = siPerCommit.getId();
+      if (sciId != null) {
+        out.writeByte((byte)1);
+        assert sciId.length == StringHelper.ID_LENGTH : "invalid SegmentCommitInfo#id: " + Arrays.toString(sciId);
+        out.writeBytes(sciId, 0, sciId.length);
+      } else {
+        out.writeByte((byte)0);
+      }
+
       out.writeSetOfStrings(siPerCommit.getFieldInfosFiles());
       final Map<Integer,Set<String>> dvUpdatesFiles = siPerCommit.getDocValuesUpdatesFiles();
       out.writeInt(dvUpdatesFiles.size());
@@ -603,8 +668,8 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
     final Directory directory;
 
-    /** Sole constructor. */ 
-    public FindSegmentsFile(Directory directory) {
+    /** Sole constructor. */
+    protected FindSegmentsFile(Directory directory) {
       this.directory = directory;
     }
 
@@ -721,7 +786,6 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
       // Must carefully compute fileName from "generation"
       // since lastGeneration isn't incremented:
       final String pending = IndexFileNames.fileNameFromGeneration(IndexFileNames.PENDING_SEGMENTS, "", generation);
-
       // Suppress so we keep throwing the original exception
       // in our caller
       IOUtils.deleteFilesIgnoringExceptions(dir, pending);
@@ -742,6 +806,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     if (pendingCommit) {
       throw new IllegalStateException("prepareCommit was already called");
     }
+    dir.syncMetaData();
     write(dir);
   }
 
@@ -770,16 +835,24 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
     if (pendingCommit == false) {
       throw new IllegalStateException("prepareCommit was not called");
     }
-    boolean success = false;
+    boolean successRenameAndSync = false;
     final String dest;
     try {
       final String src = IndexFileNames.fileNameFromGeneration(IndexFileNames.PENDING_SEGMENTS, "", generation);
       dest = IndexFileNames.fileNameFromGeneration(IndexFileNames.SEGMENTS, "", generation);
       dir.rename(src, dest);
-      dir.syncMetaData();
-      success = true;
+      try {
+        dir.syncMetaData();
+        successRenameAndSync = true;
+      } finally {
+        if (successRenameAndSync == false) {
+          // at this point we already created the file but missed to sync directory let's also remove the
+          // renamed file
+          IOUtils.deleteFilesIgnoringExceptions(dir, dest);
+        }
+      }
     } finally {
-      if (!success) {
+      if (successRenameAndSync == false) {
         // deletes pending_segments_N:
         rollbackCommit(dir);
       }
@@ -967,8 +1040,8 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   /** Remove the provided {@link SegmentCommitInfo}.
    *
    * <p><b>WARNING</b>: O(N) cost */
-  public void remove(SegmentCommitInfo si) {
-    segments.remove(si);
+  public boolean remove(SegmentCommitInfo si) {
+    return segments.remove(si);
   }
   
   /** Remove the {@link SegmentCommitInfo} at the

@@ -125,12 +125,8 @@ public class IGainTermsQParserPlugin extends QParserPlugin {
     public void collect(int doc) throws IOException {
       super.collect(doc);
       ++count;
-      int valuesDocID = leafOutcomeValue.docID();
-      if (valuesDocID < doc) {
-        valuesDocID = leafOutcomeValue.advance(doc);
-      }
       int value;
-      if (valuesDocID == doc) {
+      if (leafOutcomeValue.advanceExact(doc)) {
         value = (int) leafOutcomeValue.longValue();
       } else {
         value = 0;
@@ -147,8 +143,10 @@ public class IGainTermsQParserPlugin extends QParserPlugin {
     @Override
     public void finish() throws IOException {
       NamedList<Double> analytics = new NamedList<Double>();
+      @SuppressWarnings({"unchecked", "rawtypes"})
       NamedList<Integer> topFreq = new NamedList();
 
+      @SuppressWarnings({"unchecked", "rawtypes"})
       NamedList<Integer> allFreq = new NamedList();
 
       rb.rsp.add("featuredTerms", analytics);

@@ -42,6 +42,16 @@ public class TestCharTermAttributeImpl extends LuceneTestCase {
     }
   }
 
+  public void testSetLength() {
+    CharTermAttributeImpl t = new CharTermAttributeImpl();
+    char[] content = "hello".toCharArray();
+    t.copyBuffer(content, 0, content.length);
+    expectThrows(IndexOutOfBoundsException.class, () -> {
+      t.setLength(-1);
+    });
+  }
+
+  @Slow
   public void testGrow() {
     CharTermAttributeImpl t = new CharTermAttributeImpl();
     StringBuilder buf = new StringBuilder("ab");
@@ -282,7 +292,7 @@ public class TestCharTermAttributeImpl extends LuceneTestCase {
 
   public static <T extends AttributeImpl> T assertCopyIsEqual(T att) throws Exception {
     @SuppressWarnings("unchecked")
-    T copy = (T) att.getClass().newInstance();
+    T copy = (T) att.getClass().getConstructor().newInstance();
     att.copyTo(copy);
     assertEquals("Copied instance must be equal", att, copy);
     assertEquals("Copied instance's hashcode must be equal", att.hashCode(), copy.hashCode());

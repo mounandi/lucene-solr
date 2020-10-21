@@ -17,31 +17,21 @@
 
 package org.apache.solr.cloud;
 
-import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrQuery;
-import org.apache.solr.client.solrj.SolrRequest;
-import org.apache.solr.client.solrj.SolrResponse;
 import org.apache.solr.client.solrj.embedded.JettySolrRunner;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
-import org.apache.solr.client.solrj.response.SolrResponseBase;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.cloud.CollectionStatePredicate;
 import org.apache.solr.common.cloud.CollectionStateWatcher;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
-import org.apache.solr.common.params.SolrParams;
-import org.apache.solr.common.util.ContentStream;
-import org.apache.solr.common.util.ContentStreamBase;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.core.SolrEventListener;
@@ -50,6 +40,7 @@ import org.apache.solr.servlet.SolrDispatchFilter;
 import org.apache.solr.util.LogLevel;
 import org.apache.solr.util.RefCounted;
 import org.apache.solr.util.TestInjection;
+import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -69,31 +60,35 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
   @BeforeClass
   public static void setupCluster() throws Exception {
     useFactory("solr.StandardDirectoryFactory"); // necessary to find the index+tlog intact after restart
-    configureCluster(1)
-        .addConfig("conf", configset("cloud-minimal"))
-        .configure();
   }
 
   @Before
-  public void before() {
+  public void setUp() throws Exception {
+    super.setUp();
+    configureCluster(1).addConfig("conf", configset("cloud-minimal")).configure();
+  }
+  
+  @After
+  @Override
+  public void tearDown() throws Exception {
     coreNameRef.set(null);
     coreNodeNameRef.set(null);
     sleepTime.set(-1);
-
-    try {
-      CollectionAdminRequest.deleteCollection("testRepFactor1LeaderStartup").process(cluster.getSolrClient());
-    } catch (Exception e) {
-      // ignore
+    
+    if (null != cluster) {
+      cluster.deleteAllCollections();
+      cluster.deleteAllConfigSets();
+      cluster.shutdown();
+      cluster = null;
     }
-    try {
-      CollectionAdminRequest.deleteCollection("testPeersyncFailureReplicationSuccess").process(cluster.getSolrClient());
-    } catch (Exception e) {
-      // ignore
-    }
+    TestInjection.wrongIndexFingerprint = null;
+    
+    super.tearDown();
   }
 
   @Test
   public void testRepFactor1LeaderStartup() throws Exception {
+
     CloudSolrClient solrClient = cluster.getSolrClient();
 
     String collectionName = "testRepFactor1LeaderStartup";
@@ -101,17 +96,16 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
         .setCreateNodeSet(cluster.getJettySolrRunner(0).getNodeName());
     create.process(solrClient);
 
-    waitForState("The collection should have 1 shard and 1 replica", collectionName, clusterShape(1, 1));
+   cluster.waitForActiveCollection(collectionName, 1, 1);
 
     solrClient.setDefaultCollection(collectionName);
-    solrClient.getZkStateReader().registerCore(collectionName);
 
     String addListenerCommand = "{" +
         "'add-listener' : {'name':'newSearcherListener','event':'newSearcher', 'class':'" + SleepingSolrEventListener.class.getName() + "'}" +
         "'add-listener' : {'name':'firstSearcherListener','event':'firstSearcher', 'class':'" + SleepingSolrEventListener.class.getName() + "'}" +
         "}";
 
-    ConfigRequest request = new ConfigRequest(SolrRequest.METHOD.POST, "/config", addListenerCommand);
+    ConfigRequest request = new ConfigRequest(addListenerCommand);
     solrClient.request(request);
 
     solrClient.add(new SolrInputDocument("id", "1"));
@@ -122,18 +116,27 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
     CollectionStateWatcher stateWatcher = createActiveReplicaSearcherWatcher(expectedDocs, failingCoreNodeName);
 
     JettySolrRunner runner = cluster.getJettySolrRunner(0);
-    cluster.stopJettySolrRunner(0);
-    waitForState("", collectionName, clusterShape(1, 0));
+    runner.stop();
+    
+    cluster.waitForJettyToStop(runner);
+    // check waitForState only after we are sure the node has shutdown and have forced an update to liveNodes
+    // ie: workaround SOLR-13490
+    cluster.getSolrClient().getZkStateReader().updateLiveNodes();
+    waitForState("jetty count:" + cluster.getJettySolrRunners().size(), collectionName, clusterShape(1, 0));
+    
     // restart
-    sleepTime.set(10000);
-    cluster.startJettySolrRunner(runner);
+    sleepTime.set(1000);
+    runner.start();
+    cluster.waitForAllNodes(30);
     cluster.getSolrClient().getZkStateReader().registerCollectionStateWatcher(collectionName, stateWatcher);
-    waitForState("", collectionName, clusterShape(1, 1));
+    cluster.waitForActiveCollection(collectionName, 1, 1);
     assertNull("No replica should have been active without registering a searcher, found: " + failingCoreNodeName.get(), failingCoreNodeName.get());
     cluster.getSolrClient().getZkStateReader().removeCollectionStateWatcher(collectionName, stateWatcher);
   }
 
+  @Test
   public void testPeersyncFailureReplicationSuccess() throws Exception {
+
     CloudSolrClient solrClient = cluster.getSolrClient();
 
     String collectionName = "testPeersyncFailureReplicationSuccess";
@@ -144,14 +147,13 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
     waitForState("The collection should have 1 shard and 1 replica", collectionName, clusterShape(1, 1));
 
     solrClient.setDefaultCollection(collectionName);
-    solrClient.getZkStateReader().registerCore(collectionName);
 
     String addListenerCommand = "{" +
         "'add-listener' : {'name':'newSearcherListener','event':'newSearcher', 'class':'" + SleepingSolrEventListener.class.getName() + "'}" +
         "'add-listener' : {'name':'firstSearcherListener','event':'firstSearcher', 'class':'" + SleepingSolrEventListener.class.getName() + "'}" +
         "}";
 
-    ConfigRequest request = new ConfigRequest(SolrRequest.METHOD.POST, "/config", addListenerCommand);
+    ConfigRequest request = new ConfigRequest(addListenerCommand);
     solrClient.request(request);
 
     solrClient.add(new SolrInputDocument("id", "1"));
@@ -173,6 +175,7 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
     cluster.getSolrClient().getZkStateReader().registerCollectionStateWatcher(collectionName, stateWatcher);
 
     JettySolrRunner newNode = cluster.startJettySolrRunner();
+    cluster.waitForAllNodes(30);
     CollectionAdminRequest.addReplicaToShard(collectionName, "shard1")
         .setNode(newNode.getNodeName())
         .process(solrClient);
@@ -184,6 +187,8 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
     log.info("Stopping old node 1");
     AtomicReference<String> oldNodeName = new AtomicReference<>(cluster.getJettySolrRunner(0).getNodeName());
     JettySolrRunner oldNode = cluster.stopJettySolrRunner(0);
+    
+    cluster.waitForJettyToStop(oldNode);
     // the newly created replica should become leader
     waitForState("The collection should have 1 shard and 1 replica", collectionName, clusterShape(1, 1));
     // the above call is not enough because we want to assert that the down'ed replica is not active
@@ -254,7 +259,9 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
             log.info("Active replica: {}", coreNodeName);
             for (int i = 0; i < cluster.getJettySolrRunners().size(); i++) {
               JettySolrRunner jettySolrRunner = cluster.getJettySolrRunner(i);
-              log.info("Checking node: {}", jettySolrRunner.getNodeName());
+              if (log.isInfoEnabled()) {
+                log.info("Checking node: {}", jettySolrRunner.getNodeName());
+              }
               if (jettySolrRunner.getNodeName().equals(replica.getNodeName())) {
                 SolrDispatchFilter solrDispatchFilter = jettySolrRunner.getSolrDispatchFilter();
                 try (SolrCore core = solrDispatchFilter.getCores().getCore(coreName)) {
@@ -263,7 +270,9 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
                     assert false;
                     return false;
                   }
-                  log.info("Found SolrCore: {}, id: {}", core.getName(), core);
+                  if (log.isInfoEnabled()) {
+                    log.info("Found SolrCore: {}, id: {}", core.getName(), core);
+                  }
                   RefCounted<SolrIndexSearcher> registeredSearcher = core.getRegisteredSearcher();
                   if (registeredSearcher != null) {
                     log.error("registered searcher not null, maxdocs = {}", registeredSearcher.get().maxDoc());
@@ -302,9 +311,8 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
 
   public static class SleepingSolrEventListener implements SolrEventListener {
     @Override
-    public void init(NamedList args) {
-      new RuntimeException().printStackTrace();
-      System.out.println(args);
+    public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
+      // No-Op
     }
 
     @Override
@@ -322,38 +330,20 @@ public class TestCloudSearcherWarming extends SolrCloudTestCase {
       if (sleepTime.get() > 0) {
         TestCloudSearcherWarming.coreNodeNameRef.set(newSearcher.getCore().getCoreDescriptor().getCloudDescriptor().getCoreNodeName());
         TestCloudSearcherWarming.coreNameRef.set(newSearcher.getCore().getName());
-        log.info("Sleeping for {} on newSearcher: {}, currentSearcher: {} belonging to (newest) core: {}, id: {}", sleepTime.get(), newSearcher, currentSearcher, newSearcher.getCore().getName(), newSearcher.getCore());
+        if (log.isInfoEnabled()) {
+          log.info("Sleeping for {} on newSearcher: {}, currentSearcher: {} belonging to (newest) core: {}, id: {}"
+              , sleepTime.get(), newSearcher, currentSearcher, newSearcher.getCore().getName(), newSearcher.getCore());
+        }
         try {
           Thread.sleep(sleepTime.get());
         } catch (InterruptedException e) {
-          e.printStackTrace();
+          log.warn("newSearcher was interupdated", e);
         }
-        log.info("Finished sleeping for {} on newSearcher: {}, currentSearcher: {} belonging to (newest) core: {}, id: {}", sleepTime.get(), newSearcher, currentSearcher, newSearcher.getCore().getName(), newSearcher.getCore());
+        if (log.isInfoEnabled()) {
+          log.info("Finished sleeping for {} on newSearcher: {}, currentSearcher: {} belonging to (newest) core: {}, id: {}"
+              , sleepTime.get(), newSearcher, currentSearcher, newSearcher.getCore().getName(), newSearcher.getCore());
+        }
       }
-    }
-  }
-
-  public static class ConfigRequest extends SolrRequest {
-    protected final String message;
-
-    public ConfigRequest(METHOD m, String path, String message) {
-      super(m, path);
-      this.message = message;
-    }
-
-    @Override
-    public SolrParams getParams() {
-      return null;
-    }
-
-    @Override
-    public Collection<ContentStream> getContentStreams() throws IOException {
-      return message != null ? Collections.singletonList(new ContentStreamBase.StringStream(message)) : null;
-    }
-
-    @Override
-    protected SolrResponse createResponse(SolrClient client) {
-      return new SolrResponseBase();
     }
   }
 }

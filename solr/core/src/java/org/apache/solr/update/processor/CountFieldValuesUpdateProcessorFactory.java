@@ -25,7 +25,7 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.muta
 /**
  * <p>
  * Replaces any list of values for a field matching the specified 
- * conditions with the the count of the number of values for that field.
+ * conditions with the count of the number of values for that field.
  * </p>
  * <p>
  * By default, this processor matches no fields.
@@ -63,6 +63,7 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.muta
  * document that had no values for the <code>category</code> field, would also 
  * have no value in the <code>category_count</code> field.
  * </p>
+ * @since 4.0.0
  */
 public final class CountFieldValuesUpdateProcessorFactory extends FieldMutatingUpdateProcessorFactory {
 

@@ -29,13 +29,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.codahale.metrics.Counter;
 import com.codahale.metrics.Metric;
 import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.Timer;
-import org.apache.commons.lang.RandomStringUtils;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServerException;
@@ -48,6 +48,7 @@ import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.solr.common.util.TimeSource;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.metrics.SolrMetricManager;
 import org.apache.solr.util.TimeOut;
@@ -56,7 +57,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.util.Collections.singletonList;
-import static java.util.concurrent.TimeUnit.SECONDS;
 
 /**
  * Test PeerSync when a node restarts and documents are indexed when node was down.
@@ -108,11 +108,12 @@ public class PeerSyncReplicationTest extends AbstractFullDistribZkTestBase {
   }
 
   @Test
+  //commented 2-Aug-2018 @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028")
   public void test() throws Exception {
     handle.clear();
     handle.put("timestamp", SKIPVAL);
 
-    waitForThingsToLevelOut(30);
+    waitForThingsToLevelOut(30, TimeUnit.SECONDS);
 
     del("*:*");
 
@@ -122,7 +123,7 @@ public class PeerSyncReplicationTest extends AbstractFullDistribZkTestBase {
           "document number " + docId++);
     }
     commit();
-    waitForThingsToLevelOut(30);
+    waitForThingsToLevelOut(30, TimeUnit.SECONDS);
 
     try {
       checkShardConsistency(false, true);
@@ -155,14 +156,14 @@ public class PeerSyncReplicationTest extends AbstractFullDistribZkTestBase {
       // now shutdown all other nodes except for 'nodeShutDownForFailure'
       otherJetties.remove(nodePeerSynced);
       forceNodeFailures(otherJetties);
-      waitForThingsToLevelOut(30);
+      waitForThingsToLevelOut(30, TimeUnit.SECONDS);
       checkShardConsistency(false, true);
 
       // now shutdown the original leader
       log.info("Now shutting down initial leader");
       forceNodeFailures(singletonList(initialLeaderJetty));
       log.info("Updating mappings from zk");
-      waitForNewLeader(cloudClient, "shard1", (Replica) initialLeaderJetty.client.info, new TimeOut(15, SECONDS));
+      waitForNewLeader(cloudClient, "shard1", (Replica) initialLeaderJetty.client.info, new TimeOut(15, TimeUnit.SECONDS, TimeSource.NANO_TIME));
       updateMappingsFromZk(jettys, clients, true);
       assertEquals("PeerSynced node did not become leader", nodePeerSynced, shardToLeaderJetty.get("shard1"));
 
@@ -196,8 +197,7 @@ public class PeerSyncReplicationTest extends AbstractFullDistribZkTestBase {
       Map<String, Metric> metrics = registry.getMetrics();
       assertTrue("REPLICATION.peerSync.time present", metrics.containsKey("REPLICATION.peerSync.time"));
       assertTrue("REPLICATION.peerSync.errors present", metrics.containsKey("REPLICATION.peerSync.errors"));
-      Timer timer = (Timer)metrics.get("REPLICATION.peerSync.time");
-      assertEquals(1L, timer.getCount());
+
       Counter counter = (Counter)metrics.get("REPLICATION.peerSync.errors");
       assertEquals(0L, counter.getCount());
       success = true;
@@ -247,7 +247,7 @@ public class PeerSyncReplicationTest extends AbstractFullDistribZkTestBase {
 
   private void forceNodeFailures(List<CloudJettyRunner> replicasToShutDown) throws Exception {
     for (CloudJettyRunner replicaToShutDown : replicasToShutDown) {
-      chaosMonkey.killJetty(replicaToShutDown);
+      replicaToShutDown.jetty.stop();
     }
 
     int totalDown = 0;
@@ -303,19 +303,19 @@ public class PeerSyncReplicationTest extends AbstractFullDistribZkTestBase {
     iib.start();
     
     // bring back dead node and ensure it recovers
-    ChaosMonkey.start(nodeToBringUp.jetty);
+    nodeToBringUp.jetty.start();
     
     nodesDown.remove(nodeToBringUp);
 
     waitTillNodesActive();
-    waitForThingsToLevelOut(30);
+    waitForThingsToLevelOut(30, TimeUnit.SECONDS);
 
     Set<CloudJettyRunner> jetties = new HashSet<>();
     jetties.addAll(shardToJetty.get("shard1"));
     jetties.removeAll(nodesDown);
     assertEquals(getShardCount() - nodesDown.size(), jetties.size());
 
-    waitForThingsToLevelOut(30);
+    waitForThingsToLevelOut(30, TimeUnit.SECONDS);
     
     iib.join();
     

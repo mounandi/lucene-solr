@@ -17,51 +17,41 @@
 
 package org.apache.solr.cloud;
 
-
-import java.io.Closeable;
-import java.io.IOException;
-import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
+import org.apache.solr.common.cloud.DocRouter;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.util.Utils;
 
+/**
+ * A utility class that can create mock ZkStateReader objects with custom ClusterState objects created
+ * using a simple string based description. See {@link #buildClusterState(String, int, String...)} for
+ * details on how the cluster state can be created.
+ *
+ * @lucene.experimental
+ */
 public class ClusterStateMockUtil {
 
   private final static Pattern BLUEPRINT = Pattern.compile("([a-z])(\\d+)?(?:(['A','R','D','F']))?(\\*)?");
 
-  protected static class Result implements Closeable {
-    OverseerAutoReplicaFailoverThread.DownReplica badReplica;
-    ZkStateReader reader;
-
-    @Override
-    public void close() throws IOException {
-      reader.close();
-    }
-  }
-
-  protected static ClusterStateMockUtil.Result buildClusterState(List<Result> results, String string, String ... liveNodes) {
-    return buildClusterState(results, string, 1, liveNodes);
-  }
-
-  protected static ClusterStateMockUtil.Result buildClusterState(List<Result> results, String string, int replicationFactor, String ... liveNodes) {
-    return buildClusterState(results, string, replicationFactor, 10, liveNodes);
+  public static ZkStateReader buildClusterState(String clusterDescription, String ... liveNodes) {
+    return buildClusterState(clusterDescription, 1, liveNodes);
   }
 
   /**
    * This method lets you construct a complex ClusterState object by using simple strings of letters.
    *
-   * c = collection, s = slice, r = replica, \d = node number (r2 means the replica is on node 2),
+   * c = collection, s = slice, r = replica (nrt type, default), n = nrt replica, t = tlog replica, p = pull replica, \d = node number (r2 means the replica is on node 2),
    * state = [A,R,D,F], * = replica to replace, binds to the left.
    *
    * For example:
@@ -82,7 +72,6 @@ public class ClusterStateMockUtil {
    * Result:
    *        {
    *         "collection2":{
-   *           "maxShardsPerNode":"1",
    *           "replicationFactor":"1",
    *           "shards":{"slice1":{
    *               "state":"active",
@@ -91,7 +80,6 @@ public class ClusterStateMockUtil {
    *                   "node_name":"baseUrl1_",
    *                   "base_url":"http://baseUrl1"}}}}},
    *         "collection1":{
-   *           "maxShardsPerNode":"1",
    *           "replicationFactor":"1",
    *           "shards":{
    *             "slice1":{
@@ -118,16 +106,15 @@ public class ClusterStateMockUtil {
    *
    */
   @SuppressWarnings("resource")
-  protected static ClusterStateMockUtil.Result buildClusterState(List<Result> results, String clusterDescription, int replicationFactor, int maxShardsPerNode, String ... liveNodes) {
-    ClusterStateMockUtil.Result result = new ClusterStateMockUtil.Result();
-
+  public static ZkStateReader buildClusterState(String clusterDescription, int replicationFactor, String ... liveNodes) {
     Map<String,Slice> slices = null;
     Map<String,Replica> replicas = null;
     Map<String,Object> collectionProps = new HashMap<>();
-    collectionProps.put(ZkStateReader.MAX_SHARDS_PER_NODE, Integer.toString(maxShardsPerNode));
     collectionProps.put(ZkStateReader.REPLICATION_FACTOR, Integer.toString(replicationFactor));
     Map<String,DocCollection> collectionStates = new HashMap<>();
     DocCollection docCollection = null;
+    String collName = null;
+    String sliceName = null;
     Slice slice = null;
     int replicaCount = 1;
 
@@ -137,96 +124,112 @@ public class ClusterStateMockUtil {
       switch (m.group(1)) {
         case "c":
           slices = new HashMap<>();
-          docCollection = new DocCollection("collection" + (collectionStates.size() + 1), slices, collectionProps, null);
+          docCollection = new DocCollection(collName = "collection" + (collectionStates.size() + 1), slices, collectionProps, DocRouter.DEFAULT);
           collectionStates.put(docCollection.getName(), docCollection);
           break;
         case "s":
           replicas = new HashMap<>();
-          slice = new Slice("slice" + (slices.size() + 1), replicas, null);
+          if(collName == null) collName = "collection" + (collectionStates.size() + 1);
+          slice = new Slice(sliceName = "slice" + (slices.size() + 1), replicas, null,  collName);
           slices.put(slice.getName(), slice);
+
+          // hack alert: the DocCollection constructor copies over active slices to its active slice map in the constructor
+          // but here we construct the DocCollection before creating the slices which breaks code that calls DocCollection.getActiveSlices
+          // so here we re-create doc collection with the latest slices map to workaround this problem
+          // todo: a better fix would be to have a builder class for DocCollection that builds the final object once all the slices and replicas have been created.
+          docCollection = docCollection.copyWithSlices(slices);
+          collectionStates.put(docCollection.getName(), docCollection);
           break;
         case "r":
-          Map<String,Object> replicaPropMap = new HashMap<>();
-          String node;
-
-          node = m.group(2);
-
-          if (node == null || node.trim().length() == 0) {
-            node = "1";
-          }
-
-          Replica.State state = Replica.State.ACTIVE;
+        case "n":
+        case "t":
+        case "p":
+          String node = m.group(2);
+          String replicaName = "replica" + replicaCount++;
           String stateCode = m.group(3);
 
-          if (stateCode != null) {
-            switch (stateCode.charAt(0)) {
-              case 'S':
-                state = Replica.State.ACTIVE;
-                break;
-              case 'R':
-                state = Replica.State.RECOVERING;
-                break;
-              case 'D':
-                state = Replica.State.DOWN;
-                break;
-              case 'F':
-                state = Replica.State.RECOVERY_FAILED;
-                break;
-              default:
-                throw new IllegalArgumentException(
-                    "Unexpected state for replica: " + stateCode);
+          Map<String, Object> replicaPropMap = makeReplicaProps(sliceName, node, replicaName, stateCode, m.group(1));
+          if (collName == null) collName = "collection" + (collectionStates.size() + 1);
+          if (sliceName == null) collName = "slice" + (slices.size() + 1);
+
+          // O(n^2) alert! but this is for mocks and testing so shouldn't be used for very large cluster states
+          boolean leaderFound = false;
+          for (Map.Entry<String, Replica> entry : replicas.entrySet()) {
+            Replica value = entry.getValue();
+            if ("true".equals(value.get(Slice.LEADER)))  {
+              leaderFound = true;
+              break;
             }
           }
-
-          String nodeName = "baseUrl" + node + "_";
-          String replicaName = "replica" + replicaCount++;
-
-          if ("*".equals(m.group(4))) {
-            replicaName += " (bad)";
+          if (!leaderFound && !m.group(1).equals("p")) {
+            replicaPropMap.put(Slice.LEADER, "true");
           }
-
-          replicaPropMap.put(ZkStateReader.NODE_NAME_PROP, nodeName);
-          replicaPropMap.put(ZkStateReader.BASE_URL_PROP, "http://baseUrl" + node);
-          replicaPropMap.put(ZkStateReader.STATE_PROP, state.toString());
-
-          replica = new Replica(replicaName, replicaPropMap);
-
-          if ("*".equals(m.group(4))) {
-            result.badReplica = new OverseerAutoReplicaFailoverThread.DownReplica();
-            result.badReplica.replica = replica;
-            result.badReplica.slice = slice;
-            result.badReplica.collection = docCollection;
-          }
-
+          replica = new Replica(replicaName, replicaPropMap, collName, sliceName);
           replicas.put(replica.getName(), replica);
+
+          // hack alert: re-create slice with existing data and new replicas map so that it updates its internal leader attribute
+          slice = new Slice(slice.getName(), replicas, null, collName);
+          slices.put(slice.getName(), slice);
+          // we don't need to update doc collection again because we aren't adding a new slice or changing its state
           break;
         default:
           break;
       }
     }
 
-    ClusterState clusterState = new ClusterState(1, new HashSet<>(Arrays.asList(liveNodes)), collectionStates);
+    ClusterState clusterState = new ClusterState(new HashSet<>(Arrays.asList(liveNodes)), collectionStates);
     MockZkStateReader reader = new MockZkStateReader(clusterState, collectionStates.keySet());
 
     String json;
-    try {
-      json = new String(Utils.toJSON(clusterState), "UTF-8");
-    } catch (UnsupportedEncodingException e) {
-      throw new RuntimeException("Unexpected");
-    }
+    json = new String(Utils.toJSON(clusterState), StandardCharsets.UTF_8);
     System.err.println(json);
 
-    // todo remove the limitation of always having a bad replica
-    assert result.badReplica != null : "Is there no bad replica?";
-    assert result.badReplica.slice != null : "Is there no bad replica?";
+    return reader;
+  }
 
-    result.reader = reader;
-
-    if (results != null) {
-      results.add(result);
+  private static Map<String, Object> makeReplicaProps(String sliceName, String node, String replicaName, String stateCode, String replicaTypeCode) {
+    if (node == null || node.trim().length() == 0) {
+      node = "1";
     }
 
-    return result;
+    Replica.State state = Replica.State.ACTIVE;
+    if (stateCode != null) {
+      switch (stateCode.charAt(0)) {
+        case 'S':
+          state = Replica.State.ACTIVE;
+          break;
+        case 'R':
+          state = Replica.State.RECOVERING;
+          break;
+        case 'D':
+          state = Replica.State.DOWN;
+          break;
+        case 'F':
+          state = Replica.State.RECOVERY_FAILED;
+          break;
+        default:
+          throw new IllegalArgumentException(
+              "Unexpected state for replica: " + stateCode);
+      }
+    }
+
+    Replica.Type replicaType = Replica.Type.NRT;
+    switch (replicaTypeCode)  {
+      case "t":
+        replicaType = Replica.Type.TLOG;
+        break;
+      case "p":
+        replicaType = Replica.Type.PULL;
+        break;
+    }
+
+    Map<String,Object> replicaPropMap = new HashMap<>();
+    replicaPropMap.put(ZkStateReader.NODE_NAME_PROP, "baseUrl" + node + "_");
+    replicaPropMap.put(ZkStateReader.BASE_URL_PROP, "http://baseUrl" + node);
+    replicaPropMap.put(ZkStateReader.STATE_PROP, state.toString());
+    replicaPropMap.put(ZkStateReader.CORE_NAME_PROP, sliceName + "_" + replicaName);
+    replicaPropMap.put(ZkStateReader.REPLICA_TYPE, replicaType.name());
+    return replicaPropMap;
   }
 
 

@@ -18,7 +18,6 @@ package org.apache.solr.core;
 
 import java.lang.invoke.MethodHandles;
 import java.util.Collections;
-import java.util.Locale;
 
 import com.google.common.collect.ImmutableMap;
 import org.apache.solr.util.plugin.PluginInfoInitialized;
@@ -31,7 +30,7 @@ import org.slf4j.LoggerFactory;
 public abstract class TransientSolrCoreCacheFactory {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-  private CoreContainer coreContainer = null;
+  private volatile CoreContainer coreContainer = null;
 
   public abstract TransientSolrCoreCache getTransientSolrCoreCache();
   /**
@@ -50,7 +49,7 @@ public abstract class TransientSolrCoreCacheFactory {
 
     try {
       // According to the docs, this returns a TransientSolrCoreCacheFactory with the default c'tor
-      TransientSolrCoreCacheFactory tccf = loader.findClass(info.className, TransientSolrCoreCacheFactory.class).newInstance(); 
+      TransientSolrCoreCacheFactory tccf = loader.findClass(info.className, TransientSolrCoreCacheFactory.class).getConstructor().newInstance(); 
       
       // OK, now we call it's init method.
       if (PluginInfoInitialized.class.isAssignableFrom(tccf.getClass()))
@@ -58,10 +57,9 @@ public abstract class TransientSolrCoreCacheFactory {
       tccf.setCoreContainer(coreContainer);
       return tccf;
     } catch (Exception e) {
-      // Many things could cuse this, bad solrconfig, mis-typed class name, whatever. However, this should not
+      // Many things could cause this, bad solrconfig, mis-typed class name, whatever. However, this should not
       // keep the enclosing coreContainer from instantiating, so log an error and continue.
-      log.error(String.format(Locale.ROOT, "Error instantiating TransientSolrCoreCacheFactory class [%s]: %s",
-          info.className, e.getMessage()));
+      log.error("Error instantiating TransientSolrCoreCacheFactory class [{}]: ", info.className, e);
       return null;
     }
 

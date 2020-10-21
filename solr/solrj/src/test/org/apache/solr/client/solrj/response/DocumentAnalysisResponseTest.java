@@ -16,7 +16,7 @@
  */
 package org.apache.solr.client.solrj.response;
 
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.common.util.NamedList;
 import org.junit.Test;
 
@@ -29,12 +29,13 @@ import java.util.List;
  *
  * @since solr 1.4
  */
-public class DocumentAnalysisResponseTest extends LuceneTestCase {
+public class DocumentAnalysisResponseTest extends SolrTestCase {
 
   /**
    * Tests the {@link DocumentAnalysisResponse#setResponse(org.apache.solr.common.util.NamedList)} method
    */
   @Test
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public void testSetResponse() throws Exception {
 
     // the parsing of the analysis phases is already tested in the AnalysisResponseBaseTest. So we can just fake
@@ -47,7 +48,7 @@ public class DocumentAnalysisResponseTest extends LuceneTestCase {
     DocumentAnalysisResponse response = new DocumentAnalysisResponse() {
 
       @Override
-      protected List<AnalysisPhase> buildPhases(NamedList<List<NamedList<Object>>> phaseNL) {
+      protected List<AnalysisPhase> buildPhases(NamedList<Object> phaseNL) {
         return phases;
       }
     };
@@ -96,6 +97,7 @@ public class DocumentAnalysisResponseTest extends LuceneTestCase {
 
   //================================================ Helper Methods ==================================================
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   private NamedList buildResponse() {
 
     NamedList response = new NamedList();

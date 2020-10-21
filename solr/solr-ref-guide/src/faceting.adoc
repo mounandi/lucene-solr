@@ -1,7 +1,4 @@
 = Faceting
-:page-shortname: faceting
-:page-permalink: faceting.html
-:page-children: blockjoin-faceting
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,6 +19,8 @@
 Faceting is the arrangement of search results into categories based on indexed terms.
 
 Searchers are presented with the indexed terms, along with numerical counts of how many matching documents were found for each term. Faceting makes it easy for users to explore search results, narrowing in on exactly the results they are looking for.
+
+See also <<json-facet-api.adoc#json-facet-api, JSON Facet API>> for an alternative approach to this.
 
 == General Facet Parameters
 
@@ -67,6 +66,10 @@ The `facet.contains` parameter limits the terms on which to facet to those conta
 
 If `facet.contains` is used, the `facet.contains.ignoreCase` parameter causes case to be ignored when matching the given substring against candidate facet terms.
 
+`facet.matches`::
+
+If you want to only return facet buckets for the terms that match a regular expression.
+
 `facet.sort`::
 This parameter determines the ordering of the facet field constraints.
 +
@@ -77,7 +80,7 @@ There are two options for this parameter.
 `index`::: Return the constraints sorted in their index order (lexicographic by indexed term). For terms in the ASCII range, this will be alphabetically sorted.
 --
 +
-The default is `count` if `facet.limit` is greater than 0, otherwise, the default is `index`.
+The default is `count` if `facet.limit` is greater than 0, otherwise, the default is `index`. Note that the default logic is changed when <<#limiting-facet-with-certain-terms>>
 
 `facet.limit`::
 This parameter specifies the maximum number of constraint counts (essentially, the number of facets for a field that are returned) that should be returned for the facet fields. A negative value means that Solr will return unlimited number of constraint counts.
@@ -174,7 +177,7 @@ The `facet.range.end` specifies the upper bound of the ranges. You can specify t
 `f.lastModified_dt.facet.range.end=NOW/DAY+30DAYS`
 
 `facet.range.gap`::
-The span of each range expressed as a value to be added to the lower bound. For date fields, this should be expressed using the {solr-javadocs}/solr-core/org/apache/solr/util/DateMathParser.html[`DateMathParser` syntax] (such as, `facet.range.gap=%2B1DAY ... '+1DAY'`). You can specify this parameter on a per-field basis with the syntax of `f.<fieldname>.facet.range.gap`. For example:
+The span of each range expressed as a value to be added to the lower bound. For date fields, this should be expressed using the {solr-javadocs}/core/org/apache/solr/util/DateMathParser.html[`DateMathParser` syntax] (such as, `facet.range.gap=%2B1DAY ... '+1DAY'`). You can specify this parameter on a per-field basis with the syntax of `f.<fieldname>.facet.range.gap`. For example:
 +
 `f.price.facet.range.gap=100&f.age.facet.range.gap=10`
 +
@@ -259,7 +262,7 @@ Using the "`bin/solr -e techproducts`" example, A query URL like this one will r
 http://localhost:8983/solr/techproducts/select?q=*:*&facet.pivot=cat,popularity,inStock
    &facet.pivot=popularity,cat&facet=true&facet.field=cat&facet.limit=5&rows=0&facet.pivot.mincount=2
 ----
-+
+
 [source,json]
 ----
 {  "facet_counts":{
@@ -551,7 +554,7 @@ For example:
 
 The initial and end values cannot be empty.
 
-If the interval needs to be unbounded, the special character `*` can be used for both, start and end limit. When using this special character, the start syntax options (`(` anAd `[`), and end syntax options (`)` and `]`) will be treated the same. `[*,*]` will include all documents with a value in the field.
+If the interval needs to be unbounded, the special character `\*` can be used for both, start and end, limits. When using this special character, the start syntax options (`(` and `[`), and end syntax options (`)` and `]`) will be treated the same. `[*,*]` will include all documents with a value in the field.
 
 The interval limits may be strings but there is no need to add quotes. All the text until the comma will be treated as the start limit, and the text after that will be the end limit. For example: `[Buenos Aires,New York]`. Keep in mind that a string-like comparison will be done to match documents in string intervals (case-sensitive). The comparator can't be changed.
 
@@ -583,7 +586,7 @@ Consider the following example query with faceting:
 
 Because everything is already constrained by the filter `doctype:pdf`, the `facet.field=doctype` facet command is currently redundant and will return 0 counts for everything except `doctype:pdf`.
 
-To implement a multi-select facet for doctype, a GUI may want to still display the other doctype values and their associated counts, as if the http://doctypepdf[`doctype:pdf`] constraint had not yet been applied. For example:
+To implement a multi-select facet for doctype, a GUI may want to still display the other doctype values and their associated counts, as if the `doctype:pdf` constraint had not yet been applied. For example:
 
 [source,text]
 ----
@@ -610,9 +613,11 @@ The parameter setting above causes the field facet results for the "doctype" fie
 
 === Limiting Facet with Certain Terms
 
-To limit field facet with certain terms specify them comma separated with `terms` local parameter. Commas and quotes in terms can be escaped with backslash, as in `\,`. In this case facet is calculated on a way similar to `facet.method=enum` , but ignores `facet.enum.cache.minDf`. For example:
+To limit field facet with certain terms specify them comma separated with `terms` local parameter. Commas and quotes in terms can be escaped with backslash, as in `\,`. In this case facet is calculated on a way similar to `facet.method=enum`, but ignores `facet.enum.cache.minDf`. For example:
 
 `facet.field={!terms='alfa,betta,with\,with\',with space'}symbol`
+
+This local parameter overrides default logic for `facet.sort`. if `facet.sort` is omitted, facets are returned in the given terms order that might be changed with `index` and `count` values. Note: other parameters might not be fully supported when this parameter is supplied.   
 
 == Related Topics
 

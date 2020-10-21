@@ -27,7 +27,6 @@ import org.apache.lucene.queries.function.valuesource.DoubleFieldSource;
 import org.apache.lucene.queries.function.valuesource.MultiValuedDoubleFieldSource;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.SortedNumericSelector;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -50,7 +49,7 @@ public class DoublePointField extends PointField implements DoubleValueFieldType
   public Object toNativeType(Object val) {
     if (val == null) return null;
     if (val instanceof Number) return ((Number) val).doubleValue();
-    if (val instanceof String) return Double.parseDouble((String) val);
+    if (val instanceof CharSequence) return Double.parseDouble( val.toString());
     return super.toNativeType(val);
   }
 
@@ -130,24 +129,6 @@ public class DoublePointField extends PointField implements DoubleValueFieldType
     result.grow(Double.BYTES);
     result.setLength(Double.BYTES);
     DoublePoint.encodeDimension(parseDoubleFromUser(null, val.toString()), result.bytes(), 0);
-  }
-
-  @Override
-  public SortField getSortField(SchemaField field, boolean top) {
-    field.checkSortability();
-
-    Object missingValue = null;
-    boolean sortMissingLast = field.sortMissingLast();
-    boolean sortMissingFirst = field.sortMissingFirst();
-
-    if (sortMissingLast) {
-      missingValue = top ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
-    } else if (sortMissingFirst) {
-      missingValue = top ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
-    }
-    SortField sf = new SortField(field.getName(), SortField.Type.DOUBLE, top);
-    sf.setMissingValue(missingValue);
-    return sf;
   }
 
   @Override

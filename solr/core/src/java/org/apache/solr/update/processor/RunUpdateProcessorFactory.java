@@ -33,89 +33,93 @@ import org.apache.solr.update.*;
  * @since solr 1.3
  * @see DistributingUpdateProcessorFactory
  */
-public class RunUpdateProcessorFactory extends UpdateRequestProcessorFactory 
-{
-  @Override
-  public UpdateRequestProcessor getInstance(SolrQueryRequest req, SolrQueryResponse rsp, UpdateRequestProcessor next) 
-  {
-    return new RunUpdateProcessor(req, next);
-  }
-}
+public class RunUpdateProcessorFactory extends UpdateRequestProcessorFactory {
 
-class RunUpdateProcessor extends UpdateRequestProcessor 
-{
-  private final SolrQueryRequest req;
-  private final UpdateHandler updateHandler;
-
-  private boolean changesSinceCommit = false;
-
-  public RunUpdateProcessor(SolrQueryRequest req, UpdateRequestProcessor next) {
-    super( next );
-    this.req = req;
-    this.updateHandler = req.getCore().getUpdateHandler();
-  }
+  public static final String PRE_RUN_CHAIN_NAME = "_preRun_";
 
   @Override
-  public void processAdd(AddUpdateCommand cmd) throws IOException {
-    
-    if (AtomicUpdateDocumentMerger.isAtomicUpdate(cmd)) {
-      throw new SolrException
-        (SolrException.ErrorCode.BAD_REQUEST,
-         "RunUpdateProcessor has received an AddUpdateCommand containing a document that appears to still contain Atomic document update operations, most likely because DistributedUpdateProcessorFactory was explicitly disabled from this updateRequestProcessorChain");
+  public UpdateRequestProcessor getInstance(SolrQueryRequest req, SolrQueryResponse rsp, UpdateRequestProcessor next) {
+    RunUpdateProcessor runUpdateProcessor = new RunUpdateProcessor(req, next);
+    UpdateRequestProcessorChain preRun = req.getCore().getUpdateProcessingChain(PRE_RUN_CHAIN_NAME);
+    if (preRun != null) {
+      return preRun.createProcessor(req, rsp, false, runUpdateProcessor);
+    } else {
+      return runUpdateProcessor;
+    }
+  }
+
+
+  static class RunUpdateProcessor extends UpdateRequestProcessor {
+    private final SolrQueryRequest req;
+    private final UpdateHandler updateHandler;
+
+    private boolean changesSinceCommit = false;
+
+    public RunUpdateProcessor(SolrQueryRequest req, UpdateRequestProcessor next) {
+      super(next);
+      this.req = req;
+      this.updateHandler = req.getCore().getUpdateHandler();
     }
 
-    updateHandler.addDoc(cmd);
-    super.processAdd(cmd);
-    changesSinceCommit = true;
-  }
+    @Override
+    public void processAdd(AddUpdateCommand cmd) throws IOException {
 
-  @Override
-  public void processDelete(DeleteUpdateCommand cmd) throws IOException {
-    if( cmd.isDeleteById()) {
-      updateHandler.delete(cmd);
+      if (AtomicUpdateDocumentMerger.isAtomicUpdate(cmd)) {
+        throw new SolrException
+                (SolrException.ErrorCode.BAD_REQUEST,
+                        "RunUpdateProcessor has received an AddUpdateCommand containing a document that appears to still contain Atomic document update operations, most likely because DistributedUpdateProcessorFactory was explicitly disabled from this updateRequestProcessorChain");
+      }
+
+      updateHandler.addDoc(cmd);
+      super.processAdd(cmd);
+      changesSinceCommit = true;
     }
-    else {
-      updateHandler.deleteByQuery(cmd);
+
+    @Override
+    public void processDelete(DeleteUpdateCommand cmd) throws IOException {
+      if (cmd.isDeleteById()) {
+        updateHandler.delete(cmd);
+      } else {
+        updateHandler.deleteByQuery(cmd);
+      }
+      super.processDelete(cmd);
+      changesSinceCommit = true;
     }
-    super.processDelete(cmd);
-    changesSinceCommit = true;
-  }
 
-  @Override
-  public void processMergeIndexes(MergeIndexesCommand cmd) throws IOException {
-    updateHandler.mergeIndexes(cmd);
-    super.processMergeIndexes(cmd);
-  }
+    @Override
+    public void processMergeIndexes(MergeIndexesCommand cmd) throws IOException {
+      updateHandler.mergeIndexes(cmd);
+      super.processMergeIndexes(cmd);
+    }
 
-  @Override
-  public void processCommit(CommitUpdateCommand cmd) throws IOException
-  {
-    updateHandler.commit(cmd);
-    super.processCommit(cmd);
-    if (!cmd.softCommit) {
-      // a hard commit means we don't need to flush the transaction log
+    @Override
+    public void processCommit(CommitUpdateCommand cmd) throws IOException {
+      updateHandler.commit(cmd);
+      super.processCommit(cmd);
+      if (!cmd.softCommit) {
+        // a hard commit means we don't need to flush the transaction log
+        changesSinceCommit = false;
+      }
+    }
+
+    /**
+     * @since Solr 1.4
+     */
+    @Override
+    public void processRollback(RollbackUpdateCommand cmd) throws IOException {
+      updateHandler.rollback(cmd);
+      super.processRollback(cmd);
       changesSinceCommit = false;
     }
-  }
-
-  /**
-   * @since Solr 1.4
-   */
-  @Override
-  public void processRollback(RollbackUpdateCommand cmd) throws IOException
-  {
-    updateHandler.rollback(cmd);
-    super.processRollback(cmd);
-    changesSinceCommit = false;
-  }
 
 
-  @Override
-  public void finish() throws IOException {
-    if (changesSinceCommit && updateHandler.getUpdateLog() != null) {
-      updateHandler.getUpdateLog().finish(null);
+    @Override
+    public void finish() throws IOException {
+      if (changesSinceCommit && updateHandler.getUpdateLog() != null) {
+        updateHandler.getUpdateLog().finish(null);
+      }
+      super.finish();
     }
-    super.finish();
   }
 }
 

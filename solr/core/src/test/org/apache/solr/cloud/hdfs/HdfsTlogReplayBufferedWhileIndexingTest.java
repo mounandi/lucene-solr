@@ -16,10 +16,10 @@
  */
 package org.apache.solr.cloud.hdfs;
 
-import java.io.IOException;
-
 import org.apache.hadoop.hdfs.MiniDFSCluster;
+import org.apache.lucene.util.QuickPatchThreadsFilter;
 import org.apache.lucene.util.LuceneTestCase.Slow;
+import org.apache.solr.SolrIgnoredThreadsFilter;
 import org.apache.solr.cloud.TlogReplayBufferedWhileIndexingTest;
 import org.apache.solr.util.BadHdfsThreadsFilter;
 import org.junit.AfterClass;
@@ -31,32 +31,33 @@ import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
 @Slow
 @Nightly
 @ThreadLeakFilters(defaultFilters = true, filters = {
+    SolrIgnoredThreadsFilter.class,
+    QuickPatchThreadsFilter.class,
     BadHdfsThreadsFilter.class // hdfs currently leaks thread(s)
 })
 public class HdfsTlogReplayBufferedWhileIndexingTest extends TlogReplayBufferedWhileIndexingTest {
-  
+  private static MiniDFSCluster dfsCluster;
+
   public HdfsTlogReplayBufferedWhileIndexingTest() throws Exception {
     super();
   }
 
-  private static MiniDFSCluster dfsCluster;
-  
   @BeforeClass
   public static void setupClass() throws Exception {
     dfsCluster = HdfsTestUtil.setupClass(createTempDir().toFile().getAbsolutePath());
-    System.setProperty("solr.hdfs.blockcache.blocksperbank", "2048");
   }
   
   @AfterClass
   public static void teardownClass() throws Exception {
-    HdfsTestUtil.teardownClass(dfsCluster);
-    dfsCluster = null;
+    try {
+      HdfsTestUtil.teardownClass(dfsCluster);
+    } finally {
+      dfsCluster = null;
+    }
   }
-
   
   @Override
-  protected String getDataDir(String dataDir) throws IOException {
+  protected String getDataDir(String dataDir) {
     return HdfsTestUtil.getDataDir(dfsCluster, dataDir);
   }
-
 }

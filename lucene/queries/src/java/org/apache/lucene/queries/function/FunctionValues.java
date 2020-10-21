@@ -21,6 +21,7 @@ import java.io.IOException;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.Weight;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.mutable.MutableValue;
 import org.apache.lucene.util.mutable.MutableValueFloat;
@@ -89,6 +90,16 @@ public abstract class FunctionValues {
    * @return the number of unique sort ordinals this instance has
    */
   public int numOrd() { throw new UnsupportedOperationException(); }
+
+  /**
+   * An estimate of the expected cost to return a value for a document.
+   * It's intended to be used by TwoPhaseIterator.matchCost implementations.
+   * Returns an expected cost in number of simple operations like addition, multiplication,
+   * comparing two numbers and indexing an array.
+   * The returned value must be positive.
+   */
+  public float cost() { return 100; }
+
   public abstract String toString(int doc) throws IOException;
 
   /**
@@ -144,11 +155,15 @@ public abstract class FunctionValues {
    * Yields a {@link Scorer} that matches all documents,
    * and that which produces scores equal to {@link #floatVal(int)}.
    */
-  public ValueSourceScorer getScorer(LeafReaderContext readerContext) {
-    return new ValueSourceScorer(readerContext, this) {
+  public ValueSourceScorer getScorer(Weight weight, LeafReaderContext readerContext) {
+    return new ValueSourceScorer(weight, readerContext, this) {
       @Override
       public boolean matches(int doc) {
         return true;
+      }
+      @Override
+      public float matchCost() {
+        return 0f;
       }
     };
   }
@@ -161,7 +176,7 @@ public abstract class FunctionValues {
   // because it needs different behavior depending on the type of fields.  There is also
   // a setup cost - parsing and normalizing params, and doing a binary search on the StringIndex.
   // TODO: change "reader" to LeafReaderContext
-  public ValueSourceScorer getRangeScorer(LeafReaderContext readerContext, String lowerVal, String upperVal, boolean includeLower, boolean includeUpper) throws IOException {
+  public ValueSourceScorer getRangeScorer(Weight weight, LeafReaderContext readerContext, String lowerVal, String upperVal, boolean includeLower, boolean includeUpper) throws IOException {
     float lower;
     float upper;
 
@@ -180,7 +195,7 @@ public abstract class FunctionValues {
     final float u = upper;
 
     if (includeLower && includeUpper) {
-      return new ValueSourceScorer(readerContext, this) {
+      return new ValueSourceScorer(weight, readerContext, this) {
         @Override
         public boolean matches(int doc) throws IOException {
           if (!exists(doc)) return false;
@@ -190,7 +205,7 @@ public abstract class FunctionValues {
       };
     }
     else if (includeLower && !includeUpper) {
-       return new ValueSourceScorer(readerContext, this) {
+       return new ValueSourceScorer(weight, readerContext, this) {
         @Override
         public boolean matches(int doc) throws IOException {
           if (!exists(doc)) return false;
@@ -200,7 +215,7 @@ public abstract class FunctionValues {
       };
     }
     else if (!includeLower && includeUpper) {
-       return new ValueSourceScorer(readerContext, this) {
+       return new ValueSourceScorer(weight, readerContext, this) {
         @Override
         public boolean matches(int doc) throws IOException {
           if (!exists(doc)) return false;
@@ -210,7 +225,7 @@ public abstract class FunctionValues {
       };
     }
     else {
-       return new ValueSourceScorer(readerContext, this) {
+       return new ValueSourceScorer(weight, readerContext, this) {
         @Override
         public boolean matches(int doc) throws IOException {
           if (!exists(doc)) return false;

@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.hi;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.hi.HindiStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link HindiStemFilter}. 
@@ -32,8 +31,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.HindiStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
 public class HindiStemFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "hindiStem";
   
   /** Creates a new HindiStemFilterFactory */
   public HindiStemFilterFactory(Map<String,String> args) {
@@ -43,6 +47,11 @@ public class HindiStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public HindiStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new HindiStemFilter(input);

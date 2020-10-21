@@ -27,7 +27,6 @@ import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.BinaryDocValues;
 import org.apache.lucene.index.DocValues;
-import org.apache.lucene.index.FieldInvertState;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiDocValues;
@@ -36,7 +35,6 @@ import org.apache.lucene.index.RandomIndexWriter;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause.Occur;
-import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.LuceneTestCase;
@@ -95,7 +93,11 @@ public class TestDiversifiedTopDocsCollector extends LuceneTestCase {
     DiversifiedTopDocsCollector tdc = doDiversifiedSearch(numResults, 15);
 
     // start < 0
-    assertEquals(0, tdc.topDocs(-1).scoreDocs.length);
+    IllegalArgumentException expected = expectThrows(IllegalArgumentException.class, () -> {
+      tdc.topDocs(-1);
+    });
+
+    assertEquals("Expected value of starting position is between 0 and 5, got -1", expected.getMessage());
 
     // start > pq.size()
     assertEquals(0, tdc.topDocs(numResults + 1).scoreDocs.length);
@@ -104,7 +106,11 @@ public class TestDiversifiedTopDocsCollector extends LuceneTestCase {
     assertEquals(0, tdc.topDocs(numResults).scoreDocs.length);
 
     // howMany < 0
-    assertEquals(0, tdc.topDocs(0, -1).scoreDocs.length);
+    expected = expectThrows(IllegalArgumentException.class, () -> {
+      tdc.topDocs(0, -1);
+    });
+
+    assertEquals("Number of hits requested must be greater than 0 but value was -1", expected.getMessage());
 
     // howMany == 0
     assertEquals(0, tdc.topDocs(0, 0).scoreDocs.length);
@@ -358,7 +364,7 @@ public class TestDiversifiedTopDocsCollector extends LuceneTestCase {
         Occur.SHOULD));
     testQuery.add(new BooleanClause(new TermQuery(new Term("year", "1969")),
         Occur.SHOULD));
-    return testQuery.build();
+    return new DocValueScoreQuery(testQuery.build(), "weeksAtNumberOne");
   }
 
   @Override
@@ -411,10 +417,6 @@ public class TestDiversifiedTopDocsCollector extends LuceneTestCase {
     writer.close();
     searcher = newSearcher(reader);
     artistDocValues = MultiDocValues.getSortedValues(reader, "artist");
-
-    // All searches sort by song popularity 
-    final Similarity base = searcher.getSimilarity(true);
-    searcher.setSimilarity(new DocValueSimilarity(base, "weeksAtNumberOne"));
   }
 
   @Override
@@ -442,67 +444,108 @@ public class TestDiversifiedTopDocsCollector extends LuceneTestCase {
     return result;
   }
 
-  /**
-   * Similarity that wraps another similarity and replaces the final score
-   * according to whats in a docvalues field.
-   * 
-   * @lucene.experimental
-   */
-  static class DocValueSimilarity extends Similarity {
-    private final Similarity sim;
-    private final String scoreValueField;
+  private static final class DocValueScoreQuery extends Query {
 
-    public DocValueSimilarity(Similarity sim, String scoreValueField) {
-      this.sim = sim;
-      this.scoreValueField = scoreValueField;
+    private final Query query;
+    private final String scoreField;
+    
+    DocValueScoreQuery(Query query, String scoreField) {
+      this.query = query;
+      this.scoreField = scoreField;
+    }
+    
+    @Override
+    public String toString(String field) {
+      return "DocValueScore(" + query.toString(field) + ")";
     }
 
     @Override
-    public long computeNorm(FieldInvertState state) {
-      return sim.computeNorm(state);
+    public boolean equals(Object obj) {
+      if (obj instanceof DocValueScoreQuery == false) {
+        return false;
+      }
+      return query.equals(((DocValueScoreQuery) obj).query);
     }
 
     @Override
-    public SimWeight computeWeight(float boost,
-        CollectionStatistics collectionStats, TermStatistics... termStats) {
-      return sim.computeWeight(boost, collectionStats, termStats);
+    public int hashCode() {
+      int h = getClass().hashCode();
+      h = 31 * h + query.hashCode();
+      h = 31 * h + scoreField.hashCode();
+      return h;
     }
 
     @Override
-    public SimScorer simScorer(SimWeight stats, LeafReaderContext context)
-        throws IOException {
-      final SimScorer sub = sim.simScorer(stats, context);
-      final NumericDocValues values = DocValues.getNumeric(context.reader(), scoreValueField);
+    public Query rewrite(IndexReader reader) throws IOException {
+      Query rewritten = query.rewrite(reader);
+      if (rewritten != query) {
+        return new DocValueScoreQuery(rewritten, scoreField);
+      }
+      return super.rewrite(reader);
+    }
 
-      return new SimScorer() {
+    @Override
+    public void visit(QueryVisitor visitor) {
+      query.visit(visitor);
+    }
+
+    @Override
+    public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
+      if (scoreMode.needsScores() == false) {
+        return query.createWeight(searcher, scoreMode, boost);
+      }
+      Weight inner = query.createWeight(searcher, ScoreMode.COMPLETE_NO_SCORES, boost);
+      return new Weight(this) {
+        
         @Override
-        public float score(int doc, float freq) throws IOException {
-          if (doc != values.docID()) {
-            values.advance(doc);
+        public boolean isCacheable(LeafReaderContext ctx) {
+          return true;
+        }
+        
+        @Override
+        public Scorer scorer(LeafReaderContext context) throws IOException {
+          Scorer innerScorer = inner.scorer(context);
+          NumericDocValues scoreFactors = DocValues.getNumeric(context.reader(), scoreField);
+          return new Scorer(this) {
+            
+            @Override
+            public float score() throws IOException {
+              if (scoreFactors.advanceExact(docID())) {
+                return Float.intBitsToFloat((int) scoreFactors.longValue());
+              }
+              return 0;
+            }
+            
+            @Override
+            public float getMaxScore(int upTo) throws IOException {
+              return Float.POSITIVE_INFINITY;
+            }
+            
+            @Override
+            public DocIdSetIterator iterator() {
+              return innerScorer.iterator();
+            }
+            
+            @Override
+            public int docID() {
+              return innerScorer.docID();
+            }
+          };
+        }
+
+        @Override
+        public Explanation explain(LeafReaderContext context, int doc) throws IOException {
+          Scorer s = scorer(context);
+          if (s != null) {
+            int advanced = s.iterator().advance(doc);
+            if (doc != advanced) {
+              return Explanation.match(s.score(), "match");
+            }
           }
-          if (doc == values.docID()) {
-            return Float.intBitsToFloat((int) values.longValue());
-          } else {
-            return 0f;
-          }
-        }
-
-        @Override
-        public float computeSlopFactor(int distance) {
-          return sub.computeSlopFactor(distance);
-        }
-
-        @Override
-        public float computePayloadFactor(int doc, int start, int end,
-            BytesRef payload) {
-          return sub.computePayloadFactor(doc, start, end, payload);
-        }
-
-        @Override
-        public Explanation explain(int doc, Explanation freq) throws IOException {
-          return Explanation.match(score(doc, 0f), "indexDocValue(" + scoreValueField + ")");
+          return Explanation.noMatch("no match");
         }
       };
     }
   }
+
 }

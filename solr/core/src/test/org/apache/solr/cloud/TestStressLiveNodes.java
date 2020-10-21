@@ -26,12 +26,11 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.apache.lucene.util.TestUtil;
-import org.apache.solr.cloud.SolrCloudTestCase;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.util.ExecutorUtil;
-import org.apache.solr.util.DefaultSolrThreadFactory;
+import org.apache.solr.common.util.SolrNamedThreadFactory;
 
 import org.apache.zookeeper.CreateMode;
 
@@ -67,9 +66,6 @@ public class TestStressLiveNodes extends SolrCloudTestCase {
     // we only need 1 node, and we don't care about any configs or collections
     // we're going to fake all the live_nodes changes we want to fake.
     configureCluster(1).configure();
-
-    // give all nodes a chance to come alive
-    TestTolerantUpdateProcessorCloud.assertSpinLoopAllJettyAreRunning(cluster);
     
     CLOUD_CLIENT = cluster.getSolrClient();
     CLOUD_CLIENT.connect(); // force connection even though we aren't sending any requests
@@ -80,8 +76,10 @@ public class TestStressLiveNodes extends SolrCloudTestCase {
   
   @AfterClass
   private static void afterClass() throws Exception {
-    CLOUD_CLIENT.close();
-    CLOUD_CLIENT = null;
+    if (null != CLOUD_CLIENT) {
+      CLOUD_CLIENT.close();
+      CLOUD_CLIENT = null;
+    }
   }
 
   private static SolrZkClient newSolrZkClient() {
@@ -114,8 +112,10 @@ public class TestStressLiveNodes extends SolrCloudTestCase {
     for (int i = 0; i < 10; i++) {
       result = new ArrayList<>(CLOUD_CLIENT.getZkStateReader().getClusterState().getLiveNodes());
       if (expectedCount != result.size()) {
-        log.info("sleeping #{} to give watchers a chance to finish: {} != {}",
-                 i, expectedCount, result.size());
+        if (log.isInfoEnabled()) {
+          log.info("sleeping #{} to give watchers a chance to finish: {} != {}",
+              i, expectedCount, result.size());
+        }
         Thread.sleep(200);
       } else {
         break;
@@ -178,7 +178,7 @@ public class TestStressLiveNodes extends SolrCloudTestCase {
       }
       try {
         final ExecutorService executorService = ExecutorUtil.newMDCAwareFixedThreadPool
-          (thrashers.size()+1, new DefaultSolrThreadFactory("test_live_nodes_thrasher_iter"+iter));
+          (thrashers.size()+1, new SolrNamedThreadFactory("test_live_nodes_thrasher_iter"+iter));
         
         executorService.invokeAll(thrashers);
         executorService.shutdown();
@@ -237,7 +237,7 @@ public class TestStressLiveNodes extends SolrCloudTestCase {
           client.makePath(nodePath, CreateMode.EPHEMERAL, true);
           numAdded++;
         } catch (Exception e) {
-          log.error("failed to create: " + nodePath, e);
+          log.error("failed to create: {}", nodePath, e);
         }
       }
       return numAdded;

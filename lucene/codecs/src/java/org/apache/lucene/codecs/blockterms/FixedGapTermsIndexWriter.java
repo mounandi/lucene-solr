@@ -17,23 +17,23 @@
 package org.apache.lucene.codecs.blockterms;
 
 
-import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.store.RAMOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.TermStats;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.SegmentWriteState;
+import org.apache.lucene.store.ByteBuffersDataOutput;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.packed.MonotonicBlockPackedWriter;
 import org.apache.lucene.util.packed.PackedInts;
-
-import java.util.List;
-import java.util.ArrayList;
-import java.io.IOException;
 
 /**
  * Selects every Nth term as and index term, and hold term
@@ -111,11 +111,11 @@ public class FixedGapTermsIndexWriter extends TermsIndexWriterBase {
     long packedOffsetsStart;
     private long numTerms;
 
-    private RAMOutputStream offsetsBuffer = new RAMOutputStream();
+    private ByteBuffersDataOutput offsetsBuffer = ByteBuffersDataOutput.newResettableInstance();
     private MonotonicBlockPackedWriter termOffsets = new MonotonicBlockPackedWriter(offsetsBuffer, BLOCKSIZE);
     private long currentOffset;
 
-    private RAMOutputStream addressBuffer = new RAMOutputStream();
+    private ByteBuffersDataOutput addressBuffer = ByteBuffersDataOutput.newResettableInstance();
     private MonotonicBlockPackedWriter termAddresses = new MonotonicBlockPackedWriter(addressBuffer, BLOCKSIZE);
 
     private final BytesRefBuilder lastTerm = new BytesRefBuilder();
@@ -150,7 +150,13 @@ public class FixedGapTermsIndexWriter extends TermsIndexWriterBase {
 
     @Override
     public void add(BytesRef text, TermStats stats, long termsFilePointer) throws IOException {
-      final int indexedTermLength = indexedTermPrefixLength(lastTerm.get(), text);
+      final int indexedTermLength;
+      if (numIndexTerms == 0) {
+        // no previous term: no bytes to write
+        indexedTermLength = 0;
+      } else {
+        indexedTermLength = indexedTermPrefixLength(lastTerm.get(), text);
+      }
       //System.out.println("FGW: add text=" + text.utf8ToString() + " " + text + " fp=" + termsFilePointer);
 
       // write only the min prefix that shows the diff
@@ -177,18 +183,19 @@ public class FixedGapTermsIndexWriter extends TermsIndexWriterBase {
 
       // relative to our indexStart
       termAddresses.finish();
-      addressBuffer.writeTo(out);
+      addressBuffer.copyTo(out);
 
       packedOffsetsStart = out.getFilePointer();
 
       // write offsets into the byte[] terms
       termOffsets.finish();
-      offsetsBuffer.writeTo(out);
+      offsetsBuffer.copyTo(out);
 
       // our referrer holds onto us, while other fields are
       // being written, so don't tie up this RAM:
       termOffsets = termAddresses = null;
-      addressBuffer = offsetsBuffer = null;
+      addressBuffer = null;
+      offsetsBuffer = null;
     }
   }
 

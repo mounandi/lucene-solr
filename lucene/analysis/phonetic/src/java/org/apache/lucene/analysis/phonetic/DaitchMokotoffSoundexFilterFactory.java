@@ -19,7 +19,7 @@ package org.apache.lucene.analysis.phonetic;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link DaitchMokotoffSoundexFilter}.
@@ -42,8 +42,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * @see DaitchMokotoffSoundexFilter
  *
  * @lucene.experimental
+ * @since 5.0.0
+ * @lucene.spi {@value #NAME}
  */
 public class DaitchMokotoffSoundexFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "daitchMokotoffSoundex";
+
   /** parameter name: true if encoded tokens should be added as synonyms */
   public static final String INJECT = "inject"; // boolean
 
@@ -56,6 +62,11 @@ public class DaitchMokotoffSoundexFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public DaitchMokotoffSoundexFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

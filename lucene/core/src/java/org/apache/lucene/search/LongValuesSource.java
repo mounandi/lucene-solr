@@ -23,12 +23,14 @@ import java.util.Objects;
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.search.comparators.LongComparator;
 
 /**
  * Base class for producing {@link LongValues}
  *
  * To obtain a {@link LongValues} object for a leaf reader, clients should
- * call {@link #getValues(LeafReaderContext, DoubleValues)}.
+ * call {@link #rewrite(IndexSearcher)} against the top-level searcher, and
+ * then {@link #getValues(LeafReaderContext, DoubleValues)}.
  *
  * LongValuesSource objects for long and int-valued NumericDocValues fields can
  * be obtained by calling {@link #fromLongField(String)} and {@link #fromIntField(String)}.
@@ -37,7 +39,7 @@ import org.apache.lucene.index.NumericDocValues;
  * use {@link DoubleValuesSource#fromFloatField(String)} or {@link DoubleValuesSource#fromDoubleField(String)}
  * and then call {@link DoubleValuesSource#toLongValuesSource()}.
  */
-public abstract class LongValuesSource {
+public abstract class LongValuesSource implements SegmentCacheable {
 
   /**
    * Returns a {@link LongValues} instance for the passed-in LeafReaderContext and scores
@@ -62,11 +64,84 @@ public abstract class LongValuesSource {
   public abstract String toString();
 
   /**
+   * Return a LongValuesSource specialised for the given IndexSearcher
+   *
+   * Implementations should assume that this will only be called once.
+   * IndexSearcher-independent implementations can just return {@code this}
+   */
+  public abstract LongValuesSource rewrite(IndexSearcher searcher) throws IOException;
+
+  /**
    * Create a sort field based on the value of this producer
    * @param reverse true if the sort should be decreasing
    */
   public SortField getSortField(boolean reverse) {
     return new LongValuesSortField(this, reverse);
+  }
+
+  /**
+   * Convert to a DoubleValuesSource by casting long values to doubles
+   */
+  public DoubleValuesSource toDoubleValuesSource() {
+    return new DoubleLongValuesSource(this);
+  }
+
+  private static class DoubleLongValuesSource extends DoubleValuesSource {
+
+    private final LongValuesSource inner;
+
+    private DoubleLongValuesSource(LongValuesSource inner) {
+      this.inner = inner;
+    }
+
+    @Override
+    public DoubleValues getValues(LeafReaderContext ctx, DoubleValues scores) throws IOException {
+      LongValues v = inner.getValues(ctx, scores);
+      return new DoubleValues() {
+        @Override
+        public double doubleValue() throws IOException {
+          return (double) v.longValue();
+        }
+
+        @Override
+        public boolean advanceExact(int doc) throws IOException {
+          return v.advanceExact(doc);
+        }
+      };
+    }
+
+    @Override
+    public DoubleValuesSource rewrite(IndexSearcher searcher) throws IOException {
+      return inner.rewrite(searcher).toDoubleValuesSource();
+    }
+
+    @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return inner.isCacheable(ctx);
+    }
+
+    @Override
+    public String toString() {
+      return "double(" + inner.toString() + ")";
+    }
+
+    @Override
+    public boolean needsScores() {
+      return inner.needsScores();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      DoubleLongValuesSource that = (DoubleLongValuesSource) o;
+      return Objects.equals(inner, that.inner);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(inner);
+    }
   }
 
   /**
@@ -114,6 +189,11 @@ public abstract class LongValuesSource {
     }
 
     @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return true;
+    }
+
+    @Override
     public boolean needsScores() {
       return false;
     }
@@ -134,6 +214,11 @@ public abstract class LongValuesSource {
     @Override
     public String toString() {
       return "constant(" + value + ")";
+    }
+
+    @Override
+    public LongValuesSource rewrite(IndexSearcher searcher) throws IOException {
+      return this;
     }
 
   }
@@ -171,8 +256,18 @@ public abstract class LongValuesSource {
     }
 
     @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return DocValues.isCacheable(ctx, field);
+    }
+
+    @Override
     public boolean needsScores() {
       return false;
+    }
+
+    @Override
+    public LongValuesSource rewrite(IndexSearcher searcher) throws IOException {
+      return this;
     }
   }
 
@@ -183,6 +278,16 @@ public abstract class LongValuesSource {
     public LongValuesSortField(LongValuesSource producer, boolean reverse) {
       super(producer.toString(), new LongValuesComparatorSource(producer), reverse);
       this.producer = producer;
+    }
+
+    @Override
+    public void setMissingValue(Object missingValue) {
+      if (missingValue instanceof Number) {
+        this.missingValue = missingValue;
+        ((LongValuesComparatorSource) getComparatorSource()).setMissingValue(((Number) missingValue).longValue());
+      } else {
+          super.setMissingValue(missingValue);
+      }
     }
 
     @Override
@@ -199,6 +304,18 @@ public abstract class LongValuesSource {
       return buffer.toString();
     }
 
+    @Override
+    public SortField rewrite(IndexSearcher searcher) throws IOException {
+      LongValuesSource rewrittenSource = producer.rewrite(searcher);
+      if (producer == rewrittenSource) {
+        return this;
+      }
+      LongValuesSortField rewritten = new LongValuesSortField(rewrittenSource, reverse);
+      if (missingValue != null) {
+        rewritten.setMissingValue(missingValue);
+      }
+      return rewritten;
+    }
   }
 
   private static class LongValuesHolder {
@@ -207,28 +324,40 @@ public abstract class LongValuesSource {
 
   private static class LongValuesComparatorSource extends FieldComparatorSource {
     private final LongValuesSource producer;
+    private long missingValue;
 
     public LongValuesComparatorSource(LongValuesSource producer) {
       this.producer = producer;
+      this.missingValue = 0L;
+    }
+
+    void setMissingValue(long missingValue) {
+      this.missingValue = missingValue;
     }
 
     @Override
     public FieldComparator<Long> newComparator(String fieldname, int numHits,
-                                                 int sortPos, boolean reversed) {
-      return new FieldComparator.LongComparator(numHits, fieldname, 0L){
-
-        LeafReaderContext ctx;
-        LongValuesHolder holder = new LongValuesHolder();
-
+                                               int sortPos, boolean reversed) {
+      return new LongComparator(numHits, fieldname, missingValue, reversed, sortPos) {
         @Override
-        protected NumericDocValues getNumericDocValues(LeafReaderContext context, String field) throws IOException {
-          ctx = context;
-          return asNumericDocValues(holder);
-        }
+        public LeafFieldComparator getLeafComparator(LeafReaderContext context) throws IOException {
+          LongValuesHolder holder = new LongValuesHolder();
 
-        @Override
-        public void setScorer(Scorer scorer) throws IOException {
-          holder.values = producer.getValues(ctx, DoubleValuesSource.fromScorer(scorer));
+          return new LongComparator.LongLeafComparator(context) {
+            LeafReaderContext ctx;
+
+            @Override
+            protected NumericDocValues getNumericDocValues(LeafReaderContext context, String field) {
+              ctx = context;
+              return asNumericDocValues(holder);
+            }
+
+            @Override
+            public void setScorer(Scorable scorer) throws IOException {
+              holder.values = producer.getValues(ctx, DoubleValuesSource.fromScorer(scorer));
+              super.setScorer(scorer);
+            }
+          };
         }
       };
     }

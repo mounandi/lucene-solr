@@ -76,7 +76,7 @@ public interface LeafCollector {
    * {@link #collect(int)}), should save the passed-in Scorer and call
    * scorer.score() when needed.
    */
-  void setScorer(Scorer scorer) throws IOException;
+  void setScorer(Scorable scorer) throws IOException;
   
   /**
    * Called once for every document matching a query, with the unbased document
@@ -92,5 +92,17 @@ public interface LeafCollector {
    * Doing so can slow searches by an order of magnitude or more.
    */
   void collect(int doc) throws IOException;
+
+  /**
+   * Optionally returns an iterator over competitive documents.
+   *
+   * Collectors should delegate this method to their comparators if
+   * their comparators provide the skipping functionality over non-competitive docs.
+   *
+   * The default is to return {@code null} which is interpreted as the collector provide any competitive iterator.
+   */
+  default DocIdSetIterator competitiveIterator() throws IOException {
+    return null;
+  }
 
 }

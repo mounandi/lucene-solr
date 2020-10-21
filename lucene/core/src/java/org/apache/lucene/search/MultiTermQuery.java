@@ -24,7 +24,7 @@ import org.apache.lucene.index.FilteredTermsEnum; // javadocs
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.SingleTermsEnum;   // javadocs
 import org.apache.lucene.index.Term;
-import org.apache.lucene.index.TermContext;
+import org.apache.lucene.index.TermStates;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.BooleanQuery.Builder;
@@ -43,10 +43,10 @@ import org.apache.lucene.util.AttributeSource;
  * <p><b>NOTE</b>: if {@link #setRewriteMethod} is either
  * {@link #CONSTANT_SCORE_BOOLEAN_REWRITE} or {@link
  * #SCORING_BOOLEAN_REWRITE}, you may encounter a
- * {@link BooleanQuery.TooManyClauses} exception during
+ * {@link IndexSearcher.TooManyClauses} exception during
  * searching, which happens when the number of terms to be
  * searched exceeds {@link
- * BooleanQuery#getMaxClauseCount()}.  Setting {@link
+ * IndexSearcher#getMaxClauseCount()}.  Setting {@link
  * #setRewriteMethod} to {@link #CONSTANT_SCORE_REWRITE}
  * prevents this.
  *
@@ -87,7 +87,7 @@ public abstract class MultiTermQuery extends Query {
    *  <p> This method is faster than the BooleanQuery
    *  rewrite methods when the number of matched terms or
    *  matched documents is non-trivial. Also, it will never
-   *  hit an errant {@link BooleanQuery.TooManyClauses}
+   *  hit an errant {@link IndexSearcher.TooManyClauses}
    *  exception.
    *
    *  @see #setRewriteMethod */
@@ -107,8 +107,8 @@ public abstract class MultiTermQuery extends Query {
    *  #CONSTANT_SCORE_REWRITE} instead.
    *
    *  <p><b>NOTE</b>: This rewrite method will hit {@link
-   *  BooleanQuery.TooManyClauses} if the number of terms
-   *  exceeds {@link BooleanQuery#getMaxClauseCount}.
+   *  IndexSearcher.TooManyClauses} if the number of terms
+   *  exceeds {@link IndexSearcher#getMaxClauseCount}.
    *
    *  @see #setRewriteMethod */
   public final static RewriteMethod SCORING_BOOLEAN_REWRITE = ScoringRewrite.SCORING_BOOLEAN_REWRITE;
@@ -119,8 +119,8 @@ public abstract class MultiTermQuery extends Query {
    *  query's boost.
    * 
    *  <p><b>NOTE</b>: This rewrite method will hit {@link
-   *  BooleanQuery.TooManyClauses} if the number of terms
-   *  exceeds {@link BooleanQuery#getMaxClauseCount}.
+   *  IndexSearcher.TooManyClauses} if the number of terms
+   *  exceeds {@link IndexSearcher#getMaxClauseCount}.
    *
    *  @see #setRewriteMethod */
   public final static RewriteMethod CONSTANT_SCORE_BOOLEAN_REWRITE = ScoringRewrite.CONSTANT_SCORE_BOOLEAN_REWRITE;
@@ -143,7 +143,7 @@ public abstract class MultiTermQuery extends Query {
      * Create a TopTermsScoringBooleanQueryRewrite for 
      * at most <code>size</code> terms.
      * <p>
-     * NOTE: if {@link BooleanQuery#getMaxClauseCount} is smaller than 
+     * NOTE: if {@link IndexSearcher#getMaxClauseCount} is smaller than
      * <code>size</code>, then it will be used instead. 
      */
     public TopTermsScoringBooleanQueryRewrite(int size) {
@@ -152,7 +152,7 @@ public abstract class MultiTermQuery extends Query {
     
     @Override
     protected int getMaxSize() {
-      return BooleanQuery.getMaxClauseCount();
+      return IndexSearcher.getMaxClauseCount();
     }
     
     @Override
@@ -166,7 +166,7 @@ public abstract class MultiTermQuery extends Query {
     }
     
     @Override
-    protected void addClause(BooleanQuery.Builder topLevel, Term term, int docCount, float boost, TermContext states) {
+    protected void addClause(BooleanQuery.Builder topLevel, Term term, int docCount, float boost, TermStates states) {
       final TermQuery tq = new TermQuery(term, states);
       topLevel.add(new BoostQuery(tq, boost), BooleanClause.Occur.SHOULD);
     }
@@ -192,7 +192,7 @@ public abstract class MultiTermQuery extends Query {
      * Create a TopTermsBlendedScoringBooleanQueryRewrite for at most
      * <code>size</code> terms.
      * <p>
-     * NOTE: if {@link BooleanQuery#getMaxClauseCount} is smaller than
+     * NOTE: if {@link IndexSearcher#getMaxClauseCount} is smaller than
      * <code>size</code>, then it will be used instead.
      */
     public TopTermsBlendedFreqScoringRewrite(int size) {
@@ -201,7 +201,7 @@ public abstract class MultiTermQuery extends Query {
 
     @Override
     protected int getMaxSize() {
-      return BooleanQuery.getMaxClauseCount();
+      return IndexSearcher.getMaxClauseCount();
     }
 
     @Override
@@ -218,7 +218,7 @@ public abstract class MultiTermQuery extends Query {
 
     @Override
     protected void addClause(BlendedTermQuery.Builder topLevel, Term term, int docCount,
-        float boost, TermContext states) {
+        float boost, TermStates states) {
       topLevel.add(term, boost, states);
     }
   }
@@ -239,7 +239,7 @@ public abstract class MultiTermQuery extends Query {
      * Create a TopTermsBoostOnlyBooleanQueryRewrite for 
      * at most <code>size</code> terms.
      * <p>
-     * NOTE: if {@link BooleanQuery#getMaxClauseCount} is smaller than 
+     * NOTE: if {@link IndexSearcher#getMaxClauseCount} is smaller than
      * <code>size</code>, then it will be used instead. 
      */
     public TopTermsBoostOnlyBooleanQueryRewrite(int size) {
@@ -248,7 +248,7 @@ public abstract class MultiTermQuery extends Query {
     
     @Override
     protected int getMaxSize() {
-      return BooleanQuery.getMaxClauseCount();
+      return IndexSearcher.getMaxClauseCount();
     }
     
     @Override
@@ -262,7 +262,7 @@ public abstract class MultiTermQuery extends Query {
     }
     
     @Override
-    protected void addClause(BooleanQuery.Builder topLevel, Term term, int docFreq, float boost, TermContext states) {
+    protected void addClause(BooleanQuery.Builder topLevel, Term term, int docFreq, float boost, TermStates states) {
       final Query q = new ConstantScoreQuery(new TermQuery(term, states));
       topLevel.add(new BoostQuery(q, boost), BooleanClause.Occur.SHOULD);
     }
@@ -286,17 +286,20 @@ public abstract class MultiTermQuery extends Query {
    *  (should instead return {@link TermsEnum#EMPTY} if no
    *  terms match).  The TermsEnum must already be
    *  positioned to the first matching term.
-   * The given {@link AttributeSource} is passed by the {@link RewriteMethod} to
-   * provide attributes, the rewrite method uses to inform about e.g. maximum competitive boosts.
-   * This is currently only used by {@link TopTermsRewrite}
+   *  The given {@link AttributeSource} is passed by the {@link RewriteMethod} to
+   *  share information between segments, for example {@link TopTermsRewrite} uses
+   *  it to share maximum competitive boosts
    */
   protected abstract TermsEnum getTermsEnum(Terms terms, AttributeSource atts) throws IOException;
 
-  /** Convenience method, if no attributes are needed:
-   * This simply passes empty attributes and is equal to:
-   * <code>getTermsEnum(terms, new AttributeSource())</code>
+  /**
+   * Constructs an enumeration that expands the pattern term.
+   * This method should only be called if the field exists (ie,
+   * implementations can assume the field does exist).
+   * This method never returns null.
+   * The returned TermsEnum is positioned to the first matching term.
    */
-  protected final TermsEnum getTermsEnum(Terms terms) throws IOException {
+  public final TermsEnum getTermsEnum(Terms terms) throws IOException {
     return getTermsEnum(terms, new AttributeSource());
   }
 

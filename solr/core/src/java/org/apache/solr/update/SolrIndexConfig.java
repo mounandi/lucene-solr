@@ -31,7 +31,6 @@ import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.MergeScheduler;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.util.InfoStream;
-import org.apache.lucene.util.Version;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.Utils;
 import org.apache.solr.core.DirectoryFactory;
@@ -49,7 +48,7 @@ import org.apache.solr.util.SolrPluginUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.solr.core.Config.assertWarnOrFail;
+import static org.apache.solr.core.XmlConfigFile.assertWarnOrFail;
 
 /**
  * This config object encapsulates IndexWriter config params,
@@ -62,13 +61,26 @@ public class SolrIndexConfig implements MapSerializable {
 
   private static final String DEFAULT_MERGE_POLICY_FACTORY_CLASSNAME = DefaultMergePolicyFactory.class.getName();
   public static final String DEFAULT_MERGE_SCHEDULER_CLASSNAME = ConcurrentMergeScheduler.class.getName();
-  public final Version luceneVersion;
 
   public final boolean useCompoundFile;
 
   public final int maxBufferedDocs;
 
   public final double ramBufferSizeMB;
+  public final int ramPerThreadHardLimitMB;
+  /**
+   * <p>
+   * When using a custom merge policy that allows triggering synchronous merges on commit
+   * (see {@link MergePolicy#findFullFlushMerges(org.apache.lucene.index.MergeTrigger, org.apache.lucene.index.SegmentInfos, org.apache.lucene.index.MergePolicy.MergeContext)}),
+   * a timeout (in milliseconds) can be set for those merges to finish. Use {@code <maxCommitMergeWaitTime>1000</maxCommitMergeWaitTime>} in the {@code <indexConfig>} section.
+   * See {@link IndexWriterConfig#setMaxFullFlushMergeWaitMillis(long)}.
+   * </p>
+   * <p>
+   * Note that as of Solr 8.6, no {@code MergePolicy} shipped with Lucene/Solr make use of
+   * {@code MergePolicy.findFullFlushMerges}, which means this setting has no effect unless a custom {@code MergePolicy} is used.
+   * </p> 
+   */
+  public final int maxCommitMergeWaitMillis;
 
   public final int writeLockTimeout;
   public final String lockType;
@@ -84,10 +96,11 @@ public class SolrIndexConfig implements MapSerializable {
    * Internal constructor for setting defaults based on Lucene Version
    */
   private SolrIndexConfig(SolrConfig solrConfig) {
-    luceneVersion = solrConfig.luceneMatchVersion;
     useCompoundFile = false;
     maxBufferedDocs = -1;
     ramBufferSizeMB = 100;
+    ramPerThreadHardLimitMB = -1;
+    maxCommitMergeWaitMillis = -1;
     writeLockTimeout = -1;
     lockType = DirectoryFactory.LOCK_TYPE_NATIVE;
     mergePolicyFactoryInfo = null;
@@ -106,7 +119,7 @@ public class SolrIndexConfig implements MapSerializable {
   public SolrIndexConfig(SolrConfig solrConfig, String prefix, SolrIndexConfig def)  {
     if (prefix == null) {
       prefix = "indexConfig";
-      log.debug("Defaulting to prefix \""+prefix+"\" for index configuration");
+      log.debug("Defaulting to prefix '{}' for index configuration", prefix);
     }
     
     if (def == null) {
@@ -116,8 +129,6 @@ public class SolrIndexConfig implements MapSerializable {
     // sanity check: this will throw an error for us if there is more then one
     // config section
     Object unused = solrConfig.getNode(prefix, false);
-
-    luceneVersion = solrConfig.luceneMatchVersion;
 
     // Assert that end-of-life parameters or syntax is not in our config.
     // Warn for luceneMatchVersion's before LUCENE_3_6, fail fast above
@@ -132,8 +143,12 @@ public class SolrIndexConfig implements MapSerializable {
         true);
 
     useCompoundFile = solrConfig.getBool(prefix+"/useCompoundFile", def.useCompoundFile);
-    maxBufferedDocs=solrConfig.getInt(prefix+"/maxBufferedDocs",def.maxBufferedDocs);
+    maxBufferedDocs = solrConfig.getInt(prefix+"/maxBufferedDocs", def.maxBufferedDocs);
     ramBufferSizeMB = solrConfig.getDouble(prefix+"/ramBufferSizeMB", def.ramBufferSizeMB);
+    maxCommitMergeWaitMillis = solrConfig.getInt(prefix+"/maxCommitMergeWaitTime", def.maxCommitMergeWaitMillis);
+
+    // how do we validate the value??
+    ramPerThreadHardLimitMB = solrConfig.getInt(prefix+"/ramPerThreadHardLimitMB", def.ramPerThreadHardLimitMB);
 
     writeLockTimeout=solrConfig.getInt(prefix+"/writeLockTimeout", def.writeLockTimeout);
     lockType=solrConfig.get(prefix+"/lockType", def.lockType);
@@ -184,6 +199,8 @@ public class SolrIndexConfig implements MapSerializable {
     Map<String, Object> m = Utils.makeMap("useCompoundFile", useCompoundFile,
         "maxBufferedDocs", maxBufferedDocs,
         "ramBufferSizeMB", ramBufferSizeMB,
+        "ramPerThreadHardLimitMB", ramPerThreadHardLimitMB,
+        "maxCommitMergeWaitTime", maxCommitMergeWaitMillis,
         "writeLockTimeout", writeLockTimeout,
         "lockType", lockType,
         "infoStreamEnabled", infoStream != InfoStream.NO_OUTPUT);
@@ -226,10 +243,18 @@ public class SolrIndexConfig implements MapSerializable {
     if (ramBufferSizeMB != -1)
       iwc.setRAMBufferSizeMB(ramBufferSizeMB);
 
+    if (ramPerThreadHardLimitMB != -1) {
+      iwc.setRAMPerThreadHardLimitMB(ramPerThreadHardLimitMB);
+    }
+    
+    if (maxCommitMergeWaitMillis > 0) {
+      iwc.setMaxFullFlushMergeWaitMillis(maxCommitMergeWaitMillis);
+    }
+
     iwc.setSimilarity(schema.getSimilarity());
-    MergePolicy mergePolicy = buildMergePolicy(schema);
+    MergePolicy mergePolicy = buildMergePolicy(core.getResourceLoader(), schema);
     iwc.setMergePolicy(mergePolicy);
-    MergeScheduler mergeScheduler = buildMergeScheduler(schema);
+    MergeScheduler mergeScheduler = buildMergeScheduler(core.getResourceLoader());
     iwc.setMergeScheduler(mergeScheduler);
     iwc.setInfoStream(infoStream);
 
@@ -242,7 +267,8 @@ public class SolrIndexConfig implements MapSerializable {
 
     if (mergedSegmentWarmerInfo != null) {
       // TODO: add infostream -> normal logging system (there is an issue somewhere)
-      IndexReaderWarmer warmer = schema.getResourceLoader().newInstance(mergedSegmentWarmerInfo.className, 
+      @SuppressWarnings({"rawtypes"})
+      IndexReaderWarmer warmer = core.getResourceLoader().newInstance(mergedSegmentWarmerInfo.className,
                                                                         IndexReaderWarmer.class,
                                                                         null,
                                                                         new Class[] { InfoStream.class },
@@ -257,8 +283,8 @@ public class SolrIndexConfig implements MapSerializable {
    * Builds a MergePolicy using the configured MergePolicyFactory
    * or if no factory is configured uses the configured mergePolicy PluginInfo.
    */
-  @SuppressWarnings("unchecked")
-  private MergePolicy buildMergePolicy(final IndexSchema schema) {
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  private MergePolicy buildMergePolicy(SolrResourceLoader resourceLoader, IndexSchema schema) {
 
     final String mpfClassName;
     final MergePolicyFactoryArgs mpfArgs;
@@ -270,25 +296,26 @@ public class SolrIndexConfig implements MapSerializable {
       mpfArgs = new MergePolicyFactoryArgs(mergePolicyFactoryInfo.initArgs);
     }
 
-    final SolrResourceLoader resourceLoader = schema.getResourceLoader();
     final MergePolicyFactory mpf = resourceLoader.newInstance(
         mpfClassName,
         MergePolicyFactory.class,
         NO_SUB_PACKAGES,
         new Class[] { SolrResourceLoader.class, MergePolicyFactoryArgs.class, IndexSchema.class },
-        new Object[] { resourceLoader, mpfArgs, schema });
+        new Object[] {resourceLoader, mpfArgs, schema });
 
     return mpf.getMergePolicy();
   }
 
-  private MergeScheduler buildMergeScheduler(IndexSchema schema) {
+  @SuppressWarnings({"unchecked"})
+  private MergeScheduler buildMergeScheduler(SolrResourceLoader resourceLoader) {
     String msClassName = mergeSchedulerInfo == null ? SolrIndexConfig.DEFAULT_MERGE_SCHEDULER_CLASSNAME : mergeSchedulerInfo.className;
-    MergeScheduler scheduler = schema.getResourceLoader().newInstance(msClassName, MergeScheduler.class);
+    MergeScheduler scheduler = resourceLoader.newInstance(msClassName, MergeScheduler.class);
 
     if (mergeSchedulerInfo != null) {
       // LUCENE-5080: these two setters are removed, so we have to invoke setMaxMergesAndThreads
       // if someone has them configured.
       if (scheduler instanceof ConcurrentMergeScheduler) {
+        @SuppressWarnings({"rawtypes"})
         NamedList args = mergeSchedulerInfo.initArgs.clone();
         Integer maxMergeCount = (Integer) args.remove("maxMergeCount");
         if (maxMergeCount == null) {
@@ -299,6 +326,10 @@ public class SolrIndexConfig implements MapSerializable {
           maxThreadCount = ((ConcurrentMergeScheduler) scheduler).getMaxThreadCount();
         }
         ((ConcurrentMergeScheduler)scheduler).setMaxMergesAndThreads(maxMergeCount, maxThreadCount);
+        Boolean ioThrottle = (Boolean) args.remove("ioThrottle");
+        if (ioThrottle != null && !ioThrottle) { //by-default 'enabled'
+            ((ConcurrentMergeScheduler) scheduler).disableAutoIOThrottle();
+        }
         SolrPluginUtils.invokeSetters(scheduler, args);
       } else {
         SolrPluginUtils.invokeSetters(scheduler, mergeSchedulerInfo.initArgs);

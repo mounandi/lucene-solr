@@ -18,11 +18,9 @@ package org.apache.lucene.search;
 
 
 import java.io.IOException;
-import java.util.Set;
 
 import org.apache.lucene.index.FieldInvertState;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.Term;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.util.PriorityQueue;
 
@@ -50,12 +48,12 @@ final class JustCompileSearch {
     }
 
     @Override
-    public void setScorer(Scorer scorer) {
+    public void setScorer(Scorable scorer) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
 
     @Override
-    public boolean needsScores() {
+    public ScoreMode scoreMode() {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
   }
@@ -154,6 +152,11 @@ final class JustCompileSearch {
     }
 
     @Override
+    public void visit(QueryVisitor visitor) {
+      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
+    }
+
+    @Override
     public boolean equals(Object obj) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
@@ -176,7 +179,7 @@ final class JustCompileSearch {
     }
 
     @Override
-    public int freq() {
+    public float getMaxScore(int upTo) throws IOException {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
 
@@ -194,12 +197,7 @@ final class JustCompileSearch {
   static final class JustCompileSimilarity extends Similarity {
 
     @Override
-    public SimWeight computeWeight(float boost, CollectionStatistics collectionStats, TermStatistics... termStats) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
-    public SimScorer simScorer(SimWeight stats, LeafReaderContext context) {
+    public SimScorer scorer(float boost, CollectionStatistics collectionStats, TermStatistics... termStats) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
 
@@ -236,7 +234,7 @@ final class JustCompileSearch {
     }
 
     @Override
-    public boolean needsScores() {
+    public ScoreMode scoreMode() {
       throw new UnsupportedOperationException( UNSUPPORTED_MSG );
     }
   }
@@ -248,17 +246,17 @@ final class JustCompileSearch {
     }
 
     @Override
-    public void extractTerms(Set<Term> terms) {
-      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
-    }
-
-    @Override
     public Explanation explain(LeafReaderContext context, int doc) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
 
     @Override
     public Scorer scorer(LeafReaderContext context) {
+      throw new UnsupportedOperationException(UNSUPPORTED_MSG);
+    }
+
+    @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
       throw new UnsupportedOperationException(UNSUPPORTED_MSG);
     }
 

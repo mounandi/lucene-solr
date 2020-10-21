@@ -97,13 +97,21 @@ public abstract class RangeFacet<B, G> {
 
   }
 
+  public static class Currency extends RangeFacet<String, String> {
+    public Currency(String name, String start, String end, String gap, Number before, Number after, Number between) {
+      super(name, start, end, gap, before, after, between);
+    }
+  }
+
   public static class Count {
 
     private final String value;
     private final int count;
+    @SuppressWarnings({"rawtypes"})
     private final RangeFacet rangeFacet;
 
-    public Count(String value, int count, RangeFacet rangeFacet) {
+    public Count(String value, int count,
+                 @SuppressWarnings({"rawtypes"})RangeFacet rangeFacet) {
       this.value = value;
       this.count = count;
       this.rangeFacet = rangeFacet;
@@ -117,6 +125,7 @@ public abstract class RangeFacet<B, G> {
       return count;
     }
 
+    @SuppressWarnings({"rawtypes"})
     public RangeFacet getRangeFacet() {
       return rangeFacet;
     }

@@ -21,9 +21,7 @@ import java.util.Arrays;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link SerbianNormalizationFilter}.
@@ -36,18 +34,29 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *       haircut="bald"/&gt; 
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre> 
+ * @since 5.0.0
+ * @lucene.spi {@value #NAME}
  */
-public class SerbianNormalizationFilterFactory extends TokenFilterFactory implements MultiTermAwareComponent {
+public class SerbianNormalizationFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "serbianNormalization";
+
   final String haircut;
 
   /** Creates a new SerbianNormalizationFilterFactory */
   public SerbianNormalizationFilterFactory(Map<String,String> args) {
     super(args);
 
-  this.haircut = get(args, "haircut", Arrays.asList( "bald", "regular" ), "bald");
+    this.haircut = get(args, "haircut", Arrays.asList( "bald", "regular" ), "bald");
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public SerbianNormalizationFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override
@@ -60,8 +69,7 @@ public class SerbianNormalizationFilterFactory extends TokenFilterFactory implem
   }
 
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
-
 }

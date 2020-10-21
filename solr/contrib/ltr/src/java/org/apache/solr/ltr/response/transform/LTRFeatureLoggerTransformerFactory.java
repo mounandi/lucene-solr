@@ -24,6 +24,7 @@ import java.util.Map;
 
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.Explanation;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.SolrParams;
@@ -52,7 +53,7 @@ import org.apache.solr.util.SolrPluginUtils;
  * features declared in the feature store of the current reranking model,
  * or a specified feature store.  Ex. <code>fl=id,[features store=myStore efi.user_text="ibm"]</code>
  * 
- * <h3>Parameters</h3>
+ * <h2>Parameters</h2>
  * <code>store</code> - The feature store to extract features from. If not provided it
  * will default to the features used by your reranking model.<br>
  * <code>efi.*</code> - External feature information variables required by the features
@@ -110,6 +111,7 @@ public class LTRFeatureLoggerTransformerFactory extends TransformerFactory {
   }
 
   @Override
+  @SuppressWarnings({"unchecked"})
   public void init(@SuppressWarnings("rawtypes") NamedList args) {
     super.init(args);
     threadManager = LTRThreadModule.getInstance(args);
@@ -203,7 +205,10 @@ public class LTRFeatureLoggerTransformerFactory extends TransformerFactory {
             "searcher is null");
       }
       leafContexts = searcher.getTopReaderContext().leaves();
-
+      if (threadManager != null) {
+        threadManager.setExecutor(context.getRequest().getCore().getCoreContainer().getUpdateShardHandler().getUpdateExecutor());
+      }
+      
       // Setup LTRScoringQuery
       scoringQuery = SolrQueryRequestContextUtils.getScoringQuery(req);
       docsWereNotReranked = (scoringQuery == null);
@@ -242,7 +247,7 @@ public class LTRFeatureLoggerTransformerFactory extends TransformerFactory {
       featureLogger = scoringQuery.getFeatureLogger();
 
       try {
-        modelWeight = scoringQuery.createWeight(searcher, true, 1f);
+        modelWeight = scoringQuery.createWeight(searcher, ScoreMode.COMPLETE, 1f);
       } catch (final IOException e) {
         throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, e.getMessage(), e);
       }
@@ -255,7 +260,7 @@ public class LTRFeatureLoggerTransformerFactory extends TransformerFactory {
     @Override
     public void transform(SolrDocument doc, int docid, float score)
         throws IOException {
-      implTransform(doc, docid, new Float(score));
+      implTransform(doc, docid, score);
     }
 
     @Override

@@ -18,7 +18,7 @@ package org.apache.lucene.analysis.core;
 
 
 import org.apache.lucene.analysis.util.CharTokenizer;
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.util.AttributeFactory;
 
 import java.util.Map;
@@ -40,8 +40,15 @@ import static org.apache.lucene.analysis.standard.StandardTokenizer.MAX_TOKEN_LE
  *       It is rare to need to change this
  *      else {@link CharTokenizer}::DEFAULT_MAX_TOKEN_LEN</li>
  * </ul>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class LetterTokenizerFactory extends TokenizerFactory {
+
+  /** SPI name */
+  public static final String NAME = "letter";
+
   private final int maxTokenLen;
 
   /** Creates a new LetterTokenizerFactory */
@@ -54,6 +61,11 @@ public class LetterTokenizerFactory extends TokenizerFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public LetterTokenizerFactory() {
+    throw defaultCtorException();
   }
 
   @Override

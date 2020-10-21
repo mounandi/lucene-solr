@@ -113,7 +113,7 @@ public class UpdateRequestHandler extends ContentStreamHandlerBase implements Pe
   };
 
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
     super.init(args);
 
     // Since backed by a non-thread safe Map, it should not be modifiable
@@ -133,16 +133,16 @@ public class UpdateRequestHandler extends ContentStreamHandlerBase implements Pe
     }
   }
   private Map<String ,ContentStreamLoader> pathVsLoaders = new HashMap<>();
-  protected Map<String,ContentStreamLoader> createDefaultLoaders(NamedList args) {
+  protected Map<String,ContentStreamLoader> createDefaultLoaders(@SuppressWarnings({"rawtypes"})NamedList args) {
     SolrParams p = null;
     if(args!=null) {
-      p = SolrParams.toSolrParams(args);
+      p = args.toSolrParams();
     }
     Map<String,ContentStreamLoader> registry = new HashMap<>();
     registry.put("application/xml", new XMLLoader().init(p) );
     registry.put("application/json", new JsonLoader().init(p) );
     registry.put("application/csv", new CSVLoader().init(p) );
-    registry.put("application/javabin", new JavabinLoader().init(p) );
+    registry.put("application/javabin", new JavabinLoader(instance).init(p) );
     registry.put("text/csv", registry.get("application/csv") );
     registry.put("text/xml", registry.get("application/xml") );
     registry.put("text/json", registry.get("application/json"));

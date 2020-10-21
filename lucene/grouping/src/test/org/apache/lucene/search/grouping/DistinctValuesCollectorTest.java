@@ -46,7 +46,6 @@ import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.mutable.MutableValue;
 import org.apache.lucene.util.mutable.MutableValueStr;
 
@@ -221,7 +220,7 @@ public class DistinctValuesCollectorTest extends AbstractGroupingTestCase {
 
   public void testRandom() throws Exception {
     Random random = random();
-    int numberOfRuns = TestUtil.nextInt(random, 3, 6);
+    int numberOfRuns = atLeast(1);
     for (int indexIter = 0; indexIter < numberOfRuns; indexIter++) {
       IndexContext context = createIndexContext();
       for (int searchIter = 0; searchIter < 100; searchIter++) {
@@ -246,7 +245,7 @@ public class DistinctValuesCollectorTest extends AbstractGroupingTestCase {
           System.out.println("1st pass collector class name=" + firstCollector.getClass().getName());
           System.out.println("2nd pass collector class name=" + distinctValuesCollector.getClass().getName());
           System.out.println("Search term=" + term);
-          System.out.println("1st pass groups=" + firstCollector.getTopGroups(0, false));
+          System.out.println("1st pass groups=" + firstCollector.getTopGroups(0));
           System.out.println("Expected:");      
           printGroups(expectedResult);
           System.out.println("Actual:");      
@@ -342,7 +341,7 @@ public class DistinctValuesCollectorTest extends AbstractGroupingTestCase {
   @SuppressWarnings({"unchecked","rawtypes"})
   private <T extends Comparable<Object>, R extends Comparable<Object>> DistinctValuesCollector<T, R> createDistinctCountCollector(FirstPassGroupingCollector<T> firstPassGroupingCollector,
                                                                                          String countField) throws IOException {
-    Collection<SearchGroup<T>> searchGroups = firstPassGroupingCollector.getTopGroups(0, false);
+    Collection<SearchGroup<T>> searchGroups = firstPassGroupingCollector.getTopGroups(0);
     GroupSelector<T> selector = firstPassGroupingCollector.getGroupSelector();
     if (ValueSourceGroupSelector.class.isAssignableFrom(selector.getClass())) {
       GroupSelector gs = new ValueSourceGroupSelector(new BytesRefFieldSource(countField), new HashMap<>());

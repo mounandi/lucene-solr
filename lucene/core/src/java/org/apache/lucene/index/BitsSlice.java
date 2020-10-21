@@ -16,6 +16,8 @@
  */
 package org.apache.lucene.index;
 
+import java.util.Objects;
+
 import org.apache.lucene.util.Bits;
 
 
@@ -39,10 +41,7 @@ final class BitsSlice implements Bits {
     
   @Override
   public boolean get(int doc) {
-    if (doc >= length) {
-      throw new RuntimeException("doc " + doc + " is out of bounds 0 .. " + (length-1));
-    }
-    assert doc < length: "doc=" + doc + " length=" + length;
+    Objects.checkIndex(doc, length);
     return parent.get(doc+start);
   }
 

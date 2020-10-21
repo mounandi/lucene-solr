@@ -17,12 +17,10 @@
 package org.apache.lucene.analysis.miscellaneous;
 
 
-import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
-
 import java.util.Map;
+
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link org.apache.lucene.analysis.miscellaneous.ScandinavianNormalizationFilter}.
@@ -33,9 +31,13 @@ import java.util.Map;
  *     &lt;filter class="solr.ScandinavianNormalizationFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 4.4.0
+ * @lucene.spi {@value #NAME}
  */
-public class ScandinavianNormalizationFilterFactory extends TokenFilterFactory
-    implements MultiTermAwareComponent {
+public class ScandinavianNormalizationFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "scandinavianNormalization";
 
   public ScandinavianNormalizationFilterFactory(Map<String, String> args) {
     super(args);
@@ -44,13 +46,18 @@ public class ScandinavianNormalizationFilterFactory extends TokenFilterFactory
     }
   }
 
+  /** Default ctor for compatibility with SPI */
+  public ScandinavianNormalizationFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public ScandinavianNormalizationFilter create(TokenStream input) {
     return new ScandinavianNormalizationFilter(input);
   }
 
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

@@ -30,6 +30,7 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.LuceneTestCase;
 
 /** Test that creates way, way, way too many fields */
+@LuceneTestCase.SuppressCodecs("SimpleText")
 public class TestManyFields extends LuceneTestCase {
   private static final FieldType storedTextType = new FieldType(TextField.TYPE_NOT_STORED);
   
@@ -107,7 +108,7 @@ public class TestManyFields extends LuceneTestCase {
 
     IndexReader reader = DirectoryReader.open(dir);
     IndexSearcher searcher = newSearcher(reader);
-    long totalHits = searcher.search(new TermQuery(new Term("field", "aaa")), 1).totalHits;
+    long totalHits = searcher.count(new TermQuery(new Term("field", "aaa")));
     assertEquals(n*100, totalHits);
     reader.close();
 

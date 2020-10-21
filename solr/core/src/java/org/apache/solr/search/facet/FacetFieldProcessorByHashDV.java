@@ -28,6 +28,7 @@ import org.apache.lucene.index.MultiDocValues;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.SimpleCollector;
 import org.apache.lucene.util.BitUtil;
 import org.apache.lucene.util.BytesRef;
@@ -36,13 +37,13 @@ import org.apache.solr.common.SolrException;
 import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.search.DocSetUtil;
+import org.apache.solr.search.facet.SlotAcc.SlotContext;
 
 /**
  * Facets numbers into a hash table.  The number is either a raw numeric DocValues value, or
  * a term global ordinal integer.
  * Limitations:
  * <ul>
- *   <li>doesn't handle multiValued, but could easily be added</li>
  *   <li>doesn't handle prefix, but could easily be added</li>
  *   <li>doesn't handle mincount==0 -- you're better off with an array alg</li>
  * </ul>
@@ -56,8 +57,8 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
     static final float LOAD_FACTOR = 0.7f;
 
     long[] vals;
-    int[] counts;  // maintain the counts here since we need them to tell if there was actually a value anyway
-    int[] oldToNewMapping;
+    long[] counts;  // maintain the counts here since we need them to tell if there was actually a value anyway
+    long[] oldToNewMapping;
 
     int cardinality;
     int threshold;
@@ -65,7 +66,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
     /** sz must be a power of two */
     LongCounts(int sz) {
       vals = new long[sz];
-      counts = new int[sz];
+      counts = new long[sz];
       threshold = (int) (sz * LOAD_FACTOR);
     }
 
@@ -94,7 +95,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
 
       int h = hash(val);
       for (int slot = h & (vals.length-1);  ;slot = (slot + ((h>>7)|1)) & (vals.length-1)) {
-        int count = counts[slot];
+        long count = counts[slot];
         if (count == 0) {
           counts[slot] = 1;
           vals[slot] = val;
@@ -110,14 +111,14 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
 
     protected void rehash() {
       long[] oldVals = vals;
-      int[] oldCounts = counts;  // after retrieving the count, this array is reused as a mapping to new array
+      long[] oldCounts = counts;  // after retrieving the count, this array is reused as a mapping to new array
       int newCapacity = vals.length << 1;
       vals = new long[newCapacity];
-      counts = new int[newCapacity];
+      counts = new long[newCapacity];
       threshold = (int) (newCapacity * LOAD_FACTOR);
 
       for (int i=0; i<oldVals.length; i++) {
-        int count = oldCounts[i];
+        long count = oldCounts[i];
         if (count == 0) {
           oldCounts[i] = -1;
           continue;
@@ -161,6 +162,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
 
     /** To be returned in "buckets"/"val" */
     @Override
+    @SuppressWarnings({"rawtypes"})
     public Comparable bitsToValue(long globalOrd) {
       BytesRef bytesRef = lookupOrdFunction.apply((int) globalOrd);
       // note FacetFieldProcessorByArray.findTopSlots also calls SchemaFieldType.toObject
@@ -168,16 +170,19 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
     }
 
     @Override
+    @SuppressWarnings({"rawtypes"})
     public String formatValue(Comparable val) {
       return (String) val;
     }
 
     @Override
+    @SuppressWarnings({"rawtypes"})
     protected Comparable parseStr(String rawval) throws ParseException {
       throw new UnsupportedOperationException();
     }
 
     @Override
+    @SuppressWarnings({"rawtypes"})
     protected Comparable parseAndAddGap(Comparable value, String gap) throws ParseException {
       throw new UnsupportedOperationException();
     }
@@ -198,7 +203,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
           getClass()+" doesn't support prefix"); // yet, but it could
     }
-    FieldInfo fieldInfo = fcontext.searcher.getSlowAtomicReader().getFieldInfos().fieldInfo(sf.getName());
+    FieldInfo fieldInfo = fcontext.searcher.getFieldInfos().fieldInfo(sf.getName());
     if (fieldInfo != null &&
         fieldInfo.getDocValuesType() != DocValuesType.NUMERIC &&
         fieldInfo.getDocValuesType() != DocValuesType.SORTED &&
@@ -260,7 +265,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
 
     indexOrderAcc = new SlotAcc(fcontext) {
       @Override
-      public void collect(int doc, int slot) throws IOException {
+      public void collect(int doc, int slot, IntFunction<SlotContext> slotContext) throws IOException {
       }
 
       @Override
@@ -284,14 +289,14 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
       }
     };
 
-    countAcc = new CountSlotAcc(fcontext) {
+    countAcc = new SlotAcc.CountSlotAcc(fcontext) {
       @Override
-      public void incrementCount(int slot, int count) {
+      public void incrementCount(int slot, long count) {
         throw new UnsupportedOperationException();
       }
 
       @Override
-      public int getCount(int slot) {
+      public long getCount(int slot) {
         return table.counts[slot];
       }
 
@@ -306,13 +311,13 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
       }
 
       @Override
-      public void collect(int doc, int slot) throws IOException {
+      public void collect(int doc, int slot, IntFunction<SlotContext> slotContext) throws IOException {
         throw new UnsupportedOperationException();
       }
 
       @Override
       public int compare(int slotA, int slotB) {
-        return Integer.compare( table.counts[slotA], table.counts[slotB] );
+        return Long.compare( table.counts[slotA], table.counts[slotB] );
       }
 
       @Override
@@ -346,7 +351,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
           SortedDocValues docValues = globalDocValues; // this segment/leaf. NN
           LongValues toGlobal = LongValues.IDENTITY; // this segment to global ordinal. NN
 
-          @Override public boolean needsScores() { return false; }
+          @Override public ScoreMode scoreMode() { return ScoreMode.COMPLETE_NO_SCORES; }
 
           @Override
           protected void doSetNextReader(LeafReaderContext ctx) throws IOException {
@@ -360,10 +365,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
 
           @Override
           public void collect(int segDoc) throws IOException {
-            if (segDoc > docValues.docID()) {
-              docValues.advance(segDoc);
-            }
-            if (segDoc == docValues.docID()) {
+            if (docValues.advanceExact(segDoc)) {
               long val = toGlobal.get(docValues.ordValue());
               collectValFirstPhase(segDoc, val);
             }
@@ -376,7 +378,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
         DocSetUtil.collectSortedDocSet(fcontext.base, fcontext.searcher.getIndexReader(), new SimpleCollector() {
           SortedNumericDocValues values = null; //NN
 
-          @Override public boolean needsScores() { return false; }
+          @Override public ScoreMode scoreMode() { return ScoreMode.COMPLETE_NO_SCORES; }
 
           @Override
           protected void doSetNextReader(LeafReaderContext ctx) throws IOException {
@@ -386,13 +388,17 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
 
           @Override
           public void collect(int segDoc) throws IOException {
-            if (segDoc > values.docID()) {
-              values.advance(segDoc);
-            }
-            if (segDoc == values.docID()) {
-              for (int i = 0; i < values.docValueCount(); i++) {
-                collectValFirstPhase(segDoc, values.nextValue());
+            if (values.advanceExact(segDoc)) {
+              long l = values.nextValue(); // This document must have at least one value
+              collectValFirstPhase(segDoc, l);
+              for (int i = 1, count = values.docValueCount(); i < count; i++) {
+                long lnew = values.nextValue();
+                if (lnew != l) { // Skip the value if it's equal to the last one, we don't want to double-count it
+                  collectValFirstPhase(segDoc, lnew);
+                }
+                l = lnew;
               }
+
             }
           }
         });
@@ -400,7 +406,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
         DocSetUtil.collectSortedDocSet(fcontext.base, fcontext.searcher.getIndexReader(), new SimpleCollector() {
           NumericDocValues values = null; //NN
 
-          @Override public boolean needsScores() { return false; }
+          @Override public ScoreMode scoreMode() { return ScoreMode.COMPLETE_NO_SCORES; }
 
           @Override
           protected void doSetNextReader(LeafReaderContext ctx) throws IOException {
@@ -410,10 +416,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
 
           @Override
           public void collect(int segDoc) throws IOException {
-            if (segDoc > values.docID()) {
-              values.advance(segDoc);
-            }
-            if (segDoc == values.docID()) {
+            if (values.advanceExact(segDoc)) {
               collectValFirstPhase(segDoc, values.longValue());
             }
           }
@@ -428,8 +431,20 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
     // Our countAcc is virtual, so this is not needed:
     // countAcc.incrementCount(slot, 1);
 
-    super.collectFirstPhase(segDoc, slot);
+    super.collectFirstPhase(segDoc, slot, slotContext);
   }
+
+  /**
+   * SlotContext to use during all {@link SlotAcc} collection.
+   *
+   * This avoids a memory allocation for each invocation of collectValFirstPhase.
+   */
+  private IntFunction<SlotContext> slotContext = (slotNum) -> {
+    long val = table.vals[slotNum];
+    @SuppressWarnings({"rawtypes"})
+    Comparable value = calc.bitsToValue(val);
+    return new SlotContext(sf.getType().getFieldQuery(null, sf, calc.formatValue(value)));
+  };
 
   private void doRehash(LongCounts table) {
     if (collectAcc == null && allBucketsAcc == null) return;
@@ -445,7 +460,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
     }
 
     final int finalNumSlots = numSlots;
-    final int[] mapping = table.oldToNewMapping;
+    final long[] mapping = table.oldToNewMapping;
 
     SlotAcc.Resizer resizer = new SlotAcc.Resizer() {
       @Override
@@ -456,7 +471,7 @@ class FacetFieldProcessorByHashDV extends FacetFieldProcessor {
       @Override
       public int getNewSlot(int oldSlot) {
         if (oldSlot < mapping.length) {
-          return mapping[oldSlot];
+          return (int) mapping[oldSlot];
         }
         if (oldSlot == oldAllBucketsSlot) {
           return allBucketsSlot;

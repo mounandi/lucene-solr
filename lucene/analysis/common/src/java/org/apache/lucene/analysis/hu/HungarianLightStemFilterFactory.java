@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.hu;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.hu.HungarianLightStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link HungarianLightStemFilter}. 
@@ -33,8 +32,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.HungarianLightStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
 public class HungarianLightStemFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "hungarianLightStem";
   
   /** Creates a new HungarianLightStemFilterFactory */
   public HungarianLightStemFilterFactory(Map<String,String> args) {
@@ -44,6 +48,11 @@ public class HungarianLightStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public HungarianLightStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new HungarianLightStemFilter(input);

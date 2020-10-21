@@ -89,7 +89,7 @@ public class HyphenationTree extends TernaryTree implements PatternConsumer {
     StringBuilder buf = new StringBuilder();
     byte v = vspace.get(k++);
     while (v != 0) {
-      char c = (char) ((v >>> 4) - 1 + '0');
+      char c = (char) (((v & 0xf0 )>>> 4) - 1 + '0');
       buf.append(c);
       c = (char) (v & 0x0f);
       if (c == 0) {
@@ -151,7 +151,7 @@ public class HyphenationTree extends TernaryTree implements PatternConsumer {
     StringBuilder buf = new StringBuilder();
     byte v = vspace.get(k++);
     while (v != 0) {
-      char c = (char) ((v >>> 4) - 1);
+      char c = (char) (((v & 0xf0 )>>> 4) - 1);
       buf.append(c);
       c = (char) (v & 0x0f);
       if (c == 0) {
@@ -186,7 +186,7 @@ public class HyphenationTree extends TernaryTree implements PatternConsumer {
    * patterns for languages such as English range from 4000 to 10000. Thus,
    * doing thousands of string comparisons for each word to hyphenate would be
    * really slow without the tree. The tradeoff is memory, but using a ternary
-   * tree instead of a trie, almost halves the the memory used by Lout or TeX.
+   * tree instead of a trie, almost halves the memory used by Lout or TeX.
    * It's also faster than using a hash table
    * </p>
    * 

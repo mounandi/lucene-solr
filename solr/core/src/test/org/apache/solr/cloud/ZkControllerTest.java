@@ -16,28 +16,38 @@
  */
 package org.apache.solr.cloud;
 
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.apache.solr.SolrTestCaseJ4;
-import org.apache.solr.common.cloud.*;
+import org.apache.solr.common.cloud.ClusterProperties;
+import org.apache.solr.common.cloud.SolrZkClient;
+import org.apache.solr.common.cloud.ZkConfigManager;
+import org.apache.solr.common.cloud.ZkNodeProps;
+import org.apache.solr.common.cloud.ZkStateReader;
+import org.apache.solr.common.params.CollectionParams;
 import org.apache.solr.common.util.Utils;
-import org.apache.solr.core.CloudConfig;
-import org.apache.solr.core.CoreContainer;
-import org.apache.solr.core.CoreDescriptor;
-import org.apache.solr.core.SolrXmlConfig;
+import org.apache.solr.core.*;
 import org.apache.solr.handler.admin.CoreAdminHandler;
 import org.apache.solr.handler.component.HttpShardHandlerFactory;
 import org.apache.solr.update.UpdateShardHandler;
 import org.apache.solr.update.UpdateShardHandlerConfig;
+import org.apache.solr.util.LogLevel;
 import org.apache.zookeeper.CreateMode;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
+
+import static org.apache.solr.common.cloud.ZkStateReader.COLLECTION_PROP;
+import static org.apache.solr.common.cloud.ZkStateReader.SHARD_ID_PROP;
+import static org.apache.solr.common.params.CollectionParams.CollectionAction.ADDREPLICA;
 
 @Slow
 @SolrTestCaseJ4.SuppressSSL
@@ -80,14 +90,11 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
                  ZkController.generateNodeName("foo-bar", "77", "/solr/sub_dir/"));
 
     // setup a SolrZkClient to do some getBaseUrlForNodeName testing
-    String zkDir = createTempDir("zkData").toFile().getAbsolutePath();
+    Path zkDir = createTempDir("zkData");
 
     ZkTestServer server = new ZkTestServer(zkDir);
     try {
       server.run();
-
-      AbstractZkTestCase.tryCleanSolrZkNode(server.getZkHost());
-      AbstractZkTestCase.makeSolrZkNode(server.getZkHost());
 
       try (SolrZkClient client = new SolrZkClient(server.getZkAddress(), TIMEOUT)) {
 
@@ -162,15 +169,12 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
 
   @Test
   public void testReadConfigName() throws Exception {
-    String zkDir = createTempDir("zkData").toFile().getAbsolutePath();
+    Path zkDir = createTempDir("zkData");
     CoreContainer cc = null;
 
     ZkTestServer server = new ZkTestServer(zkDir);
     try {
       server.run();
-
-      AbstractZkTestCase.tryCleanSolrZkNode(server.getZkHost());
-      AbstractZkTestCase.makeSolrZkNode(server.getZkHost());
 
       SolrZkClient zkClient = new SolrZkClient(server.getZkAddress(), TIMEOUT);
       String actualConfigName = "firstConfig";
@@ -189,15 +193,7 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
       cc = getCoreContainer();
 
       CloudConfig cloudConfig = new CloudConfig.CloudConfigBuilder("127.0.0.1", 8983, "solr").build();
-      ZkController zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig,
-          new CurrentCoreDescriptorProvider() {
-            
-            @Override
-            public List<CoreDescriptor> getCurrentDescriptors() {
-              // do nothing
-              return null;
-            }
-          });
+      ZkController zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig, () -> null);
       try {
         String configName = zkController.getZkStateReader().readConfigName(COLLECTION_NAME);
         assertEquals(configName, actualConfigName);
@@ -214,29 +210,19 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
   }
 
   public void testGetHostName() throws Exception {
-    String zkDir = createTempDir("zkData").toFile().getAbsolutePath();
+    Path zkDir = createTempDir("zkData");
     CoreContainer cc = null;
 
     ZkTestServer server = new ZkTestServer(zkDir);
     try {
       server.run();
 
-      AbstractZkTestCase.tryCleanSolrZkNode(server.getZkHost());
-      AbstractZkTestCase.makeSolrZkNode(server.getZkHost());
-
       cc = getCoreContainer();
       ZkController zkController = null;
 
       try {
         CloudConfig cloudConfig = new CloudConfig.CloudConfigBuilder("127.0.0.1", 8983, "solr").build();
-        zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig, new CurrentCoreDescriptorProvider() {
-
-          @Override
-          public List<CoreDescriptor> getCurrentDescriptors() {
-            // do nothing
-            return null;
-          }
-        });
+        zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig, () -> null);
       } catch (IllegalArgumentException e) {
         fail("ZkController did not normalize host name correctly");
       } finally {
@@ -251,58 +237,78 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
     }
   }
 
-  @AwaitsFix(bugUrl = "https://issues.apache.org/jira/browse/SOLR-7736")
+  @Slow
+  @LogLevel(value = "org.apache.solr.cloud=DEBUG;org.apache.solr.cloud.overseer=DEBUG")
   public void testPublishAndWaitForDownStates() throws Exception  {
-    String zkDir = createTempDir("testPublishAndWaitForDownStates").toFile().getAbsolutePath();
+
+    /*
+    This test asserts that if zkController.publishAndWaitForDownStates uses only core name to check if all local
+    cores are down then the method will return immediately but if it uses coreNodeName (as it does after SOLR-6665 then
+    the method will timeout).
+    We setup the cluster state in such a way that two replicas with same core name exist on non-existent nodes
+    and core container also has a dummy core that has the same core name. The publishAndWaitForDownStates before SOLR-6665
+    would only check the core names and therefore return immediately but after SOLR-6665 it should time out.
+     */
+
+    assumeWorkingMockito();
+    final String collectionName = "testPublishAndWaitForDownStates";
+    Path zkDir = createTempDir(collectionName);
     CoreContainer cc = null;
+
+    String nodeName = "127.0.0.1:8983_solr";
 
     ZkTestServer server = new ZkTestServer(zkDir);
     try {
       server.run();
 
-      AbstractZkTestCase.tryCleanSolrZkNode(server.getZkHost());
-      AbstractZkTestCase.makeSolrZkNode(server.getZkHost());
-
-      cc = getCoreContainer();
+      AtomicReference<ZkController> zkControllerRef = new AtomicReference<>();
+      cc = new MockCoreContainer()  {
+        @Override
+        public List<CoreDescriptor> getCoreDescriptors() {
+          CoreDescriptor descriptor = new CoreDescriptor(collectionName, TEST_PATH(), Collections.emptyMap(), new Properties(), zkControllerRef.get());
+          // non-existent coreNodeName, this will cause zkController.publishAndWaitForDownStates to wait indefinitely
+          // when using coreNodeName but usage of core name alone will return immediately
+          descriptor.getCloudDescriptor().setCoreNodeName("core_node0");
+          return Collections.singletonList(descriptor);
+        }
+      };
       ZkController zkController = null;
 
       try {
         CloudConfig cloudConfig = new CloudConfig.CloudConfigBuilder("127.0.0.1", 8983, "solr").build();
-        zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig, new CurrentCoreDescriptorProvider() {
+        zkController = new ZkController(cc, server.getZkAddress(), TIMEOUT, cloudConfig, () -> null);
+        zkControllerRef.set(zkController);
 
-          @Override
-          public List<CoreDescriptor> getCurrentDescriptors() {
-            // do nothing
-            return null;
-          }
-        });
+        zkController.getZkClient().makePath(ZkStateReader.getCollectionPathRoot(collectionName), new byte[0], CreateMode.PERSISTENT, true);
 
-        HashMap<String, DocCollection> collectionStates = new HashMap<>();
-        HashMap<String, Replica> replicas = new HashMap<>();
-        // add two replicas with the same core name but one of them should be on a different node
-        // than this ZkController instance
-        for (int i=1; i<=2; i++)  {
-          Replica r = new Replica("core_node" + i,
-              map(ZkStateReader.STATE_PROP, i == 1 ? "active" : "down",
-              ZkStateReader.NODE_NAME_PROP, i == 1 ? "127.0.0.1:8983_solr" : "non_existent_host",
-              ZkStateReader.CORE_NAME_PROP, "collection1"));
-          replicas.put("core_node" + i, r);
-        }
-        HashMap<String, Object> sliceProps = new HashMap<>();
-        sliceProps.put("state", Slice.State.ACTIVE.toString());
-        Slice slice = new Slice("shard1", replicas, sliceProps);
-        DocCollection c = new DocCollection("testPublishAndWaitForDownStates", map("shard1", slice), Collections.emptyMap(), DocRouter.DEFAULT);
-        ClusterState state = new ClusterState(0, Collections.emptySet(), map("testPublishAndWaitForDownStates", c));
-        byte[] bytes = Utils.toJSON(state);
-        zkController.getZkClient().makePath(ZkStateReader.getCollectionPath("testPublishAndWaitForDownStates"), bytes, CreateMode.PERSISTENT, true);
+        ZkNodeProps m = new ZkNodeProps(Overseer.QUEUE_OPERATION,
+            CollectionParams.CollectionAction.CREATE.toLower(), ZkStateReader.NODE_NAME_PROP, nodeName, ZkStateReader.NUM_SHARDS_PROP, "1",
+            "name", collectionName);
+        zkController.getOverseerJobQueue().offer(Utils.toJSON(m));
 
-        zkController.getZkStateReader().forceUpdateCollection("testPublishAndWaitForDownStates");
-        assertTrue(zkController.getZkStateReader().getClusterState().hasCollection("testPublishAndWaitForDownStates"));
-        assertNotNull(zkController.getZkStateReader().getClusterState().getCollection("testPublishAndWaitForDownStates"));
+        HashMap<String, Object> propMap = new HashMap<>();
+        propMap.put(Overseer.QUEUE_OPERATION, ADDREPLICA.toLower());
+        propMap.put(COLLECTION_PROP, collectionName);
+        propMap.put(SHARD_ID_PROP, "shard1");
+        propMap.put(ZkStateReader.NODE_NAME_PROP, "non_existent_host1");
+        propMap.put(ZkStateReader.CORE_NAME_PROP, collectionName);
+        propMap.put(ZkStateReader.STATE_PROP, "active");
+        zkController.getOverseerJobQueue().offer(Utils.toJSON(propMap));
+
+        propMap = new HashMap<>();
+        propMap.put(Overseer.QUEUE_OPERATION, ADDREPLICA.toLower());
+        propMap.put(COLLECTION_PROP, collectionName);
+        propMap.put(SHARD_ID_PROP, "shard1");
+        propMap.put(ZkStateReader.NODE_NAME_PROP, "non_existent_host2");
+        propMap.put(ZkStateReader.CORE_NAME_PROP, collectionName);
+        propMap.put(ZkStateReader.STATE_PROP, "down");
+        zkController.getOverseerJobQueue().offer(Utils.toJSON(propMap));
+
+        zkController.getZkStateReader().forciblyRefreshAllClusterStateSlow();
 
         long now = System.nanoTime();
-        long timeout = now + TimeUnit.NANOSECONDS.convert(ZkController.WAIT_DOWN_STATES_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        zkController.publishAndWaitForDownStates();
+        long timeout = now + TimeUnit.NANOSECONDS.convert(5, TimeUnit.SECONDS);
+        zkController.publishAndWaitForDownStates(5);
         assertTrue("The ZkController.publishAndWaitForDownStates should have timed out but it didn't", System.nanoTime() >= timeout);
       } finally {
         if (zkController != null)
@@ -329,8 +335,10 @@ public class ZkControllerTest extends SolrTestCaseJ4 {
     UpdateShardHandler updateShardHandler = new UpdateShardHandler(UpdateShardHandlerConfig.DEFAULT);
 
     public MockCoreContainer() {
-      super(SolrXmlConfig.fromString(null, "<solr/>"));
-      this.shardHandlerFactory = new HttpShardHandlerFactory();
+      super(SolrXmlConfig.fromString(TEST_PATH(), "<solr/>"));
+      HttpShardHandlerFactory httpShardHandlerFactory = new HttpShardHandlerFactory();
+      httpShardHandlerFactory.init(new PluginInfo("shardHandlerFactory", Collections.emptyMap()));
+      this.shardHandlerFactory = httpShardHandlerFactory;
       this.coreAdminHandler = new CoreAdminHandler();
     }
 

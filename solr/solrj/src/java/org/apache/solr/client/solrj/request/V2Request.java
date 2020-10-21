@@ -17,34 +17,39 @@
 
 package org.apache.solr.client.solrj.request;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.Collection;
-import java.util.Collections;
+import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.commons.io.IOUtils;
+import org.apache.solr.client.solrj.ResponseParser;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.response.V2Response;
-import org.apache.solr.common.SolrException;
+import org.apache.solr.common.MapWriter;
 import org.apache.solr.common.params.SolrParams;
-import org.apache.solr.common.util.ContentStream;
-import org.apache.solr.common.util.ContentStreamBase;
+import org.apache.solr.common.util.JavaBinCodec;
 import org.apache.solr.common.util.Utils;
 
-public class V2Request extends SolrRequest<V2Response> {
+import static org.apache.solr.common.params.CommonParams.JAVABIN_MIME;
+import static org.apache.solr.common.params.CommonParams.JSON_MIME;
+
+public class V2Request extends SolrRequest<V2Response> implements MapWriter {
   //only for debugging purposes
   public static final ThreadLocal<AtomicLong> v2Calls = new ThreadLocal<>();
   static final Pattern COLL_REQ_PATTERN = Pattern.compile("/(c|collections)/([^/])+/(?!shards)");
-  private InputStream payload;
+  private Object payload;
   private SolrParams solrParams;
   public final boolean useBinary;
   private String collection;
+  private String mimeType;
+  private boolean forceV2 = false;
   private boolean isPerCollectionRequest = false;
+  private ResponseParser parser;
 
   private V2Request(METHOD m, String resource, boolean useBinary) {
     super(m, resource);
@@ -57,28 +62,47 @@ public class V2Request extends SolrRequest<V2Response> {
 
   }
 
+  public boolean isForceV2() {
+    return forceV2;
+  }
+
   @Override
   public SolrParams getParams() {
     return solrParams;
   }
 
   @Override
-  public Collection<ContentStream> getContentStreams() throws IOException {
+  public RequestWriter.ContentWriter getContentWriter(String s) {
     if (v2Calls.get() != null) v2Calls.get().incrementAndGet();
-    if (payload != null) {
-      return Collections.singleton(new ContentStreamBase() {
-        @Override
-        public InputStream getStream() throws IOException {
-          return payload;
-        }
-
-        @Override
-        public String getContentType() {
-          return useBinary ? "application/javabin" : "application/json";
-        }
-      });
+    if (payload == null) return null;
+    if (payload instanceof String) {
+      return new RequestWriter.StringPayloadContentWriter((String) payload, JSON_MIME);
     }
-    return null;
+    return new RequestWriter.ContentWriter() {
+      @Override
+      public void write(OutputStream os) throws IOException {
+        if (payload instanceof ByteBuffer) {
+          ByteBuffer b = (ByteBuffer) payload;
+          os.write(b.array(), b.arrayOffset(), b.limit());
+          return;
+        }
+        if (payload instanceof InputStream) {
+          IOUtils.copy((InputStream) payload, os);
+          return;
+        }
+        if (useBinary) {
+          new JavaBinCodec().marshal(payload, os);
+        } else {
+          Utils.writeJson(payload, os, false);
+        }
+      }
+
+      @Override
+      public String getContentType() {
+        if (mimeType != null) return mimeType;
+        return useBinary ? JAVABIN_MIME : JSON_MIME;
+      }
+    };
   }
 
   public boolean isPerCollectionRequest() {
@@ -95,12 +119,35 @@ public class V2Request extends SolrRequest<V2Response> {
     return new V2Response();
   }
 
+  @Override
+  public void writeMap(EntryWriter ew) throws IOException {
+    ew.put("method", getMethod().toString());
+    ew.put("path", getPath());
+    ew.putIfNotNull("params", solrParams);
+    ew.putIfNotNull("command", payload);
+  }
+
+  @Override
+  public ResponseParser getResponseParser() {
+    if (parser != null) return parser;
+    return super.getResponseParser();
+  }
+
+  @Override
+  public String getRequestType() {
+    return SolrRequestType.ADMIN.toString();
+  }
+
   public static class Builder {
     private String resource;
     private METHOD method = METHOD.GET;
     private Object payload;
     private SolrParams params;
     private boolean useBinary = false;
+
+    private boolean forceV2EndPoint = false;
+    private ResponseParser parser;
+    private String mimeType;
 
     /**
      * Create a Builder object based on the provided resource.
@@ -119,13 +166,22 @@ public class V2Request extends SolrRequest<V2Response> {
     }
 
     /**
+     * Only for testing. It's always true otherwise
+     */
+    public Builder forceV2(boolean flag) {
+      forceV2EndPoint = flag;
+      return this;
+    }
+
+    /**
      * Set payload for request.
+     *
      * @param payload as UTF-8 String
      * @return builder object
      */
     public Builder withPayload(String payload) {
       if (payload != null) {
-        this.payload = new ByteArrayInputStream(payload.getBytes(StandardCharsets.UTF_8));
+        this.payload = payload;
       }
       return this;
     }
@@ -135,10 +191,6 @@ public class V2Request extends SolrRequest<V2Response> {
       return this;
     }
 
-    public Builder withPayload(InputStream payload) {
-      this.payload = payload;
-      return this;
-    }
 
     public Builder withParams(SolrParams params) {
       this.params = params;
@@ -150,23 +202,25 @@ public class V2Request extends SolrRequest<V2Response> {
       return this;
     }
 
+    public Builder withResponseParser(ResponseParser parser) {
+      this.parser = parser;
+      return this;
+    }
+
+    public Builder withMimeType(String mimeType) {
+      this.mimeType = mimeType;
+      return this;
+
+    }
+
     public V2Request build() {
-      try {
-        V2Request v2Request = new V2Request(method, resource, useBinary);
-        v2Request.solrParams = params;
-        InputStream is = null;
-        if (payload != null) {
-          if (payload instanceof InputStream) is = (InputStream) payload;
-          else if (useBinary) is = Utils.toJavabin(payload);
-          else is = new ByteArrayInputStream(Utils.toJSON(payload));
-        }
-        v2Request.payload = is;
-        return v2Request;
-      } catch (IOException e) {
-        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
-      }
-
-
+      V2Request v2Request = new V2Request(method, resource, useBinary);
+      v2Request.solrParams = params;
+      v2Request.payload = payload;
+      v2Request.forceV2 = forceV2EndPoint;
+      v2Request.mimeType = mimeType;
+      v2Request.parser = parser;
+      return v2Request;
     }
   }
 }

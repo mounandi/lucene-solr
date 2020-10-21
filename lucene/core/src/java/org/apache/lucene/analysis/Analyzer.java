@@ -23,6 +23,7 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
@@ -63,23 +64,23 @@ import org.apache.lucene.util.Version;
  * <p>
  * For some concrete implementations bundled with Lucene, look in the analysis modules:
  * <ul>
- *   <li><a href="{@docRoot}/../analyzers-common/overview-summary.html">Common</a>:
+ *   <li><a href="{@docRoot}/../analysis/common/overview-summary.html">Common</a>:
  *       Analyzers for indexing content in different languages and domains.
- *   <li><a href="{@docRoot}/../analyzers-icu/overview-summary.html">ICU</a>:
+ *   <li><a href="{@docRoot}/../analysis/icu/overview-summary.html">ICU</a>:
  *       Exposes functionality from ICU to Apache Lucene. 
- *   <li><a href="{@docRoot}/../analyzers-kuromoji/overview-summary.html">Kuromoji</a>:
+ *   <li><a href="{@docRoot}/../analysis/kuromoji/overview-summary.html">Kuromoji</a>:
  *       Morphological analyzer for Japanese text.
- *   <li><a href="{@docRoot}/../analyzers-morfologik/overview-summary.html">Morfologik</a>:
+ *   <li><a href="{@docRoot}/../analysis/morfologik/overview-summary.html">Morfologik</a>:
  *       Dictionary-driven lemmatization for the Polish language.
- *   <li><a href="{@docRoot}/../analyzers-phonetic/overview-summary.html">Phonetic</a>:
+ *   <li><a href="{@docRoot}/../analysis/phonetic/overview-summary.html">Phonetic</a>:
  *       Analysis for indexing phonetic signatures (for sounds-alike search).
- *   <li><a href="{@docRoot}/../analyzers-smartcn/overview-summary.html">Smart Chinese</a>:
+ *   <li><a href="{@docRoot}/../analysis/smartcn/overview-summary.html">Smart Chinese</a>:
  *       Analyzer for Simplified Chinese, which indexes words.
- *   <li><a href="{@docRoot}/../analyzers-stempel/overview-summary.html">Stempel</a>:
+ *   <li><a href="{@docRoot}/../analysis/stempel/overview-summary.html">Stempel</a>:
  *       Algorithmic Stemmer for the Polish Language.
- *   <li><a href="{@docRoot}/../analyzers-uima/overview-summary.html">UIMA</a>: 
- *       Analysis integration with Apache UIMA. 
  * </ul>
+ *
+ * @since 3.1
  */
 public abstract class Analyzer implements Closeable {
 
@@ -93,7 +94,7 @@ public abstract class Analyzer implements Closeable {
    * Create a new Analyzer, reusing the same set of components per-thread
    * across calls to {@link #tokenStream(String, Reader)}. 
    */
-  public Analyzer() {
+  protected Analyzer() {
     this(GLOBAL_REUSE_STRATEGY);
   }
 
@@ -102,10 +103,10 @@ public abstract class Analyzer implements Closeable {
    * <p>
    * NOTE: if you just want to reuse on a per-field basis, it's easier to
    * use a subclass of {@link AnalyzerWrapper} such as 
-   * <a href="{@docRoot}/../analyzers-common/org/apache/lucene/analysis/miscellaneous/PerFieldAnalyzerWrapper.html">
-   * PerFieldAnalyerWrapper</a> instead.
+   * <a href="{@docRoot}/../analysis/common/org/apache/lucene/analysis/miscellaneous/PerFieldAnalyzerWrapper.html">
+   * PerFieldAnalyzerWrapper</a> instead.
    */
-  public Analyzer(ReuseStrategy reuseStrategy) {
+  protected Analyzer(ReuseStrategy reuseStrategy) {
     this.reuseStrategy = reuseStrategy;
   }
 
@@ -357,16 +358,16 @@ public abstract class Analyzer implements Closeable {
 
   /**
    * This class encapsulates the outer components of a token stream. It provides
-   * access to the source ({@link Tokenizer}) and the outer end (sink), an
+   * access to the source (a {@link Reader} {@link Consumer} and the outer end (sink), an
    * instance of {@link TokenFilter} which also serves as the
    * {@link TokenStream} returned by
    * {@link Analyzer#tokenStream(String, Reader)}.
    */
-  public static class TokenStreamComponents {
+  public static final class TokenStreamComponents {
     /**
      * Original source of the tokens.
      */
-    protected final Tokenizer source;
+    protected final Consumer<Reader> source;
     /**
      * Sink tokenstream, such as the outer tokenfilter decorating
      * the chain. This can be the source if there are no filters.
@@ -380,25 +381,30 @@ public abstract class Analyzer implements Closeable {
      * Creates a new {@link TokenStreamComponents} instance.
      * 
      * @param source
-     *          the analyzer's tokenizer
+     *          the source to set the reader on
      * @param result
      *          the analyzer's resulting token stream
      */
-    public TokenStreamComponents(final Tokenizer source,
+    public TokenStreamComponents(final Consumer<Reader> source,
         final TokenStream result) {
       this.source = source;
       this.sink = result;
     }
-    
+
     /**
-     * Creates a new {@link TokenStreamComponents} instance.
-     * 
-     * @param source
-     *          the analyzer's tokenizer
+     * Creates a new {@link TokenStreamComponents} instance
+     * @param tokenizer the analyzer's Tokenizer
+     * @param result    the analyzer's resulting token stream
      */
-    public TokenStreamComponents(final Tokenizer source) {
-      this.source = source;
-      this.sink = source;
+    public TokenStreamComponents(final Tokenizer tokenizer, final TokenStream result) {
+      this(tokenizer::setReader, result);
+    }
+
+    /**
+     * Creates a new {@link TokenStreamComponents} from a Tokenizer
+     */
+    public TokenStreamComponents(final Tokenizer tokenizer) {
+      this(tokenizer::setReader, tokenizer);
     }
 
     /**
@@ -408,8 +414,8 @@ public abstract class Analyzer implements Closeable {
      * @param reader
      *          a reader to reset the source component
      */
-    protected void setReader(final Reader reader) {
-      source.setReader(reader);
+    private void setReader(final Reader reader) {
+      source.accept(reader);
     }
 
     /**
@@ -422,11 +428,9 @@ public abstract class Analyzer implements Closeable {
     }
 
     /**
-     * Returns the component's {@link Tokenizer}
-     *
-     * @return Component's {@link Tokenizer}
+     * Returns the component's source
      */
-    public Tokenizer getTokenizer() {
+    public Consumer<Reader> getSource() {
       return source;
     }
   }
@@ -436,9 +440,9 @@ public abstract class Analyzer implements Closeable {
    * {@link Analyzer#tokenStream(String, java.io.Reader)}.
    */
   public static abstract class ReuseStrategy {
-
     /** Sole constructor. (For invocation by subclass constructors, typically implicit.) */
-    public ReuseStrategy() {}
+    // Explicitly declared so that we have non-empty javadoc
+    protected ReuseStrategy() {}
 
     /**
      * Gets the reusable TokenStreamComponents for the field with the given name.

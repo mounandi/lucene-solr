@@ -38,8 +38,8 @@ import java.util.Locale;
  * </p>
  * <p>
  * The default selection behavior is to mutate both those fields that don't match
- * a schema field, as well as those fields that match a schema field with a field 
- * type that uses class solr.TrieFloatField.
+ * a schema field, as well as those fields that match a schema field with a float
+ * field type.
  * </p>
  * <p>
  * If all values are parseable as float (or are already Float), then the field
@@ -64,6 +64,7 @@ import java.util.Locale;
  * See {@link Locale} for a description of acceptable language, country (optional)
  * and variant (optional) values, joined with underscore(s).
  * </p>
+ * @since 4.4.0
  */
 public class ParseFloatFieldUpdateProcessorFactory extends ParseNumericFieldUpdateProcessorFactory {
 
@@ -102,8 +103,10 @@ public class ParseFloatFieldUpdateProcessorFactory extends ParseNumericFieldUpda
         ParsePosition pos = new ParsePosition(0);
         Number number = numberFormat.get().parse(stringVal, pos);
         if (pos.getIndex() != stringVal.length()) {
-          log.debug("value '{}' is not parseable, thus not mutated; unparsed chars: '{}'",
-              new Object[] { srcVal, stringVal.substring(pos.getIndex())});
+          if (log.isDebugEnabled()) {
+            log.debug("value '{}' is not parseable, thus not mutated; unparsed chars: '{}'",
+                new Object[]{srcVal, stringVal.substring(pos.getIndex())});
+          }
           return SKIP_FIELD_VALUE_LIST_SINGLETON;
         }
         return number.floatValue();

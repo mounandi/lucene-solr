@@ -45,15 +45,15 @@ public class IDFValueSource extends DocFreqValueSource {
   }
 
   @Override
-  public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
+  public FunctionValues getValues(Map<Object, Object> context, LeafReaderContext readerContext) throws IOException {
     IndexSearcher searcher = (IndexSearcher)context.get("searcher");
-    TFIDFSimilarity sim = asTFIDF(searcher.getSimilarity(true), field);
+    TFIDFSimilarity sim = asTFIDF(searcher.getSimilarity(), field);
     if (sim == null) {
       throw new UnsupportedOperationException("requires a TFIDFSimilarity (such as ClassicSimilarity)");
     }
     int docfreq = searcher.getIndexReader().docFreq(new Term(indexedField, indexedBytes));
     float idf = sim.idf(docfreq, searcher.getIndexReader().maxDoc());
-    return new ConstDoubleDocValues(idf, this);
+    return new DocFreqValueSource.ConstDoubleDocValues(idf, this);
   }
   
   // tries extra hard to cast the sim to TFIDFSimilarity

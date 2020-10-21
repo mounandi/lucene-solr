@@ -16,17 +16,19 @@
  */
 package org.apache.solr.ltr.feature;
 
+import java.util.LinkedHashMap;
+
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestFieldLengthFeature extends TestRerankBase {
 
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1", "description", "w1"));
@@ -43,8 +45,8 @@ public class TestFieldLengthFeature extends TestRerankBase {
     assertU(commit());
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
@@ -54,10 +56,10 @@ public class TestFieldLengthFeature extends TestRerankBase {
     assertU(adoc("id", "42", "title", "w10"));
     assertU(commit());
 
-    loadFeature("description-length2", FieldLengthFeature.class.getCanonicalName(),
+    loadFeature("description-length2", FieldLengthFeature.class.getName(),
             "{\"field\":\"description\"}");
 
-    loadModel("description-model2", LinearModel.class.getCanonicalName(),
+    loadModel("description-model2", LinearModel.class.getName(),
             new String[] {"description-length2"}, "{\"weights\":{\"description-length2\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -75,10 +77,10 @@ public class TestFieldLengthFeature extends TestRerankBase {
     assertU(adoc("id", "43", "title", "w11", "description", ""));
     assertU(commit());
 
-    loadFeature("description-length3", FieldLengthFeature.class.getCanonicalName(),
+    loadFeature("description-length3", FieldLengthFeature.class.getName(),
             "{\"field\":\"description\"}");
 
-    loadModel("description-model3", LinearModel.class.getCanonicalName(),
+    loadModel("description-model3", LinearModel.class.getName(),
             new String[] {"description-length3"}, "{\"weights\":{\"description-length3\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -92,10 +94,10 @@ public class TestFieldLengthFeature extends TestRerankBase {
 
   @Test
   public void testRanking() throws Exception {
-    loadFeature("title-length", FieldLengthFeature.class.getCanonicalName(),
+    loadFeature("title-length", FieldLengthFeature.class.getName(),
         "{\"field\":\"title\"}");
 
-    loadModel("title-model", LinearModel.class.getCanonicalName(),
+    loadModel("title-model", LinearModel.class.getName(),
         new String[] {"title-length"}, "{\"weights\":{\"title-length\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -131,9 +133,9 @@ public class TestFieldLengthFeature extends TestRerankBase {
     assertJQ("/query" + query.toQueryString(), "/response/docs/[3]/id=='6'");
 
     loadFeature("description-length",
-        FieldLengthFeature.class.getCanonicalName(),
+        FieldLengthFeature.class.getName(),
         "{\"field\":\"description\"}");
-    loadModel("description-model", LinearModel.class.getCanonicalName(),
+    loadModel("description-model", LinearModel.class.getName(),
         new String[] {"description-length"},
         "{\"weights\":{\"description-length\":1.0}}");
     query.setQuery("title:w1");
@@ -149,6 +151,12 @@ public class TestFieldLengthFeature extends TestRerankBase {
     assertJQ("/query" + query.toQueryString(), "/response/docs/[3]/id=='1'");
   }
 
+  @Test
+  public void testParamsToMap() throws Exception {
+    final LinkedHashMap<String,Object> params = new LinkedHashMap<String,Object>();
+    params.put("field", "field"+random().nextInt(10));
+    doTestParamsToMap(FieldLengthFeature.class.getName(), params);
+  }
 
 
 

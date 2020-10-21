@@ -56,6 +56,7 @@ import org.apache.lucene.util.automaton.Automata;
 import org.apache.lucene.util.automaton.Automaton;
 import org.apache.lucene.util.automaton.Transition;
 
+@LuceneTestCase.SuppressCodecs("SimpleText")
 public class TestTermAutomatonQuery extends LuceneTestCase {
   // "comes * sun"
   public void testBasic1() throws Exception {
@@ -84,7 +85,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     q.addTransition(s2, s3, "sun");
     q.finish();
 
-    assertEquals(1, s.search(q, 1).totalHits);
+    assertEquals(1, s.search(q, 1).totalHits.value);
 
     w.close();
     r.close();
@@ -117,7 +118,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     q.addTransition(s2, s3, "moon");
     q.finish();
 
-    assertEquals(2, s.search(q, 1).totalHits);
+    assertEquals(2, s.search(q, 1).totalHits.value);
 
     w.close();
     r.close();
@@ -154,7 +155,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     q.addTransition(s2, s3, "sun");
     q.finish();
 
-    assertEquals(2, s.search(q, 1).totalHits);
+    assertEquals(2, s.search(q, 1).totalHits.value);
 
     w.close();
     r.close();
@@ -210,7 +211,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
 
     // System.out.println("DOT:\n" + q.toDot());
     
-    assertEquals(4, s.search(q, 1).totalHits);
+    assertEquals(4, s.search(q, 1).totalHits.value);
 
     w.close();
     r.close();
@@ -255,60 +256,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
 
     TermAutomatonQuery q = new TokenStreamToTermAutomatonQuery().toQuery("field", ts);
     // System.out.println("DOT: " + q.toDot());
-    assertEquals(4, s.search(q, 1).totalHits);
-
-    w.close();
-    r.close();
-    dir.close();
-  }
-
-  public void testFreq() throws Exception {
-    Directory dir = newDirectory();
-    RandomIndexWriter w = new RandomIndexWriter(random(), dir);
-    Document doc = new Document();
-    // matches freq == 3
-    doc.add(newTextField("field", "here comes the sun foo bar here comes another sun here comes shiny sun", Field.Store.NO));
-    w.addDocument(doc);
-
-    doc = new Document();
-    // doesn't match
-    doc.add(newTextField("field", "here comes the other sun", Field.Store.NO));
-    w.addDocument(doc);
-    IndexReader r = w.getReader();
-    IndexSearcher s = newSearcher(r);
-
-    TermAutomatonQuery q = new TermAutomatonQuery("field");
-    int init = q.createState();
-    int s1 = q.createState();
-    q.addTransition(init, s1, "comes");
-    int s2 = q.createState();
-    q.addAnyTransition(s1, s2);
-    int s3 = q.createState();
-    q.setAccept(s3, true);
-    q.addTransition(s2, s3, "sun");
-    q.finish();
-
-    s.search(q, new SimpleCollector() {
-        private Scorer scorer;
-
-        @Override
-        public void setScorer(Scorer scorer) {
-          this.scorer = scorer;
-          while (scorer instanceof AssertingScorer) {
-            scorer = ((AssertingScorer) scorer).getIn();
-          }
-        }
-
-        @Override
-        public void collect(int docID) throws IOException {
-          assertEquals(3, scorer.freq());
-        }
-        
-        @Override
-        public boolean needsScores() {
-          return true;
-        }
-      });
+    assertEquals(4, s.search(q, 1).totalHits.value);
 
     w.close();
     r.close();
@@ -341,7 +289,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     q.addTransition(s2, s3, "moon");
     q.finish();
 
-    assertEquals(2, s.search(q, 1).totalHits);
+    assertEquals(2, s.search(q, 1).totalHits.value);
     w.close();
     r.close();
     dir.close();
@@ -406,7 +354,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
 
     TermAutomatonQuery q = new TokenStreamToTermAutomatonQuery().toQuery("field", ts);
     // System.out.println("DOT: " + q.toDot());
-    assertEquals(3, s.search(q, 1).totalHits);
+    assertEquals(3, s.search(q, 1).totalHits.value);
 
     w.close();
     r.close();
@@ -459,10 +407,10 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
   }
 
   public void testRandom() throws Exception {
-    int numDocs = atLeast(100);
+    int numDocs = atLeast(50);
     Directory dir = newDirectory();
 
-    // Adds occassional random synonyms:
+    // Adds occasional random synonyms:
     Analyzer analyzer = new Analyzer() {
         @Override
         public TokenStreamComponents createComponents(String fieldName) {
@@ -496,6 +444,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     }
 
     IndexReader r = w.getReader();
+    w.close();
     IndexSearcher s = newSearcher(r);
 
     // Used to match ANY using MultiPhraseQuery:
@@ -595,7 +544,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
       Set<String> hits2Docs = toDocIDs(s, hits2);
 
       try {
-        assertEquals(hits2.totalHits, hits1.totalHits);
+        assertEquals(hits2.totalHits.value, hits1.totalHits.value);
         assertEquals(hits2Docs, hits1Docs);
       } catch (AssertionError ae) {
         System.out.println("FAILED:");
@@ -613,7 +562,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
       }
     }
 
-    IOUtils.close(w, r, dir, analyzer);
+    IOUtils.close(r, dir, analyzer);
   }
 
   private Set<String> toDocIDs(IndexSearcher s, TopDocs hits) throws IOException {
@@ -635,7 +584,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     }
 
     @Override
-    public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+    public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
       return new ConstantScoreWeight(this, boost) {
         @Override
         public Scorer scorer(LeafReaderContext context) throws IOException {
@@ -648,9 +597,19 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
               //System.out.println("  acc id=" + idSource.getInt(docID) + " docID=" + docID);
             }
           }
-          return new ConstantScoreScorer(this, score(), new BitSetIterator(bits, bits.approximateCardinality()));
+          return new ConstantScoreScorer(this, score(), scoreMode, new BitSetIterator(bits, bits.approximateCardinality()));
+        }
+
+        @Override
+        public boolean isCacheable(LeafReaderContext ctx) {
+          return false;
         }
       };
+    }
+
+    @Override
+    public void visit(QueryVisitor visitor) {
+
     }
 
     @Override
@@ -700,7 +659,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     q.setAccept(s1, true);
     q.finish();
 
-    assertEquals(1, s.search(q, 1).totalHits);
+    assertEquals(1, s.search(q, 1).totalHits.value);
     w.close();
     r.close();
     dir.close();
@@ -735,7 +694,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     q.setAccept(s4, true);
     q.finish();
 
-    assertEquals(1, s.search(q, 1).totalHits);
+    assertEquals(1, s.search(q, 1).totalHits.value);
     w.close();
     r.close();
     dir.close();
@@ -757,7 +716,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
 
     TermAutomatonQuery q = new TokenStreamToTermAutomatonQuery().toQuery("field", ts);
     // System.out.println("DOT: " + q.toDot());
-    assertEquals(0, s.search(q, 1).totalHits);
+    assertEquals(0, s.search(q, 1).totalHits.value);
 
     w.close();
     r.close();
@@ -781,7 +740,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
 
     TermAutomatonQuery q = new TokenStreamToTermAutomatonQuery().toQuery("field", ts);
     // System.out.println("DOT: " + q.toDot());
-    assertEquals(0, s.search(q, 1).totalHits);
+    assertEquals(0, s.search(q, 1).totalHits.value);
 
     IOUtils.close(w, r, dir);
   }
@@ -790,12 +749,7 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     TermAutomatonQuery q = new TermAutomatonQuery("field");
     int initState = q.createState();
     q.setAccept(initState, true);
-    try {
-      q.finish();
-      fail("did not hit exc");
-    } catch (IllegalStateException ise) {
-      // expected
-    }
+    expectThrows(IllegalStateException.class, q::finish);
   }
 
   public void testRewriteNoMatch() throws Exception {
@@ -964,5 +918,65 @@ public class TestTermAutomatonQuery extends LuceneTestCase {
     assertEquals(2, positions[1]);
     
     IOUtils.close(w, r, dir);
+  }
+  
+  // we query with sun|moon but moon doesn't exist
+  public void testOneTermMissing() throws Exception {
+    Directory dir = newDirectory();
+    RandomIndexWriter w = new RandomIndexWriter(random(), dir);
+    Document doc = new Document();
+    doc.add(newTextField("field", "here comes the sun", Field.Store.NO));
+    w.addDocument(doc);
+
+    IndexReader r = w.getReader();
+    IndexSearcher s = newSearcher(r);
+
+    TermAutomatonQuery q = new TermAutomatonQuery("field");
+    int init = q.createState();
+    int s1 = q.createState();
+    q.addTransition(init, s1, "comes");
+    int s2 = q.createState();
+    q.addAnyTransition(s1, s2);
+    int s3 = q.createState();
+    q.setAccept(s3, true);
+    q.addTransition(s2, s3, "sun");
+    q.addTransition(s2, s3, "moon");
+    q.finish();
+
+    assertEquals(1, s.search(q, 1).totalHits.value);
+
+    w.close();
+    r.close();
+    dir.close();
+  }
+  
+  // we query with sun|moon but no terms exist for the field
+  public void testFieldMissing() throws Exception {
+    Directory dir = newDirectory();
+    RandomIndexWriter w = new RandomIndexWriter(random(), dir);
+    Document doc = new Document();
+    doc.add(newTextField("field", "here comes the sun", Field.Store.NO));
+    w.addDocument(doc);
+
+    IndexReader r = w.getReader();
+    IndexSearcher s = newSearcher(r);
+
+    TermAutomatonQuery q = new TermAutomatonQuery("bogusfield");
+    int init = q.createState();
+    int s1 = q.createState();
+    q.addTransition(init, s1, "comes");
+    int s2 = q.createState();
+    q.addAnyTransition(s1, s2);
+    int s3 = q.createState();
+    q.setAccept(s3, true);
+    q.addTransition(s2, s3, "sun");
+    q.addTransition(s2, s3, "moon");
+    q.finish();
+
+    assertEquals(0, s.search(q, 1).totalHits.value);
+
+    w.close();
+    r.close();
+    dir.close();
   }
 }

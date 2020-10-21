@@ -18,7 +18,7 @@ package org.apache.lucene.analysis.miscellaneous;
 
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 import java.util.Map;
 
@@ -36,8 +36,13 @@ import java.util.Map;
  *     &lt;filter class="solr.RemoveDuplicatesTokenFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 4.8.0
+ * @lucene.spi {@value #NAME}
  */
 public class TruncateTokenFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "truncate";
 
   public static final String PREFIX_LENGTH_KEY = "prefixLength";
   private final byte prefixLength;
@@ -50,6 +55,11 @@ public class TruncateTokenFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameter(s): " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public TruncateTokenFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

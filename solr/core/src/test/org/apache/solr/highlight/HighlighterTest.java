@@ -96,14 +96,10 @@ public class HighlighterTest extends SolrTestCaseJ4 {
         "id", "1"));
     assertU(commit());
 
-    try {
-      assertQ("Tried PostingsSolrHighlighter but failed due to offsets not in postings",
-          req("q", "long", "hl.method", "postings", "df", field, "hl", "true"));
-      fail("Did not encounter exception for no offsets");
-    } catch (Exception e) {
-      assertTrue("Cause should be illegal argument", e.getCause() instanceof IllegalArgumentException);
-      assertTrue("Should warn no offsets", e.getCause().getMessage().contains("indexed without offsets"));
-    }
+    IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> {
+      h.query(req("q", "long", "hl.method", "postings", "df", field, "hl", "true"));
+    });
+    assertTrue("Should warn no offsets", e.getMessage().contains("indexed without offsets"));
     // note: the default schema.xml has no offsets in postings to test the PostingsHighlighter. Leave that for another
     //  test class.
   }
@@ -201,22 +197,25 @@ public class HighlighterTest extends SolrTestCaseJ4 {
   @Test
   public void testOffsetWindowTokenFilter() throws Exception {
     String[] multivalued = { "a b c d", "e f g", "h", "i j k l m n" };
-    Analyzer a1 = new WhitespaceAnalyzer();
-    TokenStream tokenStream = a1.tokenStream("", "a b c d e f g h i j k l m n");
+    try (Analyzer a1 = new WhitespaceAnalyzer()) {
+      TokenStream tokenStream = a1.tokenStream("", "a b c d e f g h i j k l m n");
 
-    OffsetWindowTokenFilter tots = new OffsetWindowTokenFilter(tokenStream);
-    for( String v : multivalued ){
-      TokenStream ts1 = tots.advanceToNextWindowOfLength(v.length());
-      ts1.reset();
-      Analyzer a2 = new WhitespaceAnalyzer();
-      TokenStream ts2 = a2.tokenStream("", v);
-      ts2.reset();
+      try (DefaultSolrHighlighter.OffsetWindowTokenFilter tots = new DefaultSolrHighlighter.OffsetWindowTokenFilter(tokenStream)) {
+        for (String v : multivalued) {
+          TokenStream ts1 = tots.advanceToNextWindowOfLength(v.length());
+          ts1.reset();
+          try (Analyzer a2 = new WhitespaceAnalyzer()) {
+            TokenStream ts2 = a2.tokenStream("", v);
+            ts2.reset();
 
-      while (ts1.incrementToken()) {
-        assertTrue(ts2.incrementToken());
-        assertEquals(ts1, ts2);
+            while (ts1.incrementToken()) {
+              assertTrue(ts2.incrementToken());
+              assertEquals(ts1, ts2);
+            }
+            assertFalse(ts2.incrementToken());
+          }
+        }
       }
-      assertFalse(ts2.incrementToken());
     }
   }
 
@@ -918,6 +917,24 @@ public class HighlighterTest extends SolrTestCaseJ4 {
               localRequest, new String[] {})));
       assertEquals(highlightedSetExpected, highlightedSetActual);
     }
+
+    // SOLR-11334
+    args.put("hl.fl", "title, text"); // comma then space
+    lrf = h.getRequestFactory("", 0, 10, args);
+    request = lrf.makeRequest("test");
+    highlighter = HighlightComponent.getHighlighter(h.getCore());
+    highlightFieldNames = Arrays.asList(highlighter.getHighlightFields(null,
+        request, new String[] {}));
+    assertEquals("Expected one field to highlight on", 2, highlightFieldNames
+        .size());
+    assertTrue("Expected to highlight on field \"title\"",
+        highlightFieldNames.contains("title"));
+    assertTrue("Expected to highlight on field \"text\"",
+        highlightFieldNames.contains("text"));
+    assertFalse("Expected to not highlight on field \"\"",
+        highlightFieldNames.contains(""));
+
+    request.close();
   }
 
   @Test
@@ -1007,7 +1024,7 @@ public class HighlighterTest extends SolrTestCaseJ4 {
         "//lst[@name='highlighting']/lst[@name='1']" +
         "/arr[@name='title']/str='Apache Software <em>Foundation</em>'");
     assertQ("hl.q parameter uses localparam parser definition correctly",
-        req("q", "Apache", "defType", "edismax", "qf", "title t_text", "hl", "true", "hl.fl", "title", "hl.q", "{!edismax}Software"),
+        req("q", "Apache", "defType", "edismax", "qf", "title t_text", "hl", "true", "hl.fl", "title", "hl.q", "{!edismax}Software", "hl.qparser", "lucene"),
         "//lst[@name='highlighting']/lst[@name='1']" +
             "/arr[@name='title']/str='Apache <em>Software</em> Foundation'");
     assertQ("hl.q parameter uses defType correctly",

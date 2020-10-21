@@ -17,19 +17,15 @@
 package org.apache.lucene.search.similarities;
 
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.apache.lucene.index.FieldInvertState;
-import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.NumericDocValues;
+import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.search.CollectionStatistics;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.PhraseQuery;
 import org.apache.lucene.search.TermStatistics;
-import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.SmallFloat;
 
 
@@ -83,20 +79,24 @@ import org.apache.lucene.util.SmallFloat;
  * of the weighted query vectors <i>V(q)</i> and <i>V(d)</i>:
  *
  *  <br>&nbsp;<br>
- *  <table cellpadding="2" cellspacing="2" border="0" style="width:auto; margin-left:auto; margin-right:auto" summary="formatting only">
+ *  <table class="padding2" style="border-spacing: 2px; border-collapse: separate; border: 0; width:auto; margin-left:auto; margin-right:auto">
+ *    <caption>formatting only</caption>
  *    <tr><td>
- *    <table cellpadding="1" cellspacing="0" border="1" style="margin-left:auto; margin-right:auto" summary="formatting only">
+ *    <table class="padding1" style="border-spacing: 0px; border-collapse: separate; border: 1px solid; margin-left:auto; margin-right:auto">
+ *      <caption>formatting only</caption>
  *      <tr><td>
- *      <table cellpadding="2" cellspacing="2" border="0" style="margin-left:auto; margin-right:auto" summary="cosine similarity formula">
+ *      <table class="padding2" style="border-spacing: 2px; border-collapse: separate; border: 0; margin-left:auto; margin-right:auto">
+ *        <caption>cosine similarity formula</caption>
  *        <tr>
- *          <td valign="middle" align="right" rowspan="1">
+ *          <td valign="middle" style="text-align: right" rowspan="1">
  *            cosine-similarity(q,d) &nbsp; = &nbsp;
  *          </td>
- *          <td valign="middle" align="center">
- *            <table summary="cosine similarity formula">
- *               <tr><td align="center" style="text-align: center"><small>V(q)&nbsp;&middot;&nbsp;V(d)</small></td></tr>
- *               <tr><td align="center" style="text-align: center">&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;</td></tr>
- *               <tr><td align="center" style="text-align: center"><small>|V(q)|&nbsp;|V(d)|</small></td></tr>
+ *          <td valign="middle" style="text-align: center">
+ *            <table>
+ *               <caption>cosine similarity formula</caption>
+ *               <tr><td style="text-align: center"><small>V(q)&nbsp;&middot;&nbsp;V(d)</small></td></tr>
+ *               <tr><td style="text-align: center">&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;</td></tr>
+ *               <tr><td style="text-align: center"><small>|V(q)|&nbsp;|V(d)|</small></td></tr>
  *            </table>
  *          </td>
  *        </tr>
@@ -105,7 +105,7 @@ import org.apache.lucene.util.SmallFloat;
  *    </table>
  *    </td></tr>
  *    <tr><td>
- *    <center><u>VSM Score</u></center>
+ *    <u style="text-align: center">VSM Score</u>
  *    </td></tr>
  *  </table>
  *  <br>&nbsp;<br>
@@ -165,24 +165,28 @@ import org.apache.lucene.util.SmallFloat;
  * we get <i>Lucene's Conceptual scoring formula</i>:
  *
  *  <br>&nbsp;<br>
- *  <table cellpadding="2" cellspacing="2" border="0" style="width:auto; margin-left:auto; margin-right:auto" summary="formatting only">
+ *  <table class="padding2" style="border-spacing: 2px; border-collapse: separate; border: 0; width:auto; margin-left:auto; margin-right:auto">
+ *    <caption>formatting only</caption>
  *    <tr><td>
- *    <table cellpadding="1" cellspacing="0" border="1" style="margin-left:auto; margin-right:auto" summary="formatting only">
+ *    <table class="padding1" style="border-spacing: 0px; border-collapse: separate; border: 1px solid; margin-left:auto; margin-right:auto">
+ *      <caption>formatting only</caption>
  *      <tr><td>
- *      <table cellpadding="2" cellspacing="2" border="0" style="margin-left:auto; margin-right:auto" summary="formatting only">
+ *      <table class="padding2" style="border-spacing: 2px; border-collapse: separate; border: 0; margin-left:auto; margin-right:auto">
+ *        <caption>formatting only</caption>
  *        <tr>
- *          <td valign="middle" align="right" rowspan="1">
+ *          <td valign="middle" style="text-align: right" rowspan="1">
  *            score(q,d) &nbsp; = &nbsp;
  *            <span style="color: #CCCC00">query-boost(q)</span> &middot; &nbsp;
  *          </td>
- *          <td valign="middle" align="center">
- *            <table summary="Lucene conceptual scoring formula">
- *               <tr><td align="center" style="text-align: center"><small><span style="color: #993399">V(q)&nbsp;&middot;&nbsp;V(d)</span></small></td></tr>
- *               <tr><td align="center" style="text-align: center">&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;</td></tr>
- *               <tr><td align="center" style="text-align: center"><small><span style="color: #FF33CC">|V(q)|</span></small></td></tr>
+ *          <td valign="middle" style="text-align: center">
+ *            <table>
+ *               <caption>Lucene conceptual scoring formula</caption>
+ *               <tr><td style="text-align: center"><small><span style="color: #993399">V(q)&nbsp;&middot;&nbsp;V(d)</span></small></td></tr>
+ *               <tr><td style="text-align: center">&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;</td></tr>
+ *               <tr><td style="text-align: center"><small><span style="color: #FF33CC">|V(q)|</span></small></td></tr>
  *            </table>
  *          </td>
- *          <td valign="middle" align="right" rowspan="1">
+ *          <td valign="middle" style="text-align: right" rowspan="1">
  *            &nbsp; &middot; &nbsp; <span style="color: #3399FF">doc-len-norm(d)</span>
  *            &nbsp; &middot; &nbsp; <span style="color: #3399FF">doc-boost(d)</span>
  *          </td>
@@ -192,7 +196,7 @@ import org.apache.lucene.util.SmallFloat;
  *    </table>
  *    </td></tr>
  *    <tr><td>
- *    <center><u>Lucene Conceptual Scoring Formula</u></center>
+ *    <u style="text-align: center">Lucene Conceptual Scoring Formula</u>
  *    </td></tr>
  *  </table>
  *  <br>&nbsp;<br>
@@ -250,28 +254,31 @@ import org.apache.lucene.util.SmallFloat;
  * The color codes demonstrate how it relates
  * to those of the <i>conceptual</i> formula:
  *
- * <table cellpadding="2" cellspacing="2" border="0" style="width:auto; margin-left:auto; margin-right:auto" summary="formatting only">
+ * <table class="padding2" style="border-spacing: 2px; border-collapse: separate; border: 0; width:auto; margin-left:auto; margin-right:auto">
+ *  <caption>formatting only</caption>
  *  <tr><td>
- *  <table cellpadding="" cellspacing="2" border="2" style="margin-left:auto; margin-right:auto" summary="formatting only">
+ *  <table style="border-spacing: 2px; border-collapse: separate; border: 2px solid; margin-left:auto; margin-right:auto">
+ *  <caption>formatting only</caption>
  *  <tr><td>
- *   <table cellpadding="2" cellspacing="2" border="0" style="margin-left:auto; margin-right:auto" summary="Lucene conceptual scoring formula">
+ *   <table class="padding2" style="border-spacing: 2px; border-collapse: separate; border: 0; margin-left:auto; margin-right:auto">
+ *   <caption>Lucene conceptual scoring formula</caption>
  *   <tr>
- *     <td valign="middle" align="right" rowspan="1">
+ *     <td valign="middle" style="text-align: right" rowspan="1">
  *       score(q,d) &nbsp; = &nbsp;
- *       <big><big><big>&sum;</big></big></big>
+ *       <span style="font-size: larger">&sum;</span>
  *     </td>
- *     <td valign="middle" align="right" rowspan="1">
- *       <big><big>(</big></big>
+ *     <td valign="middle" style="text-align: right" rowspan="1">
+ *       <span style="font-size: larger">(</span>
  *       <A HREF="#formula_tf"><span style="color: #993399">tf(t in d)</span></A> &nbsp;&middot;&nbsp;
  *       <A HREF="#formula_idf"><span style="color: #993399">idf(t)</span></A><sup>2</sup> &nbsp;&middot;&nbsp;
  *       <A HREF="#formula_termBoost"><span style="color: #CCCC00">t.getBoost()</span></A>&nbsp;&middot;&nbsp;
  *       <A HREF="#formula_norm"><span style="color: #3399FF">norm(t,d)</span></A>
- *       <big><big>)</big></big>
+ *       <span style="font-size: larger">)</span>
  *     </td>
  *   </tr>
  *   <tr valign="top">
  *    <td></td>
- *    <td align="center" style="text-align: center"><small>t in q</small></td>
+ *    <td style="text-align: center"><small>t in q</small></td>
  *    <td></td>
  *   </tr>
  *   </table>
@@ -279,14 +286,14 @@ import org.apache.lucene.util.SmallFloat;
  *  </table>
  * </td></tr>
  * <tr><td>
- *  <center><u>Lucene Practical Scoring Function</u></center>
+ *  <u style="text-align: center">Lucene Practical Scoring Function</u>
  * </td></tr>
  * </table>
  *
  * <p> where
  * <ol>
  *    <li>
- *      <A NAME="formula_tf"></A>
+ *      <a id="formula_tf"></A>
  *      <b><i>tf(t in d)</i></b>
  *      correlates to the term's <i>frequency</i>,
  *      defined as the number of times term <i>t</i> appears in the currently scored document <i>d</i>.
@@ -299,13 +306,14 @@ import org.apache.lucene.util.SmallFloat;
  *      {@link org.apache.lucene.search.similarities.ClassicSimilarity#tf(float) ClassicSimilarity} is:
  *
  *      <br>&nbsp;<br>
- *      <table cellpadding="2" cellspacing="2" border="0" style="width:auto; margin-left:auto; margin-right:auto" summary="term frequency computation">
+ *      <table class="padding2" style="border-spacing: 2px; border-collapse: separate; border: 0; width:auto; margin-left:auto; margin-right:auto">
+ *        <caption>term frequency computation</caption>
  *        <tr>
- *          <td valign="middle" align="right" rowspan="1">
+ *          <td valign="middle" style="text-align: right" rowspan="1">
  *            {@link org.apache.lucene.search.similarities.ClassicSimilarity#tf(float) tf(t in d)} &nbsp; = &nbsp;
  *          </td>
- *          <td valign="top" align="center" rowspan="1">
- *               frequency<sup><big>&frac12;</big></sup>
+ *          <td valign="top" style="text-align: center" rowspan="1">
+ *               frequency<sup><span style="font-size: larger">&frac12;</span></sup>
  *          </td>
  *        </tr>
  *      </table>
@@ -313,7 +321,7 @@ import org.apache.lucene.util.SmallFloat;
  *    </li>
  *
  *    <li>
- *      <A NAME="formula_idf"></A>
+ *      <a id="formula_idf"></A>
  *      <b><i>idf(t)</i></b> stands for Inverse Document Frequency. This value
  *      correlates to the inverse of <i>docFreq</i>
  *      (the number of documents in which the term <i>t</i> appears).
@@ -324,23 +332,25 @@ import org.apache.lucene.util.SmallFloat;
  *      {@link org.apache.lucene.search.similarities.ClassicSimilarity#idf(long, long) ClassicSimilarity} is:
  *
  *      <br>&nbsp;<br>
- *      <table cellpadding="2" cellspacing="2" border="0" style="width:auto; margin-left:auto; margin-right:auto" summary="inverse document frequency computation">
+ *      <table class="padding2" style="border-spacing: 2px; border-collapse: separate; border: 0; width:auto; margin-left:auto; margin-right:auto">
+ *        <caption>inverse document frequency computation</caption>
  *        <tr>
- *          <td valign="middle" align="right">
+ *          <td valign="middle" style="text-align: right">
  *            {@link org.apache.lucene.search.similarities.ClassicSimilarity#idf(long, long) idf(t)}&nbsp; = &nbsp;
  *          </td>
- *          <td valign="middle" align="center">
- *            1 + log <big>(</big>
+ *          <td valign="middle" style="text-align: center">
+ *            1 + log <span style="font-size: larger">(</span>
  *          </td>
- *          <td valign="middle" align="center">
- *            <table summary="inverse document frequency computation">
- *               <tr><td align="center" style="text-align: center"><small>docCount+1</small></td></tr>
- *               <tr><td align="center" style="text-align: center">&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;</td></tr>
- *               <tr><td align="center" style="text-align: center"><small>docFreq+1</small></td></tr>
+ *          <td valign="middle" style="text-align: center">
+ *            <table>
+ *               <caption>inverse document frequency computation</caption>
+ *               <tr><td style="text-align: center"><small>docCount+1</small></td></tr>
+ *               <tr><td style="text-align: center">&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;&ndash;</td></tr>
+ *               <tr><td style="text-align: center"><small>docFreq+1</small></td></tr>
  *            </table>
  *          </td>
- *          <td valign="middle" align="center">
- *            <big>)</big>
+ *          <td valign="middle" style="text-align: center">
+ *            <span style="font-size: larger">)</span>
  *          </td>
  *        </tr>
  *      </table>
@@ -348,7 +358,7 @@ import org.apache.lucene.util.SmallFloat;
  *    </li>
  *
  *    <li>
- *      <A NAME="formula_termBoost"></A>
+ *      <a id="formula_termBoost"></A>
  *      <b><i>t.getBoost()</i></b>
  *      is a search time boost of term <i>t</i> in the query <i>q</i> as
  *      specified in the query text
@@ -364,7 +374,7 @@ import org.apache.lucene.util.SmallFloat;
  *    </li>
  *
  *    <li>
- *      <A NAME="formula_norm"></A>
+ *      <a id="formula_norm"></A>
  *      <b><i>norm(t,d)</i></b> is an index-time boost factor that solely
  *      depends on the number of tokens of this field in the document, so
  *      that shorter fields contribute more to the score.
@@ -448,9 +458,11 @@ public abstract class TFIDFSimilarity extends Similarity {
    */
   public Explanation idfExplain(CollectionStatistics collectionStats, TermStatistics termStats) {
     final long df = termStats.docFreq();
-    final long docCount = collectionStats.docCount() == -1 ? collectionStats.maxDoc() : collectionStats.docCount();
+    final long docCount = collectionStats.docCount();
     final float idf = idf(df, docCount);
-    return Explanation.match(idf, "idf(docFreq=" + df + ", docCount=" + docCount + ")");
+    return Explanation.match(idf, "idf(docFreq, docCount)", 
+        Explanation.match(df, "docFreq, number of documents containing term"),
+        Explanation.match(docCount, "docCount, total number of documents with field"));
   }
 
   /**
@@ -472,7 +484,7 @@ public abstract class TFIDFSimilarity extends Similarity {
     for (final TermStatistics stat : termStats ) {
       Explanation idfExplain = idfExplain(collectionStats, stat);
       subs.add(idfExplain);
-      idf += idfExplain.getValue();
+      idf += idfExplain.getValue().floatValue();
     }
     return Explanation.match((float) idf, "idf(), sum of:", subs);
   }
@@ -503,43 +515,18 @@ public abstract class TFIDFSimilarity extends Similarity {
   @Override
   public final long computeNorm(FieldInvertState state) {
     final int numTerms;
-    if (discountOverlaps)
+    if (state.getIndexOptions() == IndexOptions.DOCS && state.getIndexCreatedVersionMajor() >= 8) {
+      numTerms = state.getUniqueTermCount();
+    } else if (discountOverlaps) {
       numTerms = state.getLength() - state.getNumOverlap();
-    else
+    } else {
       numTerms = state.getLength();
+    }
     return SmallFloat.intToByte4(numTerms);
   }
- 
-  /** Computes the amount of a sloppy phrase match, based on an edit distance.
-   * This value is summed for each sloppy phrase match in a document to form
-   * the frequency to be used in scoring instead of the exact term count.
-   *
-   * <p>A phrase match with a small edit distance to a document passage more
-   * closely matches the document, so implementations of this method usually
-   * return larger values when the edit distance is small and smaller values
-   * when it is large.
-   *
-   * @see PhraseQuery#getSlop()
-   * @param distance the edit distance of this sloppy phrase match
-   * @return the frequency increment for this match
-   */
-  public abstract float sloppyFreq(int distance);
-
-  /**
-   * Calculate a scoring factor based on the data in the payload.  Implementations
-   * are responsible for interpreting what is in the payload.  Lucene makes no assumptions about
-   * what is in the byte array.
-   *
-   * @param doc The docId currently being scored.
-   * @param start The start position of the payload
-   * @param end The end position of the payload
-   * @param payload The payload byte array to be scored
-   * @return An implementation dependent float to be used as a scoring factor
-   */
-  public abstract float scorePayload(int doc, int start, int end, BytesRef payload);
 
   @Override
-  public final SimWeight computeWeight(float boost, CollectionStatistics collectionStats, TermStatistics... termStats) {
+  public final SimScorer scorer(float boost, CollectionStatistics collectionStats, TermStatistics... termStats) {
     final Explanation idf = termStats.length == 1
     ? idfExplain(collectionStats, termStats[0])
     : idfExplain(collectionStats, termStats);
@@ -550,113 +537,58 @@ public abstract class TFIDFSimilarity extends Similarity {
       normTable[i] = norm;
     }
     normTable[0] = 1f / normTable[255];
-    return new IDFStats(collectionStats.field(), boost, idf, normTable);
+    return new TFIDFScorer(boost, idf, normTable);
   }
 
-  @Override
-  public final SimScorer simScorer(SimWeight stats, LeafReaderContext context) throws IOException {
-    IDFStats idfstats = (IDFStats) stats;
-    // the norms only encode the length, we need a translation table that depends on how lengthNorm is implemented
-    final float[] normTable = idfstats.normTable;
-    return new TFIDFSimScorer(idfstats, context.reader().getNormValues(idfstats.field), normTable);
-  }
-  
-  private final class TFIDFSimScorer extends SimScorer {
-    private final IDFStats stats;
-    private final float weightValue;
-    private final NumericDocValues norms;
-    private final float[] normTable;
-    
-    TFIDFSimScorer(IDFStats stats, NumericDocValues norms, float[] normTable) throws IOException {
-      this.stats = stats;
-      this.weightValue = stats.queryWeight;
-      this.norms = norms;
-      this.normTable = normTable;
-    }
-    
-    @Override
-    public float score(int doc, float freq) throws IOException {
-      final float raw = tf(freq) * weightValue; // compute tf(f)*weight
-
-      if (norms == null) {
-        return raw;
-      } else {
-        float normValue;
-        if (norms.advanceExact(doc)) {
-          normValue = normTable[(int) (norms.longValue() & 0xFF)];
-        } else {
-          normValue = 0;
-        }
-        return raw * normValue;  // normalize for field
-      }
-    }
-    
-    @Override
-    public float computeSlopFactor(int distance) {
-      return sloppyFreq(distance);
-    }
-
-    @Override
-    public float computePayloadFactor(int doc, int start, int end, BytesRef payload) {
-      return scorePayload(doc, start, end, payload);
-    }
-
-    @Override
-    public Explanation explain(int doc, Explanation freq) throws IOException {
-      return explainScore(doc, freq, stats, norms, normTable);
-    }
-  }
   
   /** Collection statistics for the TF-IDF model. The only statistic of interest
    * to this model is idf. */
-  static class IDFStats extends SimWeight {
-    private final String field;
+  class TFIDFScorer extends SimScorer {
     /** The idf and its explanation */
     private final Explanation idf;
     private final float boost;
     private final float queryWeight;
     final float[] normTable;
     
-    public IDFStats(String field, float boost, Explanation idf, float[] normTable) {
+    public TFIDFScorer(float boost, Explanation idf, float[] normTable) {
       // TODO: Validate?
-      this.field = field;
       this.idf = idf;
       this.boost = boost;
-      this.queryWeight = boost * idf.getValue();
+      this.queryWeight = boost * idf.getValue().floatValue();
       this.normTable = normTable;
+    }
+
+    @Override
+    public float score(float freq, long norm) {
+      final float raw = tf(freq) * queryWeight; // compute tf(f)*weight
+      float normValue = normTable[(int) (norm & 0xFF)];
+      return raw * normValue;  // normalize for field
+    }
+
+    @Override
+    public Explanation explain(Explanation freq, long norm) {
+      return explainScore(freq, norm, normTable);
+    }
+
+    private Explanation explainScore(Explanation freq, long encodedNorm, float[] normTable) {
+      List<Explanation> subs = new ArrayList<Explanation>();
+      if (boost != 1F) {
+        subs.add(Explanation.match(boost, "boost"));
+      }
+      subs.add(idf);
+      Explanation tf = Explanation.match(tf(freq.getValue().floatValue()), "tf(freq="+freq.getValue()+"), with freq of:", freq);
+      subs.add(tf);
+
+      float norm = normTable[(int) (encodedNorm & 0xFF)];
+      
+      Explanation fieldNorm = Explanation.match(norm, "fieldNorm");
+      subs.add(fieldNorm);
+      
+      return Explanation.match(
+          queryWeight * tf.getValue().floatValue() * norm,
+          "score(freq="+freq.getValue()+"), product of:",
+          subs);
     }
   }  
 
-  private Explanation explainField(int doc, Explanation freq, IDFStats stats, NumericDocValues norms, float[] normTable) throws IOException {
-    Explanation tfExplanation = Explanation.match(tf(freq.getValue()), "tf(freq="+freq.getValue()+"), with freq of:", freq);
-    float norm;
-    if (norms == null) {
-      norm = 1f;
-    } else if (norms.advanceExact(doc) == false) {
-      norm = 0f;
-    } else {
-      norm = normTable[(int) (norms.longValue() & 0xFF)];
-    }
-    
-    Explanation fieldNormExpl = Explanation.match(
-        norm,
-        "fieldNorm(doc=" + doc + ")");
-
-    return Explanation.match(
-        tfExplanation.getValue() * stats.idf.getValue() * fieldNormExpl.getValue(),
-        "fieldWeight in " + doc + ", product of:",
-        tfExplanation, stats.idf, fieldNormExpl);
-  }
-
-  private Explanation explainScore(int doc, Explanation freq, IDFStats stats, NumericDocValues norms, float[] normTable) throws IOException {
-    Explanation queryExpl = Explanation.match(stats.boost, "boost");
-    Explanation fieldExpl = explainField(doc, freq, stats, norms, normTable);
-    if (stats.boost == 1f) {
-      return fieldExpl;
-    }
-    return Explanation.match(
-        queryExpl.getValue() * fieldExpl.getValue(),
-        "score(doc="+doc+",freq="+freq.getValue()+"), product of:",
-        queryExpl, fieldExpl);
-  }
 }

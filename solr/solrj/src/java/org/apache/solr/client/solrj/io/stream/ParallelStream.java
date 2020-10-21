@@ -18,10 +18,8 @@ package org.apache.solr.client.solrj.io.stream;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 
 import org.apache.solr.client.solrj.io.Tuple;
 import org.apache.solr.client.solrj.io.comp.FieldComparator;
@@ -43,9 +41,8 @@ import static org.apache.solr.common.params.CommonParams.SORT;
  * The ParallelStream decorates a TupleStream implementation and pushes it to N workers for parallel execution.
  * Workers are chosen from a SolrCloud collection.
  * Tuples that are streamed back from the workers are ordered by a Comparator.
+ * @since 5.1.0
  **/
-
-
 public class ParallelStream extends CloudSolrStream implements Expressible {
 
   private TupleStream tupleStream;
@@ -209,7 +206,7 @@ public class ParallelStream extends CloudSolrStream implements Expressible {
   }
   
   public List<TupleStream> children() {
-    List l = new ArrayList();
+    List<TupleStream> l = new ArrayList<>();
     l.add(tupleStream);
     return l;
   }
@@ -218,10 +215,6 @@ public class ParallelStream extends CloudSolrStream implements Expressible {
     Tuple tuple = _read();
 
     if(tuple.EOF) {
-      Map m = new HashMap();
-      m.put("EOF", true);
-      Tuple t = new Tuple(m);
-
       /*
       Map<String, Map> metrics = new HashMap();
       Iterator<Entry<String,Tuple>> it = this.eofTuples.entrySet().iterator();
@@ -236,7 +229,7 @@ public class ParallelStream extends CloudSolrStream implements Expressible {
         t.setMetrics(metrics);
       }
       */
-      return t;
+      return Tuple.EOF();
     }
 
     return tuple;

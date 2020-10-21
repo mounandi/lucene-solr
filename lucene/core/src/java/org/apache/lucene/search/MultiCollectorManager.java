@@ -16,12 +16,12 @@
  */
 package org.apache.lucene.search;
 
-import org.apache.lucene.index.LeafReaderContext;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+
+import org.apache.lucene.index.LeafReaderContext;
 
 /**
  * A {@link CollectorManager} implements which wrap a set of {@link CollectorManager}
@@ -34,6 +34,9 @@ public class MultiCollectorManager implements CollectorManager<MultiCollectorMan
   @SafeVarargs
   @SuppressWarnings({"varargs", "unchecked"})
   public MultiCollectorManager(final CollectorManager<? extends Collector, ?>... collectorManagers) {
+    if (collectorManagers.length < 1) {
+      throw new IllegalArgumentException("There must be at least one collector");
+    }
     this.collectorManagers = (CollectorManager[]) collectorManagers;
   }
 
@@ -55,6 +58,7 @@ public class MultiCollectorManager implements CollectorManager<MultiCollectorMan
     return results;
   }
 
+  /** Wraps multiple collectors for processing */
   public class Collectors implements Collector {
 
     private final Collector[] collectors;
@@ -71,13 +75,22 @@ public class MultiCollectorManager implements CollectorManager<MultiCollectorMan
     }
 
     @Override
-    final public boolean needsScores() {
-      for (Collector collector : collectors)
-        if (collector.needsScores())
-          return true;
-      return false;
+    final public ScoreMode scoreMode() {
+      ScoreMode scoreMode = null;
+      for (Collector collector : collectors) {
+        if (scoreMode == null) {
+          scoreMode = collector.scoreMode();
+        } else if (scoreMode != collector.scoreMode()) {
+          return ScoreMode.COMPLETE;
+        }
+      }
+      return scoreMode;
     }
 
+    /**
+     * Wraps multiple leaf collectors and delegates collection across each one
+     * @lucene.internal
+     */
     public class LeafCollectors implements LeafCollector {
 
       private final LeafCollector[] leafCollectors;
@@ -89,7 +102,7 @@ public class MultiCollectorManager implements CollectorManager<MultiCollectorMan
       }
 
       @Override
-      final public void setScorer(final Scorer scorer) throws IOException {
+      final public void setScorer(final Scorable scorer) throws IOException {
         for (LeafCollector leafCollector : leafCollectors)
           if (leafCollector != null)
             leafCollector.setScorer(scorer);

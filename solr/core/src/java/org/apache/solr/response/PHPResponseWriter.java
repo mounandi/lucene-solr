@@ -16,8 +16,8 @@
  */
 package org.apache.solr.response;
 
-import java.io.Writer;
 import java.io.IOException;
+import java.io.Writer;
 import java.util.List;
 
 import org.apache.solr.common.util.NamedList;
@@ -29,7 +29,7 @@ public class PHPResponseWriter implements QueryResponseWriter {
   private String contentType = CONTENT_TYPE_PHP_UTF8;
 
   @Override
-  public void init(NamedList namedList) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList namedList) {
     String contentType = (String) namedList.get("content-type");
     if (contentType != null) {
       this.contentType = contentType;
@@ -58,7 +58,7 @@ class PHPWriter extends JSONWriter {
   }
   
   @Override
-  public void writeNamedList(String name, NamedList val) throws IOException {
+  public void writeNamedList(String name, @SuppressWarnings({"rawtypes"})NamedList val) throws IOException {
     writeNamedListAsMapMangled(name,val);
   }
 
@@ -78,7 +78,7 @@ class PHPWriter extends JSONWriter {
   }
 
   @Override
-  public void writeArray(String name, List l) throws IOException {
+  public void writeArray(String name, @SuppressWarnings({"rawtypes"})List l) throws IOException {
     writeArray(name,l.iterator());
   }
 
@@ -93,7 +93,7 @@ class PHPWriter extends JSONWriter {
   }
 
   @Override
-  protected void writeKey(String fname, boolean needsEscaping) throws IOException {
+  public void writeKey(String fname, boolean needsEscaping) throws IOException {
     writeStr(null, fname, needsEscaping);
     writer.write('=');
     writer.write('>');

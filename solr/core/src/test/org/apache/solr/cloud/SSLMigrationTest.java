@@ -16,10 +16,12 @@
  */
 package org.apache.solr.cloud;
 
-import org.apache.commons.lang.StringUtils;
-import org.apache.lucene.util.LuceneTestCase.BadApple;
+  
+import org.apache.commons.lang3.StringUtils;
 import org.apache.lucene.util.LuceneTestCase.Slow;
+import org.apache.lucene.util.LuceneTestCase.AwaitsFix;
 import org.apache.solr.SolrTestCaseJ4.SuppressSSL;
+import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.embedded.JettyConfig;
 import org.apache.solr.client.solrj.embedded.JettySolrRunner;
@@ -50,7 +52,7 @@ import static org.apache.solr.common.util.Utils.makeMap;
  */
 @Slow
 @SuppressSSL
-@BadApple(bugUrl = "https://issues.apache.org/jira/browse/SOLR-6213")
+@AwaitsFix(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // 17-Mar-2018
 public class SSLMigrationTest extends AbstractFullDistribZkTestBase {
 
   @Test
@@ -69,7 +71,7 @@ public class SSLMigrationTest extends AbstractFullDistribZkTestBase {
       runner.stop();
     }
     
-    HttpClientUtil.setSchemaRegistryProvider(sslConfig.buildClientSchemaRegistryProvider());
+    HttpClientUtil.setSocketFactoryRegistryProvider(sslConfig.buildClientSocketFactoryRegistryProvider());
     for(int i = 0; i < this.jettys.size(); i++) {
       JettySolrRunner runner = jettys.get(i);
       JettyConfig config = JettyConfig.builder()
@@ -78,7 +80,7 @@ public class SSLMigrationTest extends AbstractFullDistribZkTestBase {
           .stopAtShutdown(false)
           .withServlets(getExtraServlets())
           .withFilters(getExtraRequestFilters())
-          .withSSLConfig(sslConfig)
+          .withSSLConfig(sslConfig.buildServerSSLConfig())
           .build();
 
       Properties props = new Properties();
@@ -121,6 +123,7 @@ public class SSLMigrationTest extends AbstractFullDistribZkTestBase {
         .toLowerCase(Locale.ROOT), "name", "urlScheme", "val", value);
     @SuppressWarnings("unchecked")
     SolrParams params = new MapSolrParams(m);
+    @SuppressWarnings({"rawtypes"})
     SolrRequest request = new QueryRequest(params);
     request.setPath("/admin/collections");
     
@@ -129,7 +132,9 @@ public class SSLMigrationTest extends AbstractFullDistribZkTestBase {
       urls.add(replica.getStr(ZkStateReader.BASE_URL_PROP));
     }
     //Create new SolrServer to configure new HttpClient w/ SSL config
-    getLBHttpSolrClient(urls.toArray(new String[]{})).request(request);
+    try (SolrClient client = getLBHttpSolrClient(urls.toArray(new String[]{}))) {
+      client.request(request);
+    }
   }
   
 }

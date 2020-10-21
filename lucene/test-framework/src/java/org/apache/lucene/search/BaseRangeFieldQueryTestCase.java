@@ -17,6 +17,7 @@
 package org.apache.lucene.search;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -28,8 +29,8 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.MultiBits;
 import org.apache.lucene.index.MultiDocValues;
-import org.apache.lucene.index.MultiFields;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.SerialMergeScheduler;
 import org.apache.lucene.index.Term;
@@ -38,6 +39,7 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.TestUtil;
 
 /**
  * Abstract class to do basic tests for a RangeField query. Testing rigor inspired by {@code BaseGeoPointTestCase}
@@ -67,7 +69,7 @@ public abstract class BaseRangeFieldQueryTestCase extends LuceneTestCase {
   }
 
   public void testRandomMedium() throws Exception {
-    doTestRandom(10000, false);
+    doTestRandom(1000, false);
   }
 
   @Nightly
@@ -76,7 +78,34 @@ public abstract class BaseRangeFieldQueryTestCase extends LuceneTestCase {
   }
 
   public void testMultiValued() throws Exception {
-    doTestRandom(10000, true);
+    doTestRandom(1000, true);
+  }
+
+  public void testAllEqual() throws Exception {
+    int numDocs = atLeast(1000);
+    int dimensions = dimension();
+    Range[][] ranges = new Range[numDocs][];
+    Range[] theRange =  new Range[] {nextRange(dimensions)};
+    Arrays.fill(ranges, theRange);
+    verify(ranges);
+  }
+
+  // Force low cardinality leaves
+  public void testLowCardinality() throws Exception {
+    int numDocs = atLeast(1000);
+    int dimensions = dimension();
+
+    int cardinality = TestUtil.nextInt(random(), 2, 20);
+    Range[][] diffRanges =  new Range[cardinality][];
+    for (int i = 0; i < cardinality; i++) {
+      diffRanges[i] =  new Range[] {nextRange(dimensions)};
+    }
+
+    Range[][] ranges = new Range[numDocs][];
+    for (int i = 0; i < numDocs; i++) {
+      ranges[i] =  diffRanges[random().nextInt(cardinality)];
+    }
+    verify(ranges);
   }
 
   private void doTestRandom(int count, boolean multiValued) throws Exception {
@@ -134,22 +163,22 @@ public abstract class BaseRangeFieldQueryTestCase extends LuceneTestCase {
             ranges[id][0].setMax(d, ranges[oldID][0].getMax(d));
           }
           if (VERBOSE) {
-            System.out.println("  id=" + id + " box=" + ranges[id] + " (same box as doc=" + oldID + ")");
+            System.out.println("  id=" + id + " box=" + Arrays.toString(ranges[id]) + " (same box as doc=" + oldID + ")");
           }
         } else {
           for (int m = 0, even = dimensions % 2; m < dimensions * 2; ++m) {
             if (x == m) {
               int d = (int)Math.floor(m/2);
               // current could be multivalue but old may not be, so use first box
-              if (even == 0) {
+              if (even == 0) { // even is min
                 ranges[id][0].setMin(d, ranges[oldID][0].getMin(d));
                 if (VERBOSE) {
-                  System.out.println("  id=" + id + " box=" + ranges[id] + " (same min[" + d + "] as doc=" + oldID + ")");
+                  System.out.println("  id=" + id + " box=" + Arrays.toString(ranges[id]) + " (same min[" + d + "] as doc=" + oldID + ")");
                 }
-              } else {
+              } else { // odd is max
                 ranges[id][0].setMax(d, ranges[oldID][0].getMax(d));
                 if (VERBOSE) {
-                  System.out.println("  id=" + id + " box=" + ranges[id] + " (same max[" + d + "] as doc=" + oldID + ")");
+                  System.out.println("  id=" + id + " box=" + Arrays.toString(ranges[id]) + " (same max[" + d + "] as doc=" + oldID + ")");
                 }
               }
             }
@@ -184,7 +213,7 @@ public abstract class BaseRangeFieldQueryTestCase extends LuceneTestCase {
       doc.add(new NumericDocValuesField("id", id));
       if (ranges[id][0].isMissing == false) {
         for (int n=0; n<ranges[id].length; ++n) {
-          doc.add(newRangeField(ranges[id][n]));
+          addRange(doc, ranges[id][n]);
         }
       }
       w.addDocument(doc);
@@ -207,7 +236,7 @@ public abstract class BaseRangeFieldQueryTestCase extends LuceneTestCase {
 
     int dimensions = ranges[0][0].numDimensions();
     int iters = atLeast(25);
-    Bits liveDocs = MultiFields.getLiveDocs(s.getIndexReader());
+    Bits liveDocs = MultiBits.getLiveDocs(s.getIndexReader());
     int maxDoc = s.getIndexReader().maxDoc();
 
     for (int iter=0; iter<iters; ++iter) {
@@ -253,7 +282,7 @@ public abstract class BaseRangeFieldQueryTestCase extends LuceneTestCase {
         }
 
         @Override
-        public boolean needsScores() { return false; }
+        public ScoreMode scoreMode() { return ScoreMode.COMPLETE_NO_SCORES; }
       });
 
       NumericDocValues docIDToID = MultiDocValues.getNumericValues(r, "id");
@@ -272,25 +301,29 @@ public abstract class BaseRangeFieldQueryTestCase extends LuceneTestCase {
 
         if (hits.get(docID) != expected) {
           StringBuilder b = new StringBuilder();
-          b.append("FAIL (iter " + iter + "): ");
+          b.append("FAIL (iter ").append(iter).append("): ");
           if (expected == true) {
-            b.append("id=" + id + (ranges[id].length > 1 ? " (MultiValue) " : " ") + "should match but did not\n");
+            b.append("id=").append(id).append(ranges[id].length > 1 ? " (MultiValue) " : " ").append("should match but did not\n");
           } else {
-            b.append("id=" + id + " should not match but did\n");
+            b.append("id=").append(id).append(" should not match but did\n");
           }
-          b.append(" queryRange=" + queryRange + "\n");
-          b.append(" box" + ((ranges[id].length > 1) ? "es=" : "=" ) + ranges[id][0]);
+          b.append(" queryRange=").append(queryRange).append("\n");
+          b.append(" box").append((ranges[id].length > 1) ? "es=" : "=").append(ranges[id][0]);
           for (int n=1; n<ranges[id].length; ++n) {
             b.append(", ");
             b.append(ranges[id][n]);
           }
-          b.append("\n queryType=" + queryType + "\n");
-          b.append(" deleted?=" + (liveDocs != null && liveDocs.get(docID) == false));
+          b.append("\n queryType=").append(queryType).append("\n");
+          b.append(" deleted?=").append(liveDocs != null && liveDocs.get(docID) == false);
           fail("wrong hit (first of possibly more):\n\n" + b);
         }
       }
     }
     IOUtils.close(r, dir);
+  }
+
+  protected void addRange(Document doc, Range box) {
+    doc.add(newRangeField(box));
   }
 
   protected boolean expectedResult(Range queryRange, Range[] range, Range.QueryType queryType) {

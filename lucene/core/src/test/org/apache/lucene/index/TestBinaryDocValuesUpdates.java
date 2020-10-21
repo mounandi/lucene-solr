@@ -88,7 +88,7 @@ public class TestBinaryDocValuesUpdates extends LuceneTestCase {
     return doc;
   }
   
-  public void testUpdatesAreFlushed() throws IOException {
+  public void testUpdatesAreFlushed() throws IOException, InterruptedException {
     Directory dir = newDirectory();
     IndexWriter writer = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random(), MockTokenizer.WHITESPACE, false))
                                                 .setRAMBufferSizeMB(0.00000001));
@@ -266,7 +266,7 @@ public class TestBinaryDocValuesUpdates extends LuceneTestCase {
       writer.close();
     }
     
-    Bits liveDocs = MultiFields.getLiveDocs(reader);
+    Bits liveDocs = MultiBits.getLiveDocs(reader);
     boolean[] expectedLiveDocs = new boolean[] { true, false, false, true, true, true };
     for (int i = 0; i < expectedLiveDocs.length; i++) {
       assertEquals(expectedLiveDocs[i], liveDocs.get(i));
@@ -286,7 +286,8 @@ public class TestBinaryDocValuesUpdates extends LuceneTestCase {
   public void testUpdatesWithDeletes() throws Exception {
     // update and delete different documents in the same commit session
     Directory dir = newDirectory();
-    IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
+    IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()))
+        .setMergePolicy(NoMergePolicy.INSTANCE); // otherwise the delete might force a merge
     conf.setMaxBufferedDocs(10); // control segment flushing
     IndexWriter writer = new IndexWriter(dir, conf);
     
@@ -665,13 +666,12 @@ public class TestBinaryDocValuesUpdates extends LuceneTestCase {
     int refreshChance = TestUtil.nextInt(random(), 5, 200);
     int deleteChance = TestUtil.nextInt(random(), 2, 100);
 
-    int idUpto = 0;
     int deletedCount = 0;
     
     List<OneSortDoc> docs = new ArrayList<>();
     DirectoryReader r = w.getReader();
 
-    int numIters = atLeast(1000);
+    int numIters = TEST_NIGHTLY ? atLeast(1000) : atLeast(100);
     for(int iter=0;iter<numIters;iter++) {
       BytesRef value = toBytes((long) random().nextInt(valueRange));
       if (docs.isEmpty() || random().nextInt(3) == 1) {
@@ -976,7 +976,7 @@ public class TestBinaryDocValuesUpdates extends LuceneTestCase {
     
     // create index
     final int numFields = TestUtil.nextInt(random(), 1, 4);
-    final int numDocs = atLeast(2000);
+    final int numDocs = TEST_NIGHTLY ? atLeast(2000) : atLeast(200);
     for (int i = 0; i < numDocs; i++) {
       Document doc = new Document();
       doc.add(new StringField("id", "doc" + i, Store.NO));
@@ -995,7 +995,7 @@ public class TestBinaryDocValuesUpdates extends LuceneTestCase {
       writer.addDocument(doc);
     }
     
-    final int numThreads = TestUtil.nextInt(random(), 3, 6);
+    final int numThreads = TEST_NIGHTLY ? TestUtil.nextInt(random(), 3, 6) : 2;
     final CountDownLatch done = new CountDownLatch(numThreads);
     final AtomicInteger numUpdates = new AtomicInteger(atLeast(100));
     

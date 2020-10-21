@@ -18,14 +18,13 @@ package org.apache.solr.ltr;
 
 import java.util.Iterator;
 import java.util.Map;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.solr.common.util.ExecutorUtil;
 import org.apache.solr.common.util.NamedList;
-import org.apache.solr.util.DefaultSolrThreadFactory;
+import org.apache.solr.core.CloseHook;
+import org.apache.solr.core.SolrCore;
 import org.apache.solr.util.SolrPluginUtils;
 import org.apache.solr.util.plugin.NamedListInitializedPlugin;
 
@@ -58,11 +57,12 @@ import org.apache.solr.util.plugin.NamedListInitializedPlugin;
  * <code>totalPoolThreads</code> imposes a contention between the queries if
  * <code>(totalPoolThreads &lt; numThreadsPerRequest * total parallel queries)</code>.
  */
-final public class LTRThreadModule implements NamedListInitializedPlugin {
+final public class LTRThreadModule extends CloseHook implements NamedListInitializedPlugin  {
 
-  public static LTRThreadModule getInstance(NamedList args) {
+  public static LTRThreadModule getInstance(@SuppressWarnings({"rawtypes"})NamedList args) {
 
     final LTRThreadModule threadManager;
+    @SuppressWarnings({"rawtypes"})
     final NamedList threadManagerArgs = extractThreadModuleParams(args);
     // if and only if there are thread module args then we want a thread module!
     if (threadManagerArgs.size() > 0) {
@@ -78,6 +78,7 @@ final public class LTRThreadModule implements NamedListInitializedPlugin {
 
   private static String CONFIG_PREFIX = "threadModule.";
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   private static NamedList extractThreadModuleParams(NamedList args) {
 
     // gather the thread module args from amongst the general args
@@ -103,13 +104,10 @@ final public class LTRThreadModule implements NamedListInitializedPlugin {
   // settings
   private int totalPoolThreads = 1;
   private int numThreadsPerRequest = 1;
-  private int maxPoolSize = Integer.MAX_VALUE;
-  private long keepAliveTimeSeconds = 10;
-  private String threadNamePrefix = "ltrExecutor";
 
   // implementation
   private Semaphore ltrSemaphore;
-  private Executor createWeightScoreExecutor;
+  private volatile ExecutorService createWeightScoreExecutor;
 
   public LTRThreadModule() {
   }
@@ -122,7 +120,8 @@ final public class LTRThreadModule implements NamedListInitializedPlugin {
   }
 
   @Override
-  public void init(NamedList args) {
+  @SuppressWarnings({"unchecked"})
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
     if (args != null) {
       SolrPluginUtils.invokeSetters(this, args);
     }
@@ -132,13 +131,6 @@ final public class LTRThreadModule implements NamedListInitializedPlugin {
     } else {
       ltrSemaphore = null;
     }
-    createWeightScoreExecutor = new ExecutorUtil.MDCAwareThreadPoolExecutor(
-        0,
-        maxPoolSize,
-        keepAliveTimeSeconds, TimeUnit.SECONDS, // terminate idle threads after 10 sec
-        new SynchronousQueue<Runnable>(),  // directly hand off tasks
-        new DefaultSolrThreadFactory(threadNamePrefix)
-        );
   }
 
   private void validate() {
@@ -161,18 +153,6 @@ final public class LTRThreadModule implements NamedListInitializedPlugin {
     this.numThreadsPerRequest = numThreadsPerRequest;
   }
 
-  public void setMaxPoolSize(int maxPoolSize) {
-    this.maxPoolSize = maxPoolSize;
-  }
-
-  public void setKeepAliveTimeSeconds(long keepAliveTimeSeconds) {
-    this.keepAliveTimeSeconds = keepAliveTimeSeconds;
-  }
-
-  public void setThreadNamePrefix(String threadNamePrefix) {
-    this.threadNamePrefix = threadNamePrefix;
-  }
-
   public Semaphore createQuerySemaphore() {
     return (numThreadsPerRequest > 1 ? new Semaphore(numThreadsPerRequest) : null);
   }
@@ -187,6 +167,20 @@ final public class LTRThreadModule implements NamedListInitializedPlugin {
 
   public void execute(Runnable command) {
     createWeightScoreExecutor.execute(command);
+  }
+
+  @Override
+  public void preClose(SolrCore core) {
+    ExecutorUtil.shutdownAndAwaitTermination(createWeightScoreExecutor);
+  }
+
+  @Override
+  public void postClose(SolrCore core) {
+  
+  }
+
+  public void setExecutor(ExecutorService sharedExecutor) {
+    this.createWeightScoreExecutor = sharedExecutor;
   }
 
 }

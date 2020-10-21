@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.fr;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.fr.FrenchMinimalStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link FrenchMinimalStemFilter}.
@@ -34,8 +33,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.FrenchMinimalStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
 public class FrenchMinimalStemFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "frenchMinimalStem";
   
   /** Creates a new FrenchMinimalStemFilterFactory */
   public FrenchMinimalStemFilterFactory(Map<String,String> args) {
@@ -45,6 +49,11 @@ public class FrenchMinimalStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public FrenchMinimalStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new FrenchMinimalStemFilter(input);

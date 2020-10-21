@@ -16,18 +16,28 @@
  */
 package org.apache.solr.search;
 
-import org.apache.lucene.util.FixedBitSet;
-import org.apache.solr.handler.component.MergeStrategy;
-import org.apache.solr.request.SolrRequestInfo;
-
-import org.apache.lucene.search.*;
-import org.apache.lucene.index.*;
-import org.apache.solr.request.SolrQueryRequest;
-import org.apache.solr.common.params.SolrParams;
-
 import java.io.IOException;
 import java.util.Map;
 import java.util.Objects;
+
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.LeafCollector;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.Scorable;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.ScoreMode;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopDocsCollector;
+import org.apache.lucene.search.TotalHits;
+import org.apache.lucene.search.Weight;
+import org.apache.lucene.util.FixedBitSet;
+import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.handler.component.MergeStrategy;
+import org.apache.solr.request.SolrQueryRequest;
+import org.apache.solr.request.SolrRequestInfo;
 
 public class ExportQParserPlugin extends QParserPlugin {
 
@@ -71,8 +81,9 @@ public class ExportQParserPlugin extends QParserPlugin {
       return null;
     }
 
-    public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException{
-      return mainQuery.createWeight(searcher, true, boost);
+    @Override
+    public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException{
+      return mainQuery.createWeight(searcher, scoreMode, boost);
     }
 
     public Query rewrite(IndexReader reader) throws IOException {
@@ -84,6 +95,7 @@ public class ExportQParserPlugin extends QParserPlugin {
       }
     }
 
+    @SuppressWarnings({"rawtypes"})
     public TopDocsCollector getTopDocsCollector(int len,
                                                 QueryCommand cmd,
                                                 IndexSearcher searcher) throws IOException {
@@ -112,6 +124,11 @@ public class ExportQParserPlugin extends QParserPlugin {
       return s;
     }
 
+    @Override
+    public void visit(QueryVisitor visitor) {
+      visitor.visitLeaf(this);
+    }
+
     public ExportQuery() {
 
     }
@@ -121,10 +138,12 @@ public class ExportQParserPlugin extends QParserPlugin {
     }
   }
   
+  @SuppressWarnings({"rawtypes"})
   private static class ExportCollector extends TopDocsCollector  {
 
     private FixedBitSet[] sets;
 
+    @SuppressWarnings({"unchecked"})
     public ExportCollector(FixedBitSet[] sets) {
       super(null);
       this.sets = sets;
@@ -137,7 +156,7 @@ public class ExportQParserPlugin extends QParserPlugin {
       return new LeafCollector() {
         
         @Override
-        public void setScorer(Scorer scorer) throws IOException {}
+        public void setScorer(Scorable scorer) throws IOException {}
         
         @Override
         public void collect(int docId) throws IOException{
@@ -156,6 +175,7 @@ public class ExportQParserPlugin extends QParserPlugin {
       return docs;
     }
 
+    @SuppressWarnings({"unchecked"})
     public TopDocs topDocs(int start, int howMany) {
 
       assert(sets != null);
@@ -164,6 +184,7 @@ public class ExportQParserPlugin extends QParserPlugin {
 
       SolrQueryRequest req = null;
       if(info != null && ((req = info.getReq()) != null)) {
+        @SuppressWarnings({"rawtypes"})
         Map context = req.getContext();
         context.put("export", sets);
         context.put("totalHits", totalHits);
@@ -171,12 +192,12 @@ public class ExportQParserPlugin extends QParserPlugin {
 
       ScoreDoc[] scoreDocs = getScoreDocs(howMany);
       assert scoreDocs.length <= totalHits;
-      return new TopDocs(totalHits, scoreDocs, 0.0f);
+      return new TopDocs(new TotalHits(totalHits, totalHitsRelation), scoreDocs);
     }
 
     @Override
-    public boolean needsScores() {
-      return true; // TODO: is this the case?
+    public ScoreMode scoreMode() {
+      return ScoreMode.COMPLETE_NO_SCORES;
     }
   }
 

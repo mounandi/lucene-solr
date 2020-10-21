@@ -24,6 +24,7 @@ import java.util.Locale;
 
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.FieldsProducer;
+import org.apache.lucene.codecs.VectorReader;
 import org.apache.lucene.codecs.NormsProducer;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.codecs.StoredFieldsReader;
@@ -33,6 +34,8 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.packed.PackedInts;
 import org.apache.lucene.util.packed.PackedLongValues;
+
+import static org.apache.lucene.index.IndexWriter.isCongruentSort;
 
 /** Holds common state used during segment merging.
  *
@@ -75,6 +78,9 @@ public class MergeState {
   /** Point readers to merge */
   public final PointsReader[] pointsReaders;
 
+  /** Vector readers to merge */
+  public final VectorReader[] vectorReaders;
+
   /** Max docs per reader */
   public final int[] maxDocs;
 
@@ -101,6 +107,7 @@ public class MergeState {
     termVectorsReaders = new TermVectorsReader[numReaders];
     docValuesProducers = new DocValuesProducer[numReaders];
     pointsReaders = new PointsReader[numReaders];
+    vectorReaders = new VectorReader[numReaders];
     fieldInfos = new FieldInfos[numReaders];
     liveDocs = new Bits[numReaders];
 
@@ -137,6 +144,12 @@ public class MergeState {
       if (pointsReaders[i] != null) {
         pointsReaders[i] = pointsReaders[i].getMergeInstance();
       }
+
+      vectorReaders[i] = reader.getVectorReader();
+      if (vectorReaders[i] != null) {
+        vectorReaders[i] = vectorReaders[i].getMergeInstance();
+      }
+
       numDocs += reader.numDocs();
     }
 
@@ -223,50 +236,14 @@ public class MergeState {
       return originalReaders;
     }
 
-    /** If an incoming reader is not sorted, because it was flushed by IW older than {@link Version.LUCENE_7_0_0}
-     * or because we add unsorted segments from another index {@link IndexWriter#addIndexes(CodecReader...)} ,
-     * we sort it here:
-     */
-    final Sorter sorter = new Sorter(indexSort);
     List<CodecReader> readers = new ArrayList<>(originalReaders.size());
 
     for (CodecReader leaf : originalReaders) {
       Sort segmentSort = leaf.getMetaData().getSort();
-
-      if (segmentSort == null) {
-        // This segment was written by flush, so documents are not yet sorted, so we sort them now:
-        long t0 = System.nanoTime();
-        Sorter.DocMap sortDocMap = sorter.sort(leaf);
-        long t1 = System.nanoTime();
-        double msec = (t1-t0)/1000000.0;
-        
-        if (sortDocMap != null) {
-          if (infoStream.isEnabled("SM")) {
-            infoStream.message("SM", String.format(Locale.ROOT, "segment %s is not sorted; wrapping for sort %s now (%.2f msec to sort)", leaf, indexSort, msec));
-          }
-          needsIndexSort = true;
-          leaf = SlowCodecReaderWrapper.wrap(SortingLeafReader.wrap(new MergeReaderWrapper(leaf), sortDocMap));
-          leafDocMaps[readers.size()] = new DocMap() {
-              @Override
-              public int get(int docID) {
-                return sortDocMap.oldToNew(docID);
-              }
-            };
-        } else {
-          if (infoStream.isEnabled("SM")) {
-            infoStream.message("SM", String.format(Locale.ROOT, "segment %s is not sorted, but is already accidentally in sort %s order (%.2f msec to sort)", leaf, indexSort, msec));
-          }
-        }
-
-      } else {
-        if (segmentSort.equals(indexSort) == false) {
-          throw new IllegalArgumentException("index sort mismatch: merged segment has sort=" + indexSort + " but to-be-merged segment has sort=" + segmentSort);
-        }
-        if (infoStream.isEnabled("SM")) {
-          infoStream.message("SM", "segment " + leaf + " already sorted");
-        }
+      if (segmentSort == null || isCongruentSort(indexSort, segmentSort) == false) {
+        throw new IllegalArgumentException("index sort mismatch: merged segment has sort=" + indexSort +
+            " but to-be-merged segment has sort=" + (segmentSort == null ? "null" : segmentSort));
       }
-
       readers.add(leaf);
     }
 
@@ -275,9 +252,9 @@ public class MergeState {
 
   /** A map of doc IDs. */
   public static abstract class DocMap {
-    /** Sole constructor */
-    public DocMap() {
-    }
+    /** Sole constructor. (For invocation by subclass constructors, typically implicit.) */
+    // Explicitly declared so that we have non-empty javadoc
+    protected DocMap() {}
 
     /** Return the mapped docID or -1 if the given doc is not mapped. */
     public abstract int get(int docID);

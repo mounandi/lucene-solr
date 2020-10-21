@@ -18,9 +18,7 @@ package org.apache.solr.core;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.lang.invoke.MethodHandles;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,16 +29,15 @@ import org.apache.solr.cloud.ZkSolrResourceLoader;
 import org.apache.solr.common.MapSerializable;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.SolrZkClient;
-import org.apache.solr.common.params.MapSolrParams;
+import org.apache.solr.common.params.MultiMapSolrParams;
 import org.apache.solr.common.util.Utils;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
-import org.noggit.JSONParser;
-import org.noggit.ObjectBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.util.Collections.singletonMap;
+import static org.apache.solr.common.util.Utils.fromJSON;
 import static org.apache.solr.common.util.Utils.getDeepCopy;
 
 /**
@@ -50,10 +47,12 @@ import static org.apache.solr.common.util.Utils.getDeepCopy;
 public class RequestParams implements MapSerializable {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+  @SuppressWarnings({"rawtypes"})
   private final Map data;
   private final Map<String, ParamSet> paramsets = new LinkedHashMap<>();
   private final int znodeVersion;
 
+  @SuppressWarnings({"rawtypes"})
   public RequestParams(Map data, int znodeVersion) {
     if (data == null) data = Collections.EMPTY_MAP;
     this.data = data;
@@ -70,6 +69,7 @@ public class RequestParams implements MapSerializable {
     this.znodeVersion = znodeVersion;
   }
 
+  @SuppressWarnings({"rawtypes"})
   public static ParamSet createParamSet(Map map, Long version) {
     Map copy = getDeepCopy(map, 3);
     Map meta = (Map) copy.remove("");
@@ -85,27 +85,27 @@ public class RequestParams implements MapSerializable {
    * This converts Lists to arrays of strings. Because Solr expects
    * params to be String[]
    */
-  private static Map getMapCopy(Map value) {
-    Map copy = new LinkedHashMap<>();
-    for (Object o1 : value.entrySet()) {
-      Map.Entry entry = (Map.Entry) o1;
+  private static Map<String,String[]> getMapCopy(Map<String,?> value) {
+    Map<String, String[]> copy = new LinkedHashMap<>();
+    for (Map.Entry<String, ?> entry : value.entrySet()) {
       if ("".equals(entry.getKey())) {
-        copy.put(entry.getKey(), entry.getValue());
-        continue;
-      }
-      if (entry.getValue() != null) {
-        if (entry.getValue() instanceof List) {
-          List l = (List) entry.getValue();
-          String[] sarr = new String[l.size()];
-          for (int i = 0; i < l.size(); i++) {
-            if (l.get(i) != null) sarr[i] = String.valueOf(l.get(i));
-          }
-          copy.put(entry.getKey(), sarr);
+        // Why is this a special case?
+        if (entry.getValue() instanceof String[]) {
+          copy.put("", (String[]) entry.getValue());
         } else {
-          copy.put(entry.getKey(), String.valueOf(entry.getValue()));
+          throw new IllegalArgumentException();
         }
+      } else if (entry.getValue() == null) {
+        copy.put(entry.getKey(), null);
+      } else if (entry.getValue() instanceof List) {
+        List<?> l = (List<?>) entry.getValue();
+        String[] sarr = new String[l.size()];
+        for (int i = 0; i < l.size(); i++) {
+          if (l.get(i) != null) sarr[i] = String.valueOf(l.get(i));
+        }
+        copy.put(entry.getKey(), sarr);
       } else {
-        copy.put(entry.getKey(), entry.getValue());
+        copy.put(entry.getKey(), new String[] { entry.getValue().toString() });
       }
     }
     return copy;
@@ -125,10 +125,12 @@ public class RequestParams implements MapSerializable {
   }
 
   @Override
+  @SuppressWarnings({"unchecked"})
   public Map<String, Object> toMap(Map<String, Object> map) {
     return getMapWithVersion(data, znodeVersion);
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public static Map<String, Object> getMapWithVersion(Map<String, Object> data, int znodeVersion) {
     Map result = new LinkedHashMap();
     result.put(ConfigOverlay.ZNODEVER, znodeVersion);
@@ -136,6 +138,7 @@ public class RequestParams implements MapSerializable {
     return result;
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public RequestParams setParams(String name, ParamSet paramSet) {
     Map deepCopy = getDeepCopy(data, 3);
     Map p = (Map) deepCopy.get(NAME);
@@ -150,13 +153,17 @@ public class RequestParams implements MapSerializable {
       ZkSolrResourceLoader resourceLoader = (ZkSolrResourceLoader) loader;
       try {
         Stat stat = resourceLoader.getZkController().getZkClient().exists(resourceLoader.getConfigSetZkPath() + "/" + RequestParams.RESOURCE, null, true);
-        log.debug("latest version of {} in ZK  is : {}", resourceLoader.getConfigSetZkPath() + "/" + RequestParams.RESOURCE, stat == null ? "" : stat.getVersion());
+        if (log.isDebugEnabled()) {
+          log.debug("latest version of {}/{} in ZK  is : {}", resourceLoader.getConfigSetZkPath(), RequestParams.RESOURCE, stat == null ? "" : stat.getVersion());
+        }
         if (stat == null) {
           requestParams = new RequestParams(Collections.EMPTY_MAP, -1);
         } else if (requestParams == null || stat.getVersion() > requestParams.getZnodeVersion()) {
           Object[] o = getMapAndVersion(loader, RequestParams.RESOURCE);
           requestParams = new RequestParams((Map) o[0], (Integer) o[1]);
-          log.info("request params refreshed to version {}", requestParams.getZnodeVersion());
+          if (log.isInfoEnabled()) {
+            log.info("request params refreshed to version {}", requestParams.getZnodeVersion());
+          }
         }
       } catch (KeeperException | InterruptedException e) {
         SolrZkClient.checkInterrupted(e);
@@ -181,9 +188,10 @@ public class RequestParams implements MapSerializable {
         log.info("conf resource {} loaded . version : {} ", name, version);
       }
       try {
-        Map m = (Map) ObjectBuilder.getVal(new JSONParser(new InputStreamReader(in, StandardCharsets.UTF_8)));
+        @SuppressWarnings({"rawtypes"})
+        Map m = (Map) fromJSON (in);
         return new Object[]{m, version};
-      } catch (IOException e) {
+      } catch (Exception e) {
         throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, "Error parsing conf resource " + name, e);
       }
 
@@ -204,11 +212,15 @@ public class RequestParams implements MapSerializable {
   public static final String APPENDS = "_appends_";
   public static final String INVARIANTS = "_invariants_";
 
+  @SuppressWarnings({"unchecked"})
   public static class ParamSet implements MapSerializable {
+    @SuppressWarnings({"rawtypes"})
     private final Map defaults, appends, invariants;
     Map<String, VersionedParams> paramsMap;
+    @SuppressWarnings({"rawtypes"})
     public final Map meta;
 
+    @SuppressWarnings({"rawtypes"})
     ParamSet(Map defaults, Map invariants, Map appends, Map meta) {
       this.defaults = defaults;
       this.invariants = invariants;
@@ -226,6 +238,7 @@ public class RequestParams implements MapSerializable {
     }
 
     @Override
+    @SuppressWarnings({"unchecked"})
     public Map<String, Object> toMap(Map<String, Object> result) {
       result.putAll(defaults);
       if (appends != null) result.put(APPENDS, appends);
@@ -235,7 +248,8 @@ public class RequestParams implements MapSerializable {
     }
 
 
-    public ParamSet update(Map map) {
+    @SuppressWarnings({"rawtypes"})
+    public ParamSet update(@SuppressWarnings({"rawtypes"})Map map) {
       ParamSet p = createParamSet(map, null);
       return new ParamSet(
           mergeMaps(getDeepCopy(defaults, 2), p.defaults),
@@ -245,6 +259,7 @@ public class RequestParams implements MapSerializable {
       );
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private static Map mergeMaps(Map m1, Map m2) {
       if (m1 == null && m2 == null) return null;
       if (m1 == null) return m2;
@@ -253,15 +268,25 @@ public class RequestParams implements MapSerializable {
       return m1;
     }
 
+    /**
+     * @param type one of defaults, appends, invariants
+     */
     public VersionedParams getParams(String type) {
       return paramsMap.get(type);
     }
+
+    /**get the raw map
+     */
+    @SuppressWarnings({"unchecked"})
+    public Map<String, Object> get() {
+      return defaults;
+    }
   }
 
-  public static class VersionedParams extends MapSolrParams {
+  public static class VersionedParams extends MultiMapSolrParams {
     final ParamSet paramSet;
 
-    public VersionedParams(Map map, ParamSet paramSet) {
+    public VersionedParams(Map<String,?> map, ParamSet paramSet) {
       super(getMapCopy(map));
       this.paramSet = paramSet;
     }

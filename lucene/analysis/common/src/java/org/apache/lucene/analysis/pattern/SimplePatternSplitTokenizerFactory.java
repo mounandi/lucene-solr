@@ -19,7 +19,7 @@ package org.apache.lucene.analysis.pattern;
 
 import java.util.Map;
 
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.util.AttributeFactory;
 import org.apache.lucene.util.automaton.Automaton;
 import org.apache.lucene.util.automaton.Operations;
@@ -53,8 +53,15 @@ import org.apache.lucene.util.automaton.RegExp;
  * @lucene.experimental
  *
  * @see SimplePatternSplitTokenizer
+ *
+ * @since 6.5.0
+ * @lucene.spi {@value #NAME}
  */
 public class SimplePatternSplitTokenizerFactory extends TokenizerFactory {
+
+  /** SPI name */
+  public static final String NAME = "simplePatternSplit";
+
   public static final String PATTERN = "pattern";
   private final Automaton dfa;
   private final int maxDeterminizedStates;
@@ -69,6 +76,11 @@ public class SimplePatternSplitTokenizerFactory extends TokenizerFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public SimplePatternSplitTokenizerFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public SimplePatternSplitTokenizer create(final AttributeFactory factory) {
     return new SimplePatternSplitTokenizer(factory, dfa);

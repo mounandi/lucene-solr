@@ -17,13 +17,11 @@
 package org.apache.lucene.search;
 
 import java.io.IOException;
-import java.util.Set;
 
 import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.document.SortedNumericDocValuesField;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.Term;
 
 /**
  * A query that uses either an index structure (points or terms) or doc values
@@ -37,7 +35,7 @@ import org.apache.lucene.index.Term;
  *   String field;
  *   long minValue, maxValue;
  *   Query pointQuery = LongPoint.newRangeQuery(field, minValue, maxValue);
- *   Query dvQuery = SortedNumericDocValuesField.newRangeQuery(field, minValue, maxValue);
+ *   Query dvQuery = SortedNumericDocValuesField.newSlowRangeQuery(field, minValue, maxValue);
  *   Query query = new IndexOrDocValuesQuery(pointQuery, dvQuery);
  * </pre>
  * The above query will be efficient as it will use points in the case that they
@@ -110,13 +108,21 @@ public final class IndexOrDocValuesQuery extends Query {
   }
 
   @Override
-  public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
-    final Weight indexWeight = indexQuery.createWeight(searcher, needsScores, boost);
-    final Weight dvWeight = dvQuery.createWeight(searcher, needsScores, boost);
+  public void visit(QueryVisitor visitor) {
+    QueryVisitor v = visitor.getSubVisitor(BooleanClause.Occur.MUST, this);
+    indexQuery.visit(v);
+    dvQuery.visit(v);
+  }
+
+  @Override
+  public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
+    final Weight indexWeight = indexQuery.createWeight(searcher, scoreMode, boost);
+    final Weight dvWeight = dvQuery.createWeight(searcher, scoreMode, boost);
     return new Weight(this) {
       @Override
-      public void extractTerms(Set<Term> terms) {
-        indexWeight.extractTerms(terms);
+      public Matches matches(LeafReaderContext context, int doc) throws IOException {
+        // We need to check a single doc, so the dv query should perform better
+        return dvWeight.matches(context, doc);
       }
 
       @Override
@@ -169,6 +175,14 @@ public final class IndexOrDocValuesQuery extends Query {
         }
         return scorerSupplier.get(Long.MAX_VALUE);
       }
+
+      @Override
+      public boolean isCacheable(LeafReaderContext ctx) {
+        // Both index and dv query should return the same values, so we can use
+        // the index query's cachehelper here
+        return indexWeight.isCacheable(ctx);
+      }
+
     };
   }
 

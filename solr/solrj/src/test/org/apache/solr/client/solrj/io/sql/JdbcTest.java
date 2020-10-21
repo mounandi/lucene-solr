@@ -28,7 +28,6 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.SortedSet;
@@ -76,6 +75,9 @@ public class JdbcTest extends SolrCloudTestCase {
       collection = COLLECTIONORALIAS;
     }
     CollectionAdminRequest.createCollection(collection, "conf", 2, 1).process(cluster.getSolrClient());
+    
+    cluster.waitForActiveCollection(collection, 2, 2);
+    
     AbstractDistribZkTestBase.waitForRecoveriesToFinish(collection, cluster.getSolrClient().getZkStateReader(),
         false, true, DEFAULT_TIMEOUT);
     if (useAlias) {
@@ -415,6 +417,7 @@ public class JdbcTest extends SolrCloudTestCase {
 
   @Ignore("Fix error checking")
   @Test
+  @SuppressWarnings({"try"})
   public void testErrorPropagation() throws Exception {
     //Test error propagation
     Properties props = new Properties();
@@ -432,6 +435,7 @@ public class JdbcTest extends SolrCloudTestCase {
   }
 
   @Test
+  @SuppressWarnings({"try"})
   public void testSQLExceptionThrownWhenQueryAndConnUseDiffCollections() throws Exception  {
     String badCollection = COLLECTIONORALIAS + "bad";
     String connectionString = "jdbc:solr://" + zkHost + "?collection=" + badCollection;
@@ -494,6 +498,8 @@ public class JdbcTest extends SolrCloudTestCase {
   private void testJDBCMethods(String collection, String connectionString, Properties properties, String sql) throws Exception {
     try (Connection con = DriverManager.getConnection(connectionString, properties)) {
       assertTrue(con.isValid(DEFAULT_CONNECTION_TIMEOUT));
+      assertTrue("connection should be valid when checked with timeout = 0 -> con.isValid(0)", con.isValid(0));
+
 
       assertEquals(zkHost, con.getCatalog());
       con.setCatalog(zkHost);
@@ -524,7 +530,6 @@ public class JdbcTest extends SolrCloudTestCase {
 //      assertEquals(0, databaseMetaData.getDriverMajorVersion());
 //      assertEquals(0, databaseMetaData.getDriverMinorVersion());
 
-
       List<String> tableSchemas = new ArrayList<>(Arrays.asList(zkHost, "metadata"));
       try(ResultSet rs = databaseMetaData.getSchemas()) {
         assertTrue(rs.next());
@@ -549,19 +554,11 @@ public class JdbcTest extends SolrCloudTestCase {
       solrClient.connect();
       ZkStateReader zkStateReader = solrClient.getZkStateReader();
 
-      SortedSet<String> tables = new TreeSet<>();
-
       Set<String> collectionsSet = zkStateReader.getClusterState().getCollectionsMap().keySet();
-      tables.addAll(collectionsSet);
+      SortedSet<String> tables = new TreeSet<>(collectionsSet);
 
       Aliases aliases = zkStateReader.getAliases();
-      if(aliases != null) {
-        Map<String, String> collectionAliasMap = aliases.getCollectionAliasMap();
-        if(collectionAliasMap != null) {
-          Set<String> aliasesSet = collectionAliasMap.keySet();
-          tables.addAll(aliasesSet);
-        }
-      }
+      tables.addAll(aliases.getCollectionAliasListMap().keySet());
 
       try(ResultSet rs = databaseMetaData.getTables(null, zkHost, "%", null)) {
         for(String table : tables) {
@@ -575,6 +572,15 @@ public class JdbcTest extends SolrCloudTestCase {
         assertFalse(rs.next());
       }
 
+      assertEquals(Connection.TRANSACTION_NONE, con.getTransactionIsolation());
+      try {
+        con.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        fail("should not have been able to set transaction isolation");
+      } catch (SQLException e) {
+        assertEquals(UnsupportedOperationException.class, e.getCause().getClass());
+      }
+      assertEquals(Connection.TRANSACTION_NONE, con.getTransactionIsolation());
+
       assertTrue(con.isReadOnly());
       con.setReadOnly(true);
       assertTrue(con.isReadOnly());
@@ -582,7 +588,6 @@ public class JdbcTest extends SolrCloudTestCase {
       assertNull(con.getWarnings());
       con.clearWarnings();
       assertNull(con.getWarnings());
-
 
       try (Statement statement = con.createStatement()) {
         checkStatement(con, statement);

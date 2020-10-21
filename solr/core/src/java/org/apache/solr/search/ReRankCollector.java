@@ -20,14 +20,17 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Map;
+import java.util.Set;
+
 import com.carrotsearch.hppc.IntFloatHashMap;
 import com.carrotsearch.hppc.IntIntHashMap;
-
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LeafCollector;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Rescorer;
 import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopDocsCollector;
@@ -39,32 +42,39 @@ import org.apache.solr.handler.component.QueryElevationComponent;
 import org.apache.solr.request.SolrRequestInfo;
 
 /* A TopDocsCollector used by reranking queries. */
+@SuppressWarnings({"rawtypes"})
 public class ReRankCollector extends TopDocsCollector {
 
-  final private TopDocsCollector  mainCollector;
+  final private TopDocsCollector<?> mainCollector;
   final private IndexSearcher searcher;
   final private int reRankDocs;
   final private int length;
-  final private Map<BytesRef, Integer> boostedPriority;
+  final private Set<BytesRef> boostedPriority; // order is the "priority"
   final private Rescorer reRankQueryRescorer;
+  final private Sort sort;
+  final private Query query;
 
 
+  @SuppressWarnings({"unchecked"})
   public ReRankCollector(int reRankDocs,
       int length,
       Rescorer reRankQueryRescorer,
       QueryCommand cmd,
       IndexSearcher searcher,
-      Map<BytesRef, Integer> boostedPriority) throws IOException {
+      Set<BytesRef> boostedPriority) throws IOException {
     super(null);
     this.reRankDocs = reRankDocs;
     this.length = length;
     this.boostedPriority = boostedPriority;
+    this.query = cmd.getQuery();
     Sort sort = cmd.getSort();
     if(sort == null) {
-      this.mainCollector = TopScoreDocCollector.create(Math.max(this.reRankDocs, length));
+      this.sort = null;
+      this.mainCollector = TopScoreDocCollector.create(Math.max(this.reRankDocs, length), cmd.getMinExactCount());
     } else {
-      sort = sort.rewrite(searcher);
-      this.mainCollector = TopFieldCollector.create(sort, Math.max(this.reRankDocs, length), false, true, true);
+      this.sort = sort = sort.rewrite(searcher);
+      //scores are needed for Rescorer (regardless of whether sort needs it)
+      this.mainCollector = TopFieldCollector.create(sort, Math.max(this.reRankDocs, length), cmd.getMinExactCount());
     }
     this.searcher = searcher;
     this.reRankQueryRescorer = reRankQueryRescorer;
@@ -80,18 +90,23 @@ public class ReRankCollector extends TopDocsCollector {
   }
 
   @Override
-  public boolean needsScores() {
-    return true;
+  public ScoreMode scoreMode() {
+    return this.mainCollector.scoreMode();
   }
 
+  @SuppressWarnings({"unchecked"})
   public TopDocs topDocs(int start, int howMany) {
 
     try {
 
       TopDocs mainDocs = mainCollector.topDocs(0,  Math.max(reRankDocs, length));
 
-      if(mainDocs.totalHits == 0 || mainDocs.scoreDocs.length == 0) {
+      if(mainDocs.totalHits.value == 0 || mainDocs.scoreDocs.length == 0) {
         return mainDocs;
+      }
+
+      if (sort != null) {
+        TopFieldCollector.populateScores(mainDocs.scoreDocs, searcher, query);
       }
 
       ScoreDoc[] mainScoreDocs = mainDocs.scoreDocs;
@@ -115,7 +130,8 @@ public class ReRankCollector extends TopDocsCollector {
 
         IntIntHashMap boostedDocs = QueryElevationComponent.getBoostDocs((SolrIndexSearcher)searcher, boostedPriority, requestContext);
 
-        Arrays.sort(rescoredDocs.scoreDocs, new BoostedComp(boostedDocs, mainDocs.scoreDocs, rescoredDocs.getMaxScore()));
+        float maxScore = rescoredDocs.scoreDocs.length == 0 ? Float.NaN : rescoredDocs.scoreDocs[0].score;
+        Arrays.sort(rescoredDocs.scoreDocs, new BoostedComp(boostedDocs, mainDocs.scoreDocs, maxScore));
       }
 
       if(howMany == rescoredDocs.scoreDocs.length) {
@@ -139,6 +155,7 @@ public class ReRankCollector extends TopDocsCollector {
     }
   }
 
+  @SuppressWarnings({"rawtypes"})
   public static class BoostedComp implements Comparator {
     IntFloatHashMap boostedMap;
 

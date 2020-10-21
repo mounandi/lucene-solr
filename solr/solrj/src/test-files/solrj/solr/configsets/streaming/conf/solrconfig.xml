@@ -21,7 +21,7 @@
  It is *not* a good example to work from.
 -->
 <config>
-  <luceneMatchVersion>${tests.luceneMatchVersion:LUCENE_CURRENT}</luceneMatchVersion>
+  <luceneMatchVersion>${tests.luceneMatchVersion:LATEST}</luceneMatchVersion>
   <indexConfig>
     <useCompoundFile>${useCompoundFile:false}</useCompoundFile>
   </indexConfig>
@@ -35,6 +35,11 @@
     </updateLog>
   </updateHandler>
 
+  <updateRequestProcessorChain default="true">
+    <!-- be tolerant of errors for testing optimistic concurrency of delete() stream -->
+    <processor class="solr.TolerantUpdateProcessorFactory" />
+    <processor class="solr.RunUpdateProcessorFactory" />
+  </updateRequestProcessorChain>
 
   <requestDispatcher>
     <requestParsers enableRemoteStreaming="false" multipartUploadLimitInKB="-1" />

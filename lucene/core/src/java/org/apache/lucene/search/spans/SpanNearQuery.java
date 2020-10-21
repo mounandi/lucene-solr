@@ -24,15 +24,18 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.index.TermContext;
+import org.apache.lucene.index.TermStates;
 import org.apache.lucene.index.Terms;
+import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.ScoreMode;
+import org.apache.lucene.search.Weight;
 
 /** Matches spans which are near one another.  One can specify <i>slop</i>, the
  * maximum number of intervening unmatched positions, as well as whether
@@ -176,27 +179,31 @@ public class SpanNearQuery extends SpanQuery implements Cloneable {
   }
 
   @Override
-  public SpanWeight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+  public SpanWeight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
     List<SpanWeight> subWeights = new ArrayList<>();
     for (SpanQuery q : clauses) {
-      subWeights.add(q.createWeight(searcher, false, boost));
+      subWeights.add(q.createWeight(searcher, scoreMode, boost));
     }
-    return new SpanNearWeight(subWeights, searcher, needsScores ? getTermContexts(subWeights) : null, boost);
+    return new SpanNearWeight(subWeights, searcher, scoreMode.needsScores() ? getTermStates(subWeights) : null, boost);
   }
 
+  /**
+   * Creates SpanNearQuery scorer instances
+   * @lucene.internal
+   */
   public class SpanNearWeight extends SpanWeight {
 
     final List<SpanWeight> subWeights;
 
-    public SpanNearWeight(List<SpanWeight> subWeights, IndexSearcher searcher, Map<Term, TermContext> terms, float boost) throws IOException {
+    public SpanNearWeight(List<SpanWeight> subWeights, IndexSearcher searcher, Map<Term, TermStates> terms, float boost) throws IOException {
       super(SpanNearQuery.this, searcher, terms, boost);
       this.subWeights = subWeights;
     }
 
     @Override
-    public void extractTermContexts(Map<Term, TermContext> contexts) {
+    public void extractTermStates(Map<Term, TermStates> contexts) {
       for (SpanWeight w : subWeights) {
-        w.extractTermContexts(contexts);
+        w.extractTermStates(contexts);
       }
     }
 
@@ -224,11 +231,14 @@ public class SpanNearQuery extends SpanQuery implements Cloneable {
     }
 
     @Override
-    public void extractTerms(Set<Term> terms) {
-      for (SpanWeight w : subWeights) {
-        w.extractTerms(terms);
+    public boolean isCacheable(LeafReaderContext ctx) {
+      for (Weight w : subWeights) {
+        if (w.isCacheable(ctx) == false)
+          return false;
       }
+      return true;
     }
+
   }
 
   @Override
@@ -251,6 +261,17 @@ public class SpanNearQuery extends SpanQuery implements Cloneable {
       }
     }
     return super.rewrite(reader);
+  }
+
+  @Override
+  public void visit(QueryVisitor visitor) {
+    if (visitor.acceptField(getField()) == false) {
+      return;
+    }
+    QueryVisitor v = visitor.getSubVisitor(BooleanClause.Occur.MUST, this);
+    for (SpanQuery clause : clauses) {
+      clause.visit(v);
+    }
   }
 
   @Override
@@ -290,12 +311,17 @@ public class SpanNearQuery extends SpanQuery implements Cloneable {
     }
 
     @Override
+    public void visit(QueryVisitor visitor) {
+      visitor.visitLeaf(this);
+    }
+
+    @Override
     public String toString(String field) {
       return "SpanGap(" + field + ":" + width + ")";
     }
 
     @Override
-    public SpanWeight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+    public SpanWeight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
       return new SpanGapWeight(searcher, boost);
     }
 
@@ -306,7 +332,7 @@ public class SpanNearQuery extends SpanQuery implements Cloneable {
       }
 
       @Override
-      public void extractTermContexts(Map<Term, TermContext> contexts) {
+      public void extractTermStates(Map<Term, TermStates> contexts) {
 
       }
 
@@ -316,9 +342,10 @@ public class SpanNearQuery extends SpanQuery implements Cloneable {
       }
 
       @Override
-      public void extractTerms(Set<Term> terms) {
-
+      public boolean isCacheable(LeafReaderContext ctx) {
+        return true;
       }
+
     }
 
     @Override

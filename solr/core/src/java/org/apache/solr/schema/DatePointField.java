@@ -29,7 +29,6 @@ import org.apache.lucene.queries.function.valuesource.LongFieldSource;
 import org.apache.lucene.queries.function.valuesource.MultiValuedLongFieldSource;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.SortedNumericSelector;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -98,7 +97,6 @@ import org.apache.solr.util.DateMathParser;
  * acronym UTC was chosen as a compromise."
  * </blockquote>
  *
- * @see TrieDateField
  * @see PointField
  */
 public class DatePointField extends PointField implements DateValueFieldType {
@@ -110,8 +108,8 @@ public class DatePointField extends PointField implements DateValueFieldType {
 
   @Override
   public Object toNativeType(Object val) {
-    if (val instanceof String) {
-      return DateMathParser.parseMath(null, (String) val);
+    if (val instanceof CharSequence) {
+      return DateMathParser.parseMath(null, val.toString());
     }
     return super.toNativeType(val);
   }
@@ -189,24 +187,6 @@ public class DatePointField extends PointField implements DateValueFieldType {
   }
 
   @Override
-  public SortField getSortField(SchemaField field, boolean top) {
-    field.checkSortability();
-
-    Object missingValue = null;
-    boolean sortMissingLast = field.sortMissingLast();
-    boolean sortMissingFirst = field.sortMissingFirst();
-
-    if (sortMissingLast) {
-      missingValue = top ? Long.MIN_VALUE : Long.MAX_VALUE;
-    } else if (sortMissingFirst) {
-      missingValue = top ? Long.MAX_VALUE : Long.MIN_VALUE;
-    }
-    SortField sf = new SortField(field.getName(), SortField.Type.LONG, top);
-    sf.setMissingValue(missingValue);
-    return sf;
-  }
-
-  @Override
   public UninvertingReader.Type getUninversionType(SchemaField sf) {
     if (sf.multiValued()) {
       return null;
@@ -238,36 +218,37 @@ public class DatePointField extends PointField implements DateValueFieldType {
   protected StoredField getStoredField(SchemaField sf, Object value) {
     return new StoredField(sf.getName(), ((Date) this.toNativeType(value)).getTime());
   }
+
+  private static class DatePointFieldSource extends LongFieldSource {
+
+    public DatePointFieldSource(String field) {
+      super(field);
+    }
+
+    @Override
+    public String description() {
+      return "date(" + field + ')';
+    }
+
+    @Override
+    protected MutableValueLong newMutableValueLong() {
+      return new MutableValueDate();
+    }
+
+    @Override
+    public Date longToObject(long val) {
+      return new Date(val);
+    }
+
+    @Override
+    public String longToString(long val) {
+      return longToObject(val).toInstant().toString();
+    }
+
+    @Override
+    public long externalToLong(String extVal) {
+      return DateMathParser.parseMath(null, extVal).getTime();
+    }
+  }
 }
 
-class DatePointFieldSource extends LongFieldSource {
-
-  public DatePointFieldSource(String field) {
-    super(field);
-  }
-
-  @Override
-  public String description() {
-    return "date(" + field + ')';
-  }
-
-  @Override
-  protected MutableValueLong newMutableValueLong() {
-    return new MutableValueDate();
-  }
-
-  @Override
-  public Date longToObject(long val) {
-    return new Date(val);
-  }
-
-  @Override
-  public String longToString(long val) {
-    return longToObject(val).toInstant().toString();
-  }
-
-  @Override
-  public long externalToLong(String extVal) {
-    return DateMathParser.parseMath(null, extVal).getTime();
-  }
-}

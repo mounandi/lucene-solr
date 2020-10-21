@@ -73,7 +73,7 @@ public abstract class FilteredTermsEnum extends TermsEnum {
    * Creates a filtered {@link TermsEnum} on a terms enum.
    * @param tenum the terms enumeration to filter.
    */
-  public FilteredTermsEnum(final TermsEnum tenum) {
+  protected FilteredTermsEnum(final TermsEnum tenum) {
     this(tenum, true);
   }
 
@@ -81,7 +81,7 @@ public abstract class FilteredTermsEnum extends TermsEnum {
    * Creates a filtered {@link TermsEnum} on a terms enum.
    * @param tenum the terms enumeration to filter.
    */
-  public FilteredTermsEnum(final TermsEnum tenum, final boolean startWithSeek) {
+  protected FilteredTermsEnum(final TermsEnum tenum, final boolean startWithSeek) {
     assert tenum != null;
     this.tenum = tenum;
     doSeek = startWithSeek;
@@ -181,7 +181,12 @@ public abstract class FilteredTermsEnum extends TermsEnum {
   public PostingsEnum postings(PostingsEnum reuse, int flags) throws IOException {
     return tenum.postings(reuse, flags);
   }
-  
+
+  @Override
+  public ImpactsEnum impacts(int flags) throws IOException {
+    return tenum.impacts(flags);
+  }
+
   /** This enum does not support seeking!
    * @throws UnsupportedOperationException In general, subclasses do not
    *         support seeking.
@@ -243,7 +248,9 @@ public abstract class FilteredTermsEnum extends TermsEnum {
         case END:
           // we are supposed to end the enum
           return null;
-        // NO: we just fall through and iterate again
+        case NO:
+          // we just iterate again
+          break;
       }
     }
   }

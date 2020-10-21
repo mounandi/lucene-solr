@@ -20,6 +20,8 @@ import java.util.Arrays;
 
 
 public class TestCharsRef extends LuceneTestCase {
+
+  @SuppressWarnings("deprecation")
   public void testUTF16InUTF8Order() {
     final int numStrings = atLeast(1000);
     BytesRef utf8[] = new BytesRef[numStrings];
@@ -123,6 +125,14 @@ public class TestCharsRef extends LuceneTestCase {
     
     expectThrows(IndexOutOfBoundsException.class, () -> {
       c.subSequence(2, 1);
+    });
+  }
+  
+  public void testInvalidDeepCopy() {
+    CharsRef from = new CharsRef(new char[] { 'a', 'b' }, 0, 2);
+    from.offset += 1; // now invalid
+    expectThrows(IndexOutOfBoundsException.class, () -> {
+      CharsRef.deepCopyOf(from);
     });
   }
 }

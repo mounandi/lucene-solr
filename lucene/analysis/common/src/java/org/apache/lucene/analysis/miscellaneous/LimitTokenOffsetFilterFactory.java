@@ -20,7 +20,7 @@ package org.apache.lucene.analysis.miscellaneous;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link LimitTokenOffsetFilter}.
@@ -33,8 +33,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * &lt;/fieldType&gt;</pre>
  * <p>
  * The {@code consumeAllTokens} property is optional and defaults to {@code false}.
+ * @since 5.2.0
+ * @lucene.spi {@value #NAME}
  */
 public class LimitTokenOffsetFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "limitTokenOffset";
 
   public static final String MAX_START_OFFSET = "maxStartOffset";
   public static final String CONSUME_ALL_TOKENS_KEY = "consumeAllTokens";
@@ -49,6 +54,11 @@ public class LimitTokenOffsetFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public LimitTokenOffsetFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

@@ -16,17 +16,19 @@
  */
 package org.apache.solr.ltr.feature;
 
+import java.util.LinkedHashMap;
+
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestValueFeature extends TestRerankBase {
 
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1"));
@@ -40,8 +42,8 @@ public class TestValueFeature extends TestRerankBase {
     assertU(commit());
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
@@ -49,32 +51,27 @@ public class TestValueFeature extends TestRerankBase {
   public void testValueFeatureWithEmptyValue() throws Exception {
     final RuntimeException expectedException =
         new RuntimeException("mismatch: '0'!='500' @ responseHeader/status");
-    try {
-        loadFeature("c2", ValueFeature.class.getCanonicalName(), "{\"value\":\"\"}");
-        fail("testValueFeatureWithEmptyValue failed to throw exception: "+expectedException);
-    } catch (RuntimeException actualException) {
-      assertEquals(expectedException.toString(), actualException.toString());
-    }
+    RuntimeException e = expectThrows(RuntimeException.class, () -> {
+      loadFeature("c2", ValueFeature.class.getName(), "{\"value\":\"\"}");
+    });
+    assertEquals(expectedException.toString(), e.toString());
   }
 
   @Test
   public void testValueFeatureWithWhitespaceValue() throws Exception {
     final RuntimeException expectedException =
         new RuntimeException("mismatch: '0'!='500' @ responseHeader/status");
-    try {
-        loadFeature("c2", ValueFeature.class.getCanonicalName(),
-              "{\"value\":\" \"}");
-        fail("testValueFeatureWithWhitespaceValue failed to throw exception: "+expectedException);
-    } catch (RuntimeException actualException) {
-      assertEquals(expectedException.toString(), actualException.toString());
-    }
+    RuntimeException e = expectThrows(RuntimeException.class, () -> {
+      loadFeature("c2", ValueFeature.class.getName(), "{\"value\":\" \"}");
+    });
+    assertEquals(expectedException.toString(), e.toString());
   }
 
   @Test
   public void testRerankingWithConstantValueFeatureReplacesDocScore() throws Exception {
-    loadFeature("c3", ValueFeature.class.getCanonicalName(), "c3",
+    loadFeature("c3", ValueFeature.class.getName(), "c3",
         "{\"value\":2}");
-    loadModel("m3", LinearModel.class.getCanonicalName(), new String[] {"c3"},
+    loadModel("m3", LinearModel.class.getName(), new String[] {"c3"},
         "c3", "{\"weights\":{\"c3\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -92,9 +89,9 @@ public class TestValueFeature extends TestRerankBase {
 
   @Test
   public void testRerankingWithEfiValueFeatureReplacesDocScore() throws Exception {
-    loadFeature("c6", ValueFeature.class.getCanonicalName(), "c6",
+    loadFeature("c6", ValueFeature.class.getName(), "c6",
         "{\"value\":\"${val6}\"}");
-    loadModel("m6", LinearModel.class.getCanonicalName(), new String[] {"c6"},
+    loadModel("m6", LinearModel.class.getName(), new String[] {"c6"},
         "c6", "{\"weights\":{\"c6\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -113,9 +110,9 @@ public class TestValueFeature extends TestRerankBase {
 
   @Test
   public void testValueFeatureImplicitlyNotRequiredShouldReturnOkStatusCode() throws Exception {
-    loadFeature("c5", ValueFeature.class.getCanonicalName(), "c5",
+    loadFeature("c5", ValueFeature.class.getName(), "c5",
         "{\"value\":\"${val6}\"}");
-    loadModel("m5", LinearModel.class.getCanonicalName(), new String[] {"c5"},
+    loadModel("m5", LinearModel.class.getName(), new String[] {"c5"},
         "c5", "{\"weights\":{\"c5\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -130,9 +127,9 @@ public class TestValueFeature extends TestRerankBase {
 
   @Test
   public void testValueFeatureExplictlyNotRequiredShouldReturnOkStatusCode() throws Exception {
-    loadFeature("c7", ValueFeature.class.getCanonicalName(), "c7",
+    loadFeature("c7", ValueFeature.class.getName(), "c7",
         "{\"value\":\"${val7}\",\"required\":false}");
-    loadModel("m7", LinearModel.class.getCanonicalName(), new String[] {"c7"},
+    loadModel("m7", LinearModel.class.getName(), new String[] {"c7"},
         "c7", "{\"weights\":{\"c7\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -147,9 +144,9 @@ public class TestValueFeature extends TestRerankBase {
 
   @Test
   public void testValueFeatureRequiredShouldReturn400StatusCode() throws Exception {
-    loadFeature("c8", ValueFeature.class.getCanonicalName(), "c8",
+    loadFeature("c8", ValueFeature.class.getName(), "c8",
         "{\"value\":\"${val8}\",\"required\":true}");
-    loadModel("m8", LinearModel.class.getCanonicalName(), new String[] {"c8"},
+    loadModel("m8", LinearModel.class.getName(), new String[] {"c8"},
         "c8", "{\"weights\":{\"c8\":1.0}}");
 
     final SolrQuery query = new SolrQuery();
@@ -160,6 +157,16 @@ public class TestValueFeature extends TestRerankBase {
     query.add("rq", "{!ltr model=m8 reRankDocs=4}");
 
     assertJQ("/query" + query.toQueryString(), "/responseHeader/status==400");
+  }
+
+  @Test
+  public void testParamsToMap() throws Exception {
+    final LinkedHashMap<String,Object> params = new LinkedHashMap<String,Object>();
+    params.put("value", "${val"+random().nextInt(10)+"}");
+    if (random().nextBoolean()) {
+      params.put("required", random().nextBoolean());
+    }
+    doTestParamsToMap(ValueFeature.class.getName(), params);
   }
 
 }

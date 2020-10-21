@@ -42,14 +42,16 @@ public class TestZkConfigManager extends SolrTestCaseJ4 {
   private static ZkTestServer zkServer;
 
   @BeforeClass
-  public static void startZkServer() throws InterruptedException {
-    zkServer = new ZkTestServer(createTempDir("zkData").toString());
+  public static void startZkServer() throws Exception {
+    zkServer = new ZkTestServer(createTempDir("zkData"));
     zkServer.run();
   }
 
   @AfterClass
   public static void shutdownZkServer() throws IOException, InterruptedException {
-    zkServer.shutdown();
+    if (null != zkServer) {
+      zkServer.shutdown();
+    }
     zkServer = null;
   }
 
@@ -115,6 +117,13 @@ public class TestZkConfigManager extends SolrTestCaseJ4 {
       // uploading same files to a new name creates a new config
       configManager.uploadConfigDir(tempConfig, "config2");
       assertEquals(2, configManager.listConfigs().size());
+
+      // Test copying a config works in both flavors
+      configManager.copyConfigDir("config2", "config2copy");
+      configManager.copyConfigDir("config2", "config2copy2", null);
+      configs = configManager.listConfigs();
+      assertTrue("config2copy should exist", configs.contains("config2copy"));
+      assertTrue("config2copy2 should exist", configs.contains("config2copy2"));
     }
   }
 

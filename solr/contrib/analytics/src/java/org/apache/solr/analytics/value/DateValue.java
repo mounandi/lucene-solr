@@ -22,6 +22,7 @@ import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 
 import org.apache.solr.analytics.facet.compare.ExpressionComparator;
+import org.apache.solr.analytics.value.constant.ConstantDateValue;
 
 /**
  * A single-valued analytics value that can be represented as a date.
@@ -37,13 +38,13 @@ public interface DateValue extends DateValueStream, LongValue {
    * Get the date representation of the current value.
    * <p>
    * NOTE: The value returned is not valid unless calling {@link #exists()} afterwards returns {@code TRUE}.
-   * 
+   *
    * @return the current value
    */
   Date getDate();
-  
+
   /**
-   * An interface that represents all of the types a {@link DateValue} should be able to cast to. 
+   * An interface that represents all of the types a {@link DateValue} should be able to cast to.
    */
   public static interface CastingDateValue extends DateValue, LongValue, StringValue, ComparableValue {}
 
@@ -63,8 +64,7 @@ public interface DateValue extends DateValueStream, LongValue {
     }
     @Override
     public Object getObject() {
-      long val = getLong();
-      return exists() ? new Date(val) : null;
+      return getDate();
     }
     @Override
     public void streamDates(Consumer<Date> cons) {
@@ -93,6 +93,13 @@ public interface DateValue extends DateValueStream, LongValue {
       if (exists()) {
         cons.accept(val);
       }
+    }
+    @Override
+    public AnalyticsValue convertToConstant() {
+      if (getExpressionType().equals(ExpressionType.CONST)) {
+        return new ConstantDateValue(getLong());
+      }
+      return this;
     }
     @Override
     public ExpressionComparator<Date> getObjectComparator(String expression) {

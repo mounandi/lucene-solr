@@ -16,6 +16,11 @@
  */
 package org.apache.lucene.search.highlight.custom;
 
+import java.io.IOException;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Objects;
+
 import org.apache.lucene.analysis.CannedTokenStream;
 import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.analysis.MockTokenFilter;
@@ -25,6 +30,7 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BoostQuery;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.highlight.Highlighter;
 import org.apache.lucene.search.highlight.InvalidTokenOffsetsException;
@@ -34,11 +40,6 @@ import org.apache.lucene.search.highlight.SimpleHTMLFormatter;
 import org.apache.lucene.search.highlight.WeightedSpanTerm;
 import org.apache.lucene.search.highlight.WeightedSpanTermExtractor;
 import org.apache.lucene.util.LuceneTestCase;
-
-import java.io.IOException;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Objects;
 
 /**
  * Tests the extensibility of {@link WeightedSpanTermExtractor} and
@@ -100,21 +101,22 @@ public class HighlightCustomQueryTest extends LuceneTestCase {
 
   /**
    * This method intended for use with
-   * <tt>testHighlightingWithDefaultField()</tt>
+   * <code>testHighlightingWithDefaultField()</code>
    */
   private String highlightField(Query query, String fieldName,
       String text) throws IOException, InvalidTokenOffsetsException {
-    TokenStream tokenStream = new MockAnalyzer(random(), MockTokenizer.SIMPLE,
-        true, MockTokenFilter.ENGLISH_STOPSET).tokenStream(fieldName, text);
-    // Assuming "<B>", "</B>" used to highlight
-    SimpleHTMLFormatter formatter = new SimpleHTMLFormatter();
-    MyQueryScorer scorer = new MyQueryScorer(query, fieldName, FIELD_NAME);
-    Highlighter highlighter = new Highlighter(formatter, scorer);
-    highlighter.setTextFragmenter(new SimpleFragmenter(Integer.MAX_VALUE));
+    try (MockAnalyzer mockAnalyzer = new MockAnalyzer(random(), MockTokenizer.SIMPLE,true,
+        MockTokenFilter.ENGLISH_STOPSET); TokenStream tokenStream = mockAnalyzer.tokenStream(fieldName, text)) {
+      // Assuming "<B>", "</B>" used to highlight
+      SimpleHTMLFormatter formatter = new SimpleHTMLFormatter();
+      MyQueryScorer scorer = new MyQueryScorer(query, fieldName, FIELD_NAME);
+      Highlighter highlighter = new Highlighter(formatter, scorer);
+      highlighter.setTextFragmenter(new SimpleFragmenter(Integer.MAX_VALUE));
 
-    String rv = highlighter.getBestFragments(tokenStream, text, 1,
-        "(FIELD TEXT TRUNCATED)");
-    return rv.length() == 0 ? text : rv;
+      String rv = highlighter.getBestFragments(tokenStream, text, 1,
+          "(FIELD TEXT TRUNCATED)");
+      return rv.length() == 0 ? text : rv;
+    }
   }
 
   public static class MyWeightedSpanTermExtractor extends
@@ -173,6 +175,11 @@ public class HighlightCustomQueryTest extends LuceneTestCase {
     @Override
     public Query rewrite(IndexReader reader) throws IOException {
       return new TermQuery(term);
+    }
+
+    @Override
+    public void visit(QueryVisitor visitor) {
+      visitor.consumeTerms(this, term);
     }
 
     @Override

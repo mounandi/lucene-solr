@@ -127,7 +127,6 @@ public final class VersionBlockTreeTermsReader extends FieldsProducer {
         final long sumDocFreq = numTerms;
         assert numTerms <= Integer.MAX_VALUE;
         final int docCount = (int) numTerms;
-        final int longsSize = in.readVInt();
 
         BytesRef minTerm = readBytesRef(in);
         BytesRef maxTerm = readBytesRef(in);
@@ -137,13 +136,13 @@ public final class VersionBlockTreeTermsReader extends FieldsProducer {
         if (sumDocFreq < docCount) {  // #postings must be >= #docs with field
           throw new CorruptIndexException("invalid sumDocFreq: " + sumDocFreq + " docCount: " + docCount, in);
         }
-        if (sumTotalTermFreq != -1 && sumTotalTermFreq < sumDocFreq) { // #positions must be >= #postings
+        if (sumTotalTermFreq < sumDocFreq) { // #positions must be >= #postings
           throw new CorruptIndexException("invalid sumTotalTermFreq: " + sumTotalTermFreq + " sumDocFreq: " + sumDocFreq, in);
         }
         final long indexStartFP = indexIn.readVLong();
         VersionFieldReader previous = fields.put(fieldInfo.name,       
                                                  new VersionFieldReader(this, fieldInfo, numTerms, rootCode, sumTotalTermFreq, sumDocFreq, docCount,
-                                                                        indexStartFP, longsSize, indexIn, minTerm, maxTerm));
+                                                                        indexStartFP, indexIn, minTerm, maxTerm));
         if (previous != null) {
           throw new CorruptIndexException("duplicate field: " + fieldInfo.name, in);
         }
@@ -233,8 +232,7 @@ public final class VersionBlockTreeTermsReader extends FieldsProducer {
   
   @Override
   public Collection<Accountable> getChildResources() {
-    List<Accountable> resources = new ArrayList<>();
-    resources.addAll(Accountables.namedAccountables("field", fields));
+    List<Accountable> resources = new ArrayList<>(Accountables.namedAccountables("field", fields));
     resources.add(Accountables.namedAccountable("delegate", postingsReader));
     return Collections.unmodifiableList(resources);
   }

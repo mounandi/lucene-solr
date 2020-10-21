@@ -24,10 +24,10 @@ import org.apache.lucene.analysis.CharArraySet;
 import org.apache.lucene.analysis.TokenFilter;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.miscellaneous.SetKeywordMarkerFilter;
-import org.apache.lucene.analysis.util.ResourceLoader;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
-import org.tartarus.snowball.SnowballProgram;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenFilterFactory;
+import org.tartarus.snowball.SnowballStemmer;
 
 /**
  * Factory for {@link SnowballFilter}, with configurable language
@@ -41,13 +41,20 @@ import org.tartarus.snowball.SnowballProgram;
  *     &lt;filter class="solr.SnowballPorterFilterFactory" protected="protectedkeyword.txt" language="English"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class SnowballPorterFilterFactory extends TokenFilterFactory implements ResourceLoaderAware {
+
+  /** SPI name */
+  public static final String NAME = "snowballPorter";
+
   public static final String PROTECTED_TOKENS = "protected";
 
   private final String language;
   private final String wordFiles;
-  private Class<? extends SnowballProgram> stemClass;
+  private Class<? extends SnowballStemmer> stemClass;
   private CharArraySet protectedWords = null;
   
   /** Creates a new SnowballPorterFilterFactory */
@@ -60,10 +67,15 @@ public class SnowballPorterFilterFactory extends TokenFilterFactory implements R
     }
   }
 
+  /** Default ctor for compatibility with SPI */
+  public SnowballPorterFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public void inform(ResourceLoader loader) throws IOException {
     String className = "org.tartarus.snowball.ext." + language + "Stemmer";
-    stemClass = loader.newInstance(className, SnowballProgram.class).getClass();
+    stemClass = loader.newInstance(className, SnowballStemmer.class).getClass();
 
     if (wordFiles != null) {
       protectedWords = getWordSet(loader, wordFiles, false);
@@ -72,9 +84,9 @@ public class SnowballPorterFilterFactory extends TokenFilterFactory implements R
 
   @Override
   public TokenFilter create(TokenStream input) {
-    SnowballProgram program;
+    SnowballStemmer program;
     try {
-      program = stemClass.newInstance();
+      program = stemClass.getConstructor().newInstance();
     } catch (Exception e) {
       throw new RuntimeException("Error instantiating stemmer for language " + language + "from class " + stemClass, e);
     }

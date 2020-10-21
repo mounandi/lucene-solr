@@ -46,6 +46,7 @@ import org.apache.lucene.spatial.SpatialStrategy;
 import org.apache.lucene.spatial.query.SpatialArgs;
 import org.apache.lucene.spatial.query.SpatialArgsParser;
 import org.apache.lucene.spatial.query.SpatialOperation;
+import org.apache.lucene.spatial.spatial4j.Geo3dSpatialContextFactory;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.response.TextResponseWriter;
@@ -131,9 +132,13 @@ public abstract class AbstractSpatialFieldType<T extends SpatialStrategy> extend
           argEntry.setValue("org.locationtech.spatial4j.context.jts.JtsSpatialContextFactory");
           continue;
         }
+        if (argEntry.getKey().equals(CTX_PARAM) && argEntry.getValue().equals("Geo3D")) {
+          argEntry.setValue(Geo3dSpatialContextFactory.class.getName());
+          continue;
+        }
         // Warn about using old Spatial4j class names
         if (argEntry.getValue().contains(OLD_SPATIAL4J_PREFIX)) {
-          log.warn("Replace '" + OLD_SPATIAL4J_PREFIX + "' with '" + NEW_SPATIAL4J_PREFIX + "' in your schema.");
+          log.warn("Replace '{}' with '{}' in your schema", OLD_SPATIAL4J_PREFIX, NEW_SPATIAL4J_PREFIX);
           argEntry.setValue(argEntry.getValue().replace(OLD_SPATIAL4J_PREFIX, NEW_SPATIAL4J_PREFIX));
         }
       }
@@ -311,7 +316,7 @@ public abstract class AbstractSpatialFieldType<T extends SpatialStrategy> extend
   }
 
   @Override
-  public Query getRangeQuery(QParser parser, SchemaField field, String part1, String part2, boolean minInclusive, boolean maxInclusive) {
+  protected Query getSpecializedRangeQuery(QParser parser, SchemaField field, String part1, String part2, boolean minInclusive, boolean maxInclusive) {
     if (!minInclusive || !maxInclusive)
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Both sides of spatial range query must be inclusive: " + field.getName());
     Point p1 = SpatialUtils.parsePointSolrException(part1, ctx);

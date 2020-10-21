@@ -1,6 +1,4 @@
 = Result Clustering
-:page-shortname: result-clustering
-:page-permalink: result-clustering.html
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -22,7 +20,7 @@ The *clustering* (or *cluster analysis*) plugin attempts to automatically discov
 
 By default in Solr, the clustering algorithm is applied to the search result of each single query -— this is called an _on-line_ clustering. While Solr contains an extension for full-index clustering (_off-line_ clustering) this section will focus on discussing on-line clustering only.
 
-Clusters discovered for a given query can be perceived as _dynamic facets_. This is beneficial when regular faceting is difficult (field values are not known in advance) or when the queries are exploratory in nature. Take a look at the http://search.carrot2.org/stable/search?query=solr&results=100&source=web&view=foamtree[Carrot2] project's demo page to see an example of search results clustering in action (the groups in the visualization have been discovered automatically in search results to the right, there is no external information involved).
+Clusters discovered for a given query can be perceived as _dynamic facets_. This is beneficial when regular faceting is difficult (field values are not known in advance) or when the queries are exploratory in nature. Take a look at the https://search.carrot2.org/#/search/web/solr/treemap[Carrot2] project's demo page to see an example of search results clustering in action (the groups in the visualization have been discovered automatically in search results to the right, there is no external information involved).
 
 image::images/result-clustering/carrot2.png[image,width=900]
 
@@ -55,7 +53,7 @@ bin/solr start -e techproducts -Dsolr.clustering.enabled=true
 
 You can now try out the clustering handler by opening the following URL in a browser:
 
-`\http://localhost:8983/solr/techproducts/clustering?q=*:*&rows=100`
+`\http://localhost:8983/solr/techproducts/clustering?q=\*:*&rows=100&wt=xml`
 
 The output XML should include search hits and an array of automatically discovered clusters at the end, resembling the output shown here:
 
@@ -314,9 +312,15 @@ An example XML file changing the default language of documents to Polish is show
 
 The clustering component and Carrot2 clustering algorithms can accept query-time attribute overrides. Note that certain things (for example lexical resources) can only be initialized once (at startup, via the XML configuration files).
 
-An example query that changes the `LingoClusteringAlgorithm.desiredClusterCountBase` parameter for the Lingo algorithm: http://localhost:8983/solr/techproducts/clustering?q=*:*&rows=100&LingoClusteringAlgorithm.desiredClusterCountBase=20.
+An example query that changes the `LingoClusteringAlgorithm.desiredClusterCountBase` parameter for the Lingo algorithm:
 
-The clustering engine (the algorithm declared in `solrconfig.xml`) can also be changed at runtime by passing `clustering.engine=name` request attribute: http://localhost:8983/solr/techproducts/clustering?q=*:*&rows=100&clustering.engine=kmeans
+[source,text]
+http://localhost:8983/solr/techproducts/clustering?q=*:*&rows=100&LingoClusteringAlgorithm.desiredClusterCountBase=20
+
+The clustering engine (the algorithm declared in `solrconfig.xml`) can also be changed at runtime by passing `clustering.engine=name` request attribute:
+
+[source,text]
+http://localhost:8983/solr/techproducts/clustering?q=*:*&rows=100&clustering.engine=kmeans
 
 == Performance Considerations with Dynamic Clustering
 
@@ -339,4 +343,4 @@ Some of these techniques are described in _Apache SOLR and Carrot2 integration s
 The following resources provide additional information about the clustering component in Solr and its potential applications.
 
 * Apache Solr and Carrot2 integration strategies: http://carrot2.github.io/solr-integration-strategies
-* Clustering and Visualization of Solr search results (video from Berlin BuzzWords conference, 2011): http://vimeo.com/26616444
+* Clustering and Visualization of Solr search results (Berlin BuzzWords conference, 2011): http://2011.berlinbuzzwords.de/sites/2011.berlinbuzzwords.de/files/solr-clustering-visualization.pdf

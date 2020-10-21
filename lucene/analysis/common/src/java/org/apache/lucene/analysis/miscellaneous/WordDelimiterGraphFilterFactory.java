@@ -28,9 +28,9 @@ import java.util.regex.Pattern;
 import org.apache.lucene.analysis.CharArraySet;
 import org.apache.lucene.analysis.TokenFilter;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.ResourceLoader;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 import static org.apache.lucene.analysis.miscellaneous.WordDelimiterGraphFilter.*;
 import static org.apache.lucene.analysis.miscellaneous.WordDelimiterIterator.*;
@@ -48,16 +48,24 @@ import static org.apache.lucene.analysis.miscellaneous.WordDelimiterIterator.*;
  *             types="wdfftypes.txt" /&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 6.5.0
+ * @lucene.spi {@value #NAME}
  */
 public class WordDelimiterGraphFilterFactory extends TokenFilterFactory implements ResourceLoaderAware {
+
+  /** SPI name */
+  public static final String NAME = "wordDelimiterGraph";
+
   public static final String PROTECTED_TOKENS = "protected";
   public static final String TYPES = "types";
+  public static final String OFFSETS = "adjustOffsets";
 
   private final String wordFiles;
   private final String types;
   private final int flags;
   byte[] typeTable = null;
   private CharArraySet protectedWords = null;
+  private boolean adjustOffsets = false;
   
   /** Creates a new WordDelimiterGraphFilterFactory */
   public WordDelimiterGraphFilterFactory(Map<String, String> args) {
@@ -93,11 +101,17 @@ public class WordDelimiterGraphFilterFactory extends TokenFilterFactory implemen
     wordFiles = get(args, PROTECTED_TOKENS);
     types = get(args, TYPES);
     this.flags = flags;
+    this.adjustOffsets = getBoolean(args, OFFSETS, true);
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public WordDelimiterGraphFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public void inform(ResourceLoader loader) throws IOException {
     if (wordFiles != null) {  
@@ -116,7 +130,7 @@ public class WordDelimiterGraphFilterFactory extends TokenFilterFactory implemen
 
   @Override
   public TokenFilter create(TokenStream input) {
-    return new WordDelimiterGraphFilter(input, typeTable == null ? WordDelimiterIterator.DEFAULT_WORD_DELIM_TABLE : typeTable,
+    return new WordDelimiterGraphFilter(input, adjustOffsets, typeTable == null ? WordDelimiterIterator.DEFAULT_WORD_DELIM_TABLE : typeTable,
                                         flags, protectedWords);
   }
   

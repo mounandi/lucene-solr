@@ -18,8 +18,10 @@ package org.apache.lucene.codecs.blocktree;
 
 
 import java.io.IOException;
+import java.util.Arrays;
 
 import org.apache.lucene.codecs.BlockTermState;
+import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.store.ByteArrayDataInput;
 import org.apache.lucene.util.ArrayUtil;
@@ -48,7 +50,11 @@ final class IntersectTermsEnumFrame {
   byte[] suffixBytes = new byte[128];
   final ByteArrayDataInput suffixesReader = new ByteArrayDataInput();
 
+  byte[] suffixLengthBytes;
+  final ByteArrayDataInput suffixLengthsReader;
+
   byte[] statBytes = new byte[64];
+  int statsSingletonRunLength = 0;
   final ByteArrayDataInput statsReader = new ByteArrayDataInput();
 
   byte[] floorData = new byte[32];
@@ -80,11 +86,8 @@ final class IntersectTermsEnumFrame {
   FST.Arc<BytesRef> arc;
 
   final BlockTermState termState;
-  
-  // metadata buffer, holding monotonic values
-  final long[] longs;
 
-  // metadata buffer, holding general values
+  // metadata buffer
   byte[] bytes = new byte[32];
 
   final ByteArrayDataInput bytesReader = new ByteArrayDataInput();
@@ -95,25 +98,22 @@ final class IntersectTermsEnumFrame {
   int startBytePos;
   int suffix;
 
-  // When we are on an auto-prefix term this is the starting lead byte
-  // of the suffix (e.g. 'a' for the foo[a-m]* case):
-  int floorSuffixLeadStart;
-
-  // When we are on an auto-prefix term this is the ending lead byte
-  // of the suffix (e.g. 'm' for the foo[a-m]* case):
-  int floorSuffixLeadEnd;
-
-  // True if the term we are currently on is an auto-prefix term:
-  boolean isAutoPrefixTerm;
-
   private final IntersectTermsEnum ite;
+  private final int version;
 
   public IntersectTermsEnumFrame(IntersectTermsEnum ite, int ord) throws IOException {
     this.ite = ite;
     this.ord = ord;
     this.termState = ite.fr.parent.postingsReader.newTermState();
     this.termState.totalTermFreq = -1;
-    this.longs = new long[ite.fr.longsSize];
+    this.version = ite.fr.parent.version;
+    if (version >= BlockTreeTermsReader.VERSION_COMPRESSED_SUFFIXES) {
+      suffixLengthBytes = new byte[32];
+      suffixLengthsReader = new ByteArrayDataInput();
+    } else {
+      suffixLengthBytes = null;
+      suffixLengthsReader = suffixesReader;
+    }
   }
 
   void loadNextFloorBlock() throws IOException {
@@ -185,27 +185,58 @@ final class IntersectTermsEnumFrame {
     isLastInFloor = (code & 1) != 0;
 
     // term suffixes:
-    code = ite.in.readVInt();
-    isLeafBlock = (code & 1) != 0;
-    int numBytes = code >>> 1;
-    if (suffixBytes.length < numBytes) {
-      suffixBytes = new byte[ArrayUtil.oversize(numBytes, 1)];
+    if (version >= BlockTreeTermsReader.VERSION_COMPRESSED_SUFFIXES) {
+      final long codeL = ite.in.readVLong();
+      isLeafBlock = (codeL & 0x04) != 0;
+      final int numSuffixBytes = (int) (codeL >>> 3);
+      if (suffixBytes.length < numSuffixBytes) {
+        suffixBytes = new byte[ArrayUtil.oversize(numSuffixBytes, 1)];
+      }
+      final CompressionAlgorithm compressionAlg;
+      try {
+        compressionAlg = CompressionAlgorithm.byCode((int) codeL & 0x03);
+      } catch (IllegalArgumentException e) {
+        throw new CorruptIndexException(e.getMessage(), ite.in, e);
+      }
+      compressionAlg.read(ite.in, suffixBytes, numSuffixBytes);
+      suffixesReader.reset(suffixBytes, 0, numSuffixBytes);
+
+      int numSuffixLengthBytes = ite.in.readVInt();
+      final boolean allEqual = (numSuffixLengthBytes & 0x01) != 0;
+      numSuffixLengthBytes >>>= 1;
+      if (suffixLengthBytes.length < numSuffixLengthBytes) {
+        suffixLengthBytes = new byte[ArrayUtil.oversize(numSuffixLengthBytes, 1)];
+      }
+      if (allEqual) {
+        Arrays.fill(suffixLengthBytes, 0, numSuffixLengthBytes, ite.in.readByte());
+      } else {
+        ite.in.readBytes(suffixLengthBytes, 0, numSuffixLengthBytes);
+      }
+      suffixLengthsReader.reset(suffixLengthBytes, 0, numSuffixLengthBytes);
+    } else {
+      code = ite.in.readVInt();
+      isLeafBlock = (code & 1) != 0;
+      int numBytes = code >>> 1;
+      if (suffixBytes.length < numBytes) {
+        suffixBytes = new byte[ArrayUtil.oversize(numBytes, 1)];
+      }
+      ite.in.readBytes(suffixBytes, 0, numBytes);
+      suffixesReader.reset(suffixBytes, 0, numBytes);
     }
-    ite.in.readBytes(suffixBytes, 0, numBytes);
-    suffixesReader.reset(suffixBytes, 0, numBytes);
 
     // stats
-    numBytes = ite.in.readVInt();
+    int numBytes = ite.in.readVInt();
     if (statBytes.length < numBytes) {
       statBytes = new byte[ArrayUtil.oversize(numBytes, 1)];
     }
     ite.in.readBytes(statBytes, 0, numBytes);
     statsReader.reset(statBytes, 0, numBytes);
+    statsSingletonRunLength = 0;
     metaDataUpto = 0;
 
     termState.termBlockOrd = 0;
     nextEnt = 0;
-         
+
     // metadata
     numBytes = ite.in.readVInt();
     if (bytes.length < numBytes) {
@@ -219,10 +250,6 @@ final class IntersectTermsEnumFrame {
       // written one after another -- tail recurse:
       fpEnd = ite.in.getFilePointer();
     }
-
-    // Necessary in case this ord previously was an auto-prefix
-    // term but now we recurse to a new leaf block
-    isAutoPrefixTerm = false;
   }
 
   // TODO: maybe add scanToLabel; should give perf boost
@@ -240,7 +267,7 @@ final class IntersectTermsEnumFrame {
   public void nextLeaf() {
     assert nextEnt != -1 && nextEnt < entCount: "nextEnt=" + nextEnt + " entCount=" + entCount + " fp=" + fp;
     nextEnt++;
-    suffix = suffixesReader.readVInt();
+    suffix = suffixLengthsReader.readVInt();
     startBytePos = suffixesReader.getPosition();
     suffixesReader.skipBytes(suffix);
   }
@@ -248,7 +275,7 @@ final class IntersectTermsEnumFrame {
   public boolean nextNonLeaf() {
     assert nextEnt != -1 && nextEnt < entCount: "nextEnt=" + nextEnt + " entCount=" + entCount + " fp=" + fp;
     nextEnt++;
-    final int code = suffixesReader.readVInt();
+    final int code = suffixLengthsReader.readVInt();
     suffix = code >>> 1;
     startBytePos = suffixesReader.getPosition();
     suffixesReader.skipBytes(suffix);
@@ -258,7 +285,7 @@ final class IntersectTermsEnumFrame {
       return false;
     } else {
       // A sub-block; make sub-FP absolute:
-      lastSubFP = fp - suffixesReader.readVLong();
+      lastSubFP = fp - suffixLengthsReader.readVLong();
       return true;
     }
   }
@@ -287,15 +314,38 @@ final class IntersectTermsEnumFrame {
       // just skipN here:
 
       // stats
-      termState.docFreq = statsReader.readVInt();
-      if (ite.fr.fieldInfo.getIndexOptions() != IndexOptions.DOCS) {
-        termState.totalTermFreq = termState.docFreq + statsReader.readVLong();
+      if (version >= BlockTreeTermsReader.VERSION_COMPRESSED_SUFFIXES) {
+        if (statsSingletonRunLength > 0) {
+          termState.docFreq = 1;
+          termState.totalTermFreq = 1;
+          statsSingletonRunLength--;
+        } else {
+          int token = statsReader.readVInt();
+          if (version >= BlockTreeTermsReader.VERSION_COMPRESSED_SUFFIXES && (token & 1) == 1) {
+            termState.docFreq = 1;
+            termState.totalTermFreq = 1;
+            statsSingletonRunLength = token >>> 1;
+          } else {
+            termState.docFreq = token >>> 1;
+            if (ite.fr.fieldInfo.getIndexOptions() == IndexOptions.DOCS) {
+              termState.totalTermFreq = termState.docFreq;
+            } else {
+              termState.totalTermFreq = termState.docFreq + statsReader.readVLong();
+            }
+          }
+        }
+      } else {
+        termState.docFreq = statsReader.readVInt();
+        //if (DEBUG) System.out.println("    dF=" + state.docFreq);
+        if (ite.fr.fieldInfo.getIndexOptions() == IndexOptions.DOCS) {
+          termState.totalTermFreq = termState.docFreq; // all postings have freq=1
+        } else {
+          termState.totalTermFreq = termState.docFreq + statsReader.readVLong();
+          //if (DEBUG) System.out.println("    totTF=" + state.totalTermFreq);
+        }
       }
-      // metadata 
-      for (int i = 0; i < ite.fr.longsSize; i++) {
-        longs[i] = bytesReader.readVLong();
-      }
-      ite.fr.parent.postingsReader.decodeTerm(longs, bytesReader, ite.fr.fieldInfo, termState, absolute);
+      // metadata
+      ite.fr.parent.postingsReader.decodeTerm(bytesReader, ite.fr.fieldInfo, termState, absolute);
 
       metaDataUpto++;
       absolute = false;

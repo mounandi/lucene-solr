@@ -16,8 +16,7 @@
  */
 package org.apache.solr.client.solrj.beans;
 
-import org.apache.lucene.util.LuceneTestCase;
-
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.client.solrj.impl.XMLResponseParser;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocumentList;
@@ -34,8 +33,10 @@ import java.util.List;
 import java.util.Map;
 
 
-public class TestDocumentObjectBinder extends LuceneTestCase {
+public class TestDocumentObjectBinder extends SolrTestCase {
 
+  @Test
+  // commented out on: 24-Dec-2018   @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // added 20-Sep-2018
   public void testSimple() throws Exception {
     DocumentObjectBinder binder = new DocumentObjectBinder();
     XMLResponseParser parser = new XMLResponseParser();
@@ -56,6 +57,7 @@ public class TestDocumentObjectBinder extends LuceneTestCase {
     SolrInputField catfield = out.getField("cat");
     assertEquals(3, catfield.getValueCount());
 
+    @SuppressWarnings({"unchecked"})
     List<String> catValues = (List<String>) catfield.getValue();
     assertEquals("aaa", catValues.get(0));
     assertEquals("bbb", catValues.get(1));
@@ -79,6 +81,8 @@ public class TestDocumentObjectBinder extends LuceneTestCase {
     assertEquals("hello", l.get(0).categories[0]);
   }
 
+  @Test
+  // commented out on: 24-Dec-2018   @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // added 20-Sep-2018
   public void testDynamicFieldBinding() {
     DocumentObjectBinder binder = new DocumentObjectBinder();
     XMLResponseParser parser = new XMLResponseParser();

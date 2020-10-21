@@ -20,7 +20,7 @@ package org.apache.lucene.analysis.miscellaneous;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link DelimitedTermFrequencyTokenFilter}. The field must have {@code omitPositions=true}.
@@ -31,8 +31,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.DelimitedTermFrequencyTokenFilterFactory" delimiter="|"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 7.0.0
+ * @lucene.spi {@value #NAME}
  */
 public class DelimitedTermFrequencyTokenFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "delimitedTermFrequency";
+
   public static final String DELIMITER_ATTR = "delimiter";
 
   private final char delimiter;
@@ -44,6 +50,11 @@ public class DelimitedTermFrequencyTokenFilterFactory extends TokenFilterFactory
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public DelimitedTermFrequencyTokenFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

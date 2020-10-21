@@ -71,12 +71,13 @@ public class OrdFieldSource extends ValueSource {
 
 
   @Override
+  @SuppressWarnings({"rawtypes"})
   public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
     final int off = readerContext.docBase;
     final LeafReader r;
     Object o = context.get("searcher");
     if (o instanceof SolrIndexSearcher) {
-      SolrIndexSearcher is = (SolrIndexSearcher) o;
+      @SuppressWarnings("resource") final SolrIndexSearcher is = (SolrIndexSearcher) o;
       SchemaField sf = is.getSchema().getFieldOrNull(field);
       if (sf != null && sf.getType().isPointField()) {
         throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, 

@@ -31,7 +31,7 @@ import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 
 /**
- * A reduction function which returns the sum of the sorted values of the given expression.
+ * A reduction function which returns the sum of the values of the given expression.
  */
 public class SumFunction extends AbstractDoubleValue implements ReductionFunction {
   private SumCollector collector;
@@ -46,12 +46,12 @@ public class SumFunction extends AbstractDoubleValue implements ReductionFunctio
       casted = (DoubleValueStream) params[0];
     }
     catch (ClassCastException e) {
-      throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires numeric parameter. " + 
+      throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires numeric parameter. " +
           "Incorrect parameter: "+params[0].getExpressionStr());
     }
     return new SumFunction(casted);
   });
-  
+
   public SumFunction(DoubleValueStream param) {
     this.collector = new SumCollector(param);
     this.exprStr = AnalyticsValueStream.createExpressionString(name,param);

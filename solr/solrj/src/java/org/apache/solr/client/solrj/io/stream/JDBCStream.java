@@ -31,11 +31,9 @@ import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Properties;
 
 import org.apache.solr.client.solrj.io.Tuple;
@@ -50,6 +48,7 @@ import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionNamedParamete
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionParameter;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionValue;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
+import org.apache.solr.common.params.StreamParams;
 
 import static org.apache.solr.common.params.CommonParams.SORT;
 
@@ -62,12 +61,16 @@ import static org.apache.solr.common.params.CommonParams.SORT;
  * The exception are {@link Types#DATE}, {@link Types#TIME} or {@link Types#TIMESTAMP}
  * which are determined by the JDBC type.
  * 
- * <table rules="all" frame="box" cellpadding="3" summary="Supported Java Types">
+ * <table class="padding3">
+ * <caption>Supported Java Types</caption>
+ * <thead style="border: 1px solid">
  * <tr>
  *   <th>Java or JDBC Type</th>
  *   <th>Tuple Type</th>
  *   <th>Notes</th>
  * </tr>
+ * </thead>
+ * <tbody style="border: 1px solid">
  * <tr>
  *   <td>Boolean</td>
  *   <td>Boolean</td>
@@ -113,8 +116,10 @@ import static org.apache.solr.common.params.CommonParams.SORT;
  *   <td>String</td>
  *   <td>See {@link DateTimeFormatter#ISO_INSTANT}</td>
  * </tr>
+ * </tbody>
  * </table>
  * 
+ * @since 6.0.0
  **/
 
 public class JDBCStream extends TupleStream implements Expressible {
@@ -137,6 +142,7 @@ public class JDBCStream extends TupleStream implements Expressible {
   private String connectionUrl;
   private String sqlQuery;
   private StreamComparator definedSort;
+  private int fetchSize;
   
   // Internal
   private Connection connection;
@@ -152,7 +158,7 @@ public class JDBCStream extends TupleStream implements Expressible {
   }
   
   public JDBCStream(String connectionUrl, String sqlQuery, StreamComparator definedSort, Properties connectionProperties, String driverClassName) throws IOException {
-    init(connectionUrl, sqlQuery, definedSort, connectionProperties, driverClassName);
+    init(connectionUrl, sqlQuery, definedSort, connectionProperties, driverClassName, 5000);
   }
   
   public JDBCStream(StreamExpression expression, StreamFactory factory) throws IOException{
@@ -162,7 +168,9 @@ public class JDBCStream extends TupleStream implements Expressible {
     StreamExpressionNamedParameter sqlQueryExpression = factory.getNamedOperand(expression, "sql");
     StreamExpressionNamedParameter definedSortExpression = factory.getNamedOperand(expression, SORT);
     StreamExpressionNamedParameter driverClassNameExpression = factory.getNamedOperand(expression, "driver");
-    
+    StreamExpressionNamedParameter fetchSizeExpression = factory.getNamedOperand(expression, "fetchSize");
+
+
     // Validate there are no unknown parameters - zkHost and alias are namedParameter so we don't need to count it twice
     if(expression.getParameters().size() != namedParams.size()){
       throw new IOException(String.format(Locale.ROOT,"invalid expression %s - unknown operands found", expression));
@@ -174,6 +182,12 @@ public class JDBCStream extends TupleStream implements Expressible {
       if(!namedParam.getName().equals("driver") && !namedParam.getName().equals("connection") && !namedParam.getName().equals("sql") && !namedParam.getName().equals(SORT)){
         connectionProperties.put(namedParam.getName(), namedParam.getParameter().toString().trim());
       }
+    }
+
+    int fetchSize = 5000;
+    if(null != fetchSizeExpression && fetchSizeExpression.getParameter() instanceof StreamExpressionValue){
+      String fetchSizeString = ((StreamExpressionValue)fetchSizeExpression.getParameter()).getValue();
+      fetchSize = Integer.parseInt(fetchSizeString);
     }
 
     // connectionUrl, required
@@ -210,15 +224,16 @@ public class JDBCStream extends TupleStream implements Expressible {
     }
 
     // We've got all the required items
-    init(connectionUrl, sqlQuery, definedSort, connectionProperties, driverClass);
+    init(connectionUrl, sqlQuery, definedSort, connectionProperties, driverClass, fetchSize);
   }
     
-  private void init(String connectionUrl, String sqlQuery, StreamComparator definedSort, Properties connectionProperties, String driverClassName) {
+  private void init(String connectionUrl, String sqlQuery, StreamComparator definedSort, Properties connectionProperties, String driverClassName, int fetchSize) {
     this.connectionUrl = connectionUrl;
     this.sqlQuery = sqlQuery;
     this.definedSort = definedSort;
     this.connectionProperties = connectionProperties;
     this.driverClassName = driverClassName;
+    this.fetchSize = fetchSize;
   }
   
   public void setStreamContext(StreamContext context) {
@@ -266,6 +281,7 @@ public class JDBCStream extends TupleStream implements Expressible {
     
     try{
       resultSet = statement.executeQuery(sqlQuery);
+      resultSet.setFetchSize(fetchSize);
     } catch (SQLException e) {
       throw new IOException(String.format(Locale.ROOT, "Failed to execute sqlQuery '%s' against JDBC connection '%s'.\n"
           + e.getMessage(), sqlQuery, connectionUrl), e);
@@ -498,22 +514,20 @@ public class JDBCStream extends TupleStream implements Expressible {
   
   public Tuple read() throws IOException {
     
-    try{
-      Map<Object,Object> fields = new HashMap<>();
-      if(resultSet.next()){
+    try {
+      Tuple tuple = new Tuple();
+      if (resultSet.next()) {
         // we have a record
-        for(ResultSetValueSelector selector : valueSelectors){
-          fields.put(selector.getColumnName(), selector.selectValue(resultSet));
+        for (ResultSetValueSelector selector : valueSelectors) {
+          tuple.put(selector.getColumnName(), selector.selectValue(resultSet));
         }
-      }
-      else{
+      } else {
         // we do not have a record
-        fields.put("EOF", true);
+        tuple.put(StreamParams.EOF, true);
       }
       
-      return new Tuple(fields);
-    }
-    catch(SQLException e){
+      return tuple;
+    } catch (SQLException e) {
       throw new IOException(String.format(Locale.ROOT, "Failed to read next record with error '%s'", e.getMessage()), e);
     }
   }
@@ -530,7 +544,10 @@ public class JDBCStream extends TupleStream implements Expressible {
     
     // sql
     expression.addParameter(new StreamExpressionNamedParameter("sql", sqlQuery));
-    
+
+    // fetchSize
+    expression.addParameter(new StreamExpressionNamedParameter("fetchSize", Integer.toString(fetchSize)));
+
     // sort
     expression.addParameter(new StreamExpressionNamedParameter(SORT, definedSort.toExpression(factory)));
     

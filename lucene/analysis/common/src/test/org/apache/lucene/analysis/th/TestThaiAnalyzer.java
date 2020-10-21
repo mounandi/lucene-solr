@@ -21,7 +21,7 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.BaseTokenStreamTestCase;
 import org.apache.lucene.analysis.CharArraySet;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.core.StopAnalyzer;
+import org.apache.lucene.analysis.en.EnglishAnalyzer;
 import org.apache.lucene.analysis.tokenattributes.FlagsAttribute;
 
 /**
@@ -63,7 +63,7 @@ public class TestThaiAnalyzer extends BaseTokenStreamTestCase {
    */
   // note this test uses stopfilter's stopset
   public void testPositionIncrements() throws Exception {
-    final ThaiAnalyzer analyzer = new ThaiAnalyzer(StopAnalyzer.ENGLISH_STOP_WORDS_SET);
+    final ThaiAnalyzer analyzer = new ThaiAnalyzer(EnglishAnalyzer.ENGLISH_STOP_WORDS_SET);
     assertAnalyzesTo(analyzer, "การที่ได้ต้อง the แสดงว่างานดี", 
         new String[] { "การ", "ที่", "ได้", "ต้อง", "แสดง", "ว่า", "งาน", "ดี" },
         new int[] { 0, 3, 6, 9, 18, 22, 25, 28 },
@@ -98,14 +98,14 @@ public class TestThaiAnalyzer extends BaseTokenStreamTestCase {
   /** blast some random strings through the analyzer */
   public void testRandomStrings() throws Exception {
     Analyzer analyzer = new ThaiAnalyzer();
-    checkRandomData(random(), analyzer, 1000*RANDOM_MULTIPLIER);
+    checkRandomData(random(), analyzer, 200 * RANDOM_MULTIPLIER);
     analyzer.close();
   }
   
   /** blast some random large strings through the analyzer */
   public void testRandomHugeStrings() throws Exception {
     Analyzer analyzer = new ThaiAnalyzer();
-    checkRandomData(random(), analyzer, 100*RANDOM_MULTIPLIER, 8192);
+    checkRandomData(random(), analyzer, 3*RANDOM_MULTIPLIER, 8192);
     analyzer.close();
   }
   

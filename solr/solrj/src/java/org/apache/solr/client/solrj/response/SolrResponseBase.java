@@ -16,7 +16,10 @@
  */
 package org.apache.solr.client.solrj.response;
 
+import java.io.IOException;
+
 import org.apache.solr.client.solrj.SolrResponse;
+import org.apache.solr.common.MapWriter;
 import org.apache.solr.common.util.NamedList;
 
 /**
@@ -24,12 +27,17 @@ import org.apache.solr.common.util.NamedList;
  *
  * @since solr 1.3
  */
-public class SolrResponseBase extends SolrResponse
+public class SolrResponseBase extends SolrResponse implements MapWriter
 {
   private long elapsedTime = -1;
   private NamedList<Object> response = null;
   private String requestUrl = null;
-  
+
+  @Override
+  public void writeMap(EntryWriter ew) throws IOException {
+    if (response != null) response.writeMap(ew);
+  }
+
   @Override
   public long getElapsedTime() {
     return elapsedTime;
@@ -54,12 +62,14 @@ public class SolrResponseBase extends SolrResponse
     return response.toString();
   }
   
+  @SuppressWarnings({"rawtypes"})
   public NamedList getResponseHeader() {
     return (NamedList) response.get("responseHeader");
   }
   
   // these two methods are based on the logic in SolrCore.setResponseHeaderValues(...)
   public int getStatus() {
+    @SuppressWarnings({"rawtypes"})
     NamedList header = getResponseHeader();
     if (header != null) {
         return (Integer) header.get("status");
@@ -70,6 +80,7 @@ public class SolrResponseBase extends SolrResponse
   }
   
   public int getQTime() {
+    @SuppressWarnings({"rawtypes"})
     NamedList header = getResponseHeader();
     if (header != null) {
         return (Integer) header.get("QTime");

@@ -18,29 +18,25 @@ package org.apache.solr.metrics;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.lang.invoke.MethodHandles;
 
 import com.codahale.metrics.MetricRegistry;
 import org.apache.solr.cloud.CloudDescriptor;
+import org.apache.solr.common.util.Utils;
+import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.NodeConfig;
 import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.core.SolrInfoBean;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
- * Responsible for collecting metrics from {@link SolrMetricProducer}'s
- * and exposing metrics to {@link SolrMetricReporter}'s.
+ * Helper class for managing registration of {@link SolrMetricProducer}'s
+ * and {@link SolrMetricReporter}'s specific to a {@link SolrCore} instance.
  */
 public class SolrCoreMetricManager implements Closeable {
 
-  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-
   private final SolrCore core;
-  private final String tag;
-  private final SolrMetricManager metricManager;
-  private String registryName;
+  private SolrMetricsContext solrMetricsContext;
+  private SolrMetricManager metricManager;
   private String collectionName;
   private String shardName;
   private String replicaName;
@@ -54,10 +50,10 @@ public class SolrCoreMetricManager implements Closeable {
    */
   public SolrCoreMetricManager(SolrCore core) {
     this.core = core;
-    this.tag = String.valueOf(core.hashCode());
-    this.metricManager = core.getCoreContainer().getMetricManager();
     initCloudMode();
-    registryName = createRegistryName(cloudMode, collectionName, shardName, replicaName, core.getName());
+    metricManager = core.getCoreContainer().getMetricManager();
+    String registryName = createRegistryName(cloudMode, collectionName, shardName, replicaName, core.getName());
+    solrMetricsContext = new SolrMetricsContext(metricManager, registryName, core.getMetricTag());
     leaderRegistryName = createLeaderRegistryName(cloudMode, collectionName, shardName);
   }
 
@@ -69,7 +65,7 @@ public class SolrCoreMetricManager implements Closeable {
       shardName = cd.getShardId();
       //replicaName = cd.getCoreNodeName();
       String coreName = core.getName();
-      replicaName = parseReplicaName(collectionName, coreName);
+      replicaName = Utils.parseMetricsReplicaName(collectionName, coreName);
       if (replicaName == null) {
         replicaName = cd.getCoreNodeName();
       }
@@ -81,10 +77,11 @@ public class SolrCoreMetricManager implements Closeable {
    * group or with a registry name specific to this core.
    */
   public void loadReporters() {
-    NodeConfig nodeConfig = core.getCoreContainer().getConfig();
+    CoreContainer coreContainer = core.getCoreContainer();
+    NodeConfig nodeConfig = coreContainer.getConfig();
     PluginInfo[] pluginInfos = nodeConfig.getMetricsConfig().getMetricReporters();
-    metricManager.loadReporters(pluginInfos, core.getResourceLoader(), tag,
-        SolrInfoBean.Group.core, registryName);
+    metricManager.loadReporters(pluginInfos, core.getResourceLoader(), coreContainer, core, solrMetricsContext.getTag(),
+        SolrInfoBean.Group.core, solrMetricsContext.getRegistryName());
     if (cloudMode) {
       metricManager.loadShardReporters(pluginInfos, core);
     }
@@ -95,20 +92,21 @@ public class SolrCoreMetricManager implements Closeable {
    * are carried over and will be used under the new core name.
    * This method also reloads reporters so that they use the new core name.
    */
-  public void afterCoreSetName() {
-    String oldRegistryName = registryName;
+  public void afterCoreRename() {
+    assert core.getCoreDescriptor().getCloudDescriptor() == null;
+    String oldRegistryName = solrMetricsContext.getRegistryName();
     String oldLeaderRegistryName = leaderRegistryName;
-    initCloudMode();
-    registryName = createRegistryName(cloudMode, collectionName, shardName, replicaName, core.getName());
+    String newRegistryName = createRegistryName(cloudMode, collectionName, shardName, replicaName, core.getName());
     leaderRegistryName = createLeaderRegistryName(cloudMode, collectionName, shardName);
-    if (oldRegistryName.equals(registryName)) {
+    if (oldRegistryName.equals(newRegistryName)) {
       return;
     }
     // close old reporters
-    metricManager.closeReporters(oldRegistryName, tag);
+    metricManager.closeReporters(oldRegistryName, solrMetricsContext.getTag());
     if (oldLeaderRegistryName != null) {
-      metricManager.closeReporters(oldLeaderRegistryName, tag);
+      metricManager.closeReporters(oldLeaderRegistryName, solrMetricsContext.getTag());
     }
+    solrMetricsContext = new SolrMetricsContext(metricManager, newRegistryName, solrMetricsContext.getTag());
     // load reporters again, using the new core name
     loadReporters();
   }
@@ -124,29 +122,35 @@ public class SolrCoreMetricManager implements Closeable {
       throw new IllegalArgumentException("registerMetricProducer() called with illegal arguments: " +
           "scope = " + scope + ", producer = " + producer);
     }
-    producer.initializeMetrics(metricManager, getRegistryName(), scope);
+    // use deprecated method for back-compat, remove in 9.0
+    producer.initializeMetrics(solrMetricsContext, scope);
   }
 
   /**
    * Return the registry used by this SolrCore.
    */
   public MetricRegistry getRegistry() {
-    if (registryName != null) {
-      return metricManager.registry(registryName);
+    if (solrMetricsContext != null) {
+      return solrMetricsContext.getMetricRegistry();
     } else {
       return null;
     }
   }
 
   /**
-   * Closes reporters specific to this core.
+   * Closes reporters specific to this core and unregisters gauges with this core's instance tag.
    */
   @Override
   public void close() throws IOException {
-    metricManager.closeReporters(getRegistryName(), tag);
+    metricManager.closeReporters(solrMetricsContext.getRegistryName(), solrMetricsContext.getTag());
     if (getLeaderRegistryName() != null) {
-      metricManager.closeReporters(getLeaderRegistryName(), tag);
+      metricManager.closeReporters(getLeaderRegistryName(), solrMetricsContext.getTag());
     }
+    metricManager.unregisterGauges(solrMetricsContext.getRegistryName(), solrMetricsContext.getTag());
+  }
+
+  public SolrMetricsContext getSolrMetricsContext() {
+    return solrMetricsContext;
   }
 
   public SolrCore getCore() {
@@ -171,7 +175,7 @@ public class SolrCoreMetricManager implements Closeable {
    * @return the metric registry name of the manager.
    */
   public String getRegistryName() {
-    return registryName;
+    return solrMetricsContext != null ? solrMetricsContext.getRegistryName() : null;
   }
 
   /**
@@ -186,7 +190,7 @@ public class SolrCoreMetricManager implements Closeable {
    * Return a tag specific to this instance.
    */
   public String getTag() {
-    return tag;
+    return solrMetricsContext.getTag();
   }
 
   public static String createRegistryName(boolean cloud, String collectionName, String shardName, String replicaName, String coreName) {
@@ -207,7 +211,7 @@ public class SolrCoreMetricManager implements Closeable {
     CloudDescriptor cd = aCore.getCoreDescriptor().getCloudDescriptor();
     String replicaName = null;
     if (cd != null) {
-      replicaName = parseReplicaName(cd.getCollectionName(), coreName);
+      replicaName = Utils.parseMetricsReplicaName(cd.getCollectionName(), coreName);
     }
     return createRegistryName(
         cd != null,
@@ -216,25 +220,6 @@ public class SolrCoreMetricManager implements Closeable {
         replicaName,
         coreName
         );
-  }
-
-  public static String parseReplicaName(String collectionName, String coreName) {
-    if (collectionName == null || !coreName.startsWith(collectionName)) {
-      return null;
-    } else {
-      // split "collection1_shard1_1_replica1" into parts
-      if (coreName.length() > collectionName.length()) {
-        String str = coreName.substring(collectionName.length() + 1);
-        int pos = str.lastIndexOf("_replica");
-        if (pos == -1) { // ?? no _replicaN part ??
-          return str;
-        } else {
-          return str.substring(pos + 1);
-        }
-      } else {
-        return null;
-      }
-    }
   }
 
   public static String createLeaderRegistryName(boolean cloud, String collectionName, String shardName) {

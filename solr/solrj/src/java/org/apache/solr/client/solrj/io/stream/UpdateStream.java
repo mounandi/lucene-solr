@@ -19,10 +19,9 @@ package org.apache.solr.client.solrj.io.stream;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.Optional;
 
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
@@ -39,29 +38,36 @@ import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionNamedParamete
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionValue;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 import org.apache.solr.common.SolrInputDocument;
+import org.apache.solr.common.params.CommonParams;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.solr.common.params.CommonParams.VERSION_FIELD;
 
 /**
  * Sends tuples emitted by a wrapped {@link TupleStream} as updates to a SolrCloud collection.
+ * @since 6.0.0
  */
 public class UpdateStream extends TupleStream implements Expressible {
-  private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
   public static String BATCH_INDEXED_FIELD_NAME = "batchIndexed"; // field name in summary tuple for #docs updated in batch
   private String collection;
   private String zkHost;
   private int updateBatchSize;
+  /**
+   * Indicates if the {@link CommonParams#VERSION_FIELD} should be removed from tuples when converting 
+   * to Solr Documents.  
+   * May be set per expression using the <code>"pruneVersionField"</code> named operand, 
+   * defaults to the value returned by {@link #defaultPruneVersionField()} 
+   */
+  private boolean pruneVersionField;
   private int batchNumber;
   private long totalDocsIndex;
   private PushBackStream tupleSource;
   private transient SolrClientCache cache;
   private transient CloudSolrClient cloudSolrClient;
-  private List<SolrInputDocument> documentBatch = new ArrayList();
+  private List<SolrInputDocument> documentBatch = new ArrayList<>();
   private String coreName;
-
 
   public UpdateStream(StreamExpression expression, StreamFactory factory) throws IOException {
     String collectionName = factory.getValueOperand(expression, 0);
@@ -71,6 +77,7 @@ public class UpdateStream extends TupleStream implements Expressible {
     verifyZkHost(zkHost, collectionName, expression);
     
     int updateBatchSize = extractBatchSize(expression, factory);
+    pruneVersionField = factory.getBooleanOperand(expression, "pruneVersionField", defaultPruneVersionField());
 
     //Extract underlying TupleStream.
     List<StreamExpression> streamExpressions = factory.getExpressionOperandsRepresentingTypes(expression, Expressible.class, TupleStream.class);
@@ -78,7 +85,6 @@ public class UpdateStream extends TupleStream implements Expressible {
       throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - expecting a single stream but found %d",expression, streamExpressions.size()));
     }
     StreamExpression sourceStreamExpression = streamExpressions.get(0);
-    
     init(collectionName, factory.constructStream(sourceStreamExpression), zkHost, updateBatchSize);
   }
   
@@ -86,9 +92,10 @@ public class UpdateStream extends TupleStream implements Expressible {
     if (updateBatchSize <= 0) {
       throw new IOException(String.format(Locale.ROOT,"batchSize '%d' must be greater than 0.", updateBatchSize));
     }
+    pruneVersionField = defaultPruneVersionField();
     init(collectionName, tupleSource, zkHost, updateBatchSize);
   }
-  
+
   private void init(String collectionName, TupleStream tupleSource, String zkHost, int updateBatchSize) {
     this.collection = collectionName;
     this.zkHost = zkHost;
@@ -96,6 +103,11 @@ public class UpdateStream extends TupleStream implements Expressible {
     this.tupleSource = new PushBackStream(tupleSource);
   }
   
+  /** The name of the collection being updated */
+  protected String getCollectionName() {
+    return collection;
+  }
+
   @Override
   public void open() throws IOException {
     setCloudSolrClient();
@@ -235,10 +247,10 @@ public class UpdateStream extends TupleStream implements Expressible {
   
   private int extractBatchSize(StreamExpression expression, StreamFactory factory) throws IOException {
     StreamExpressionNamedParameter batchSizeParam = factory.getNamedOperand(expression, "batchSize");
-    if(null == batchSizeParam || null == batchSizeParam.getParameter() || !(batchSizeParam.getParameter() instanceof StreamExpressionValue)){
-      throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - expecting a 'batchSize' parameter of type positive integer but didn't find one",expression));
+    if(batchSizeParam == null) {
+      // Sensible default batch size
+      return 250;
     }
-    
     String batchSizeStr = ((StreamExpressionValue)batchSizeParam.getParameter()).getValue();
     return parseBatchSize(batchSizeStr, expression);
   }
@@ -255,22 +267,39 @@ public class UpdateStream extends TupleStream implements Expressible {
       throw new IOException(String.format(Locale.ROOT,"invalid expression %s - batchSize '%s' is not a valid integer.",expression, batchSizeStr));
     }    
   }
+
+  /**
+   * Used during initialization to specify the default value for the <code>"pruneVersionField"</code> option.
+   * {@link UpdateStream} returns <code>true</code> for backcompat and to simplify slurping of data from one
+   * collection to another.
+   */
+  protected boolean defaultPruneVersionField() {
+    return true;
+  }
+  
+  /** Only viable after calling {@link #open} */
+  protected CloudSolrClient getCloudSolrClient() {
+    assert null != this.cloudSolrClient;
+    return this.cloudSolrClient;
+  }
   
   private void setCloudSolrClient() {
     if(this.cache != null) {
       this.cloudSolrClient = this.cache.getCloudSolrClient(zkHost);
     } else {
-      this.cloudSolrClient = new Builder()
-          .withZkHost(zkHost)
-          .build();
+      final List<String> hosts = new ArrayList<>();
+      hosts.add(zkHost);
+      this.cloudSolrClient = new Builder(hosts, Optional.empty()).build();
       this.cloudSolrClient.connect();
     }
   }
   
+  @SuppressWarnings({"unchecked"})
   private SolrInputDocument convertTupleToSolrDocument(Tuple tuple) {
     SolrInputDocument doc = new SolrInputDocument();
-    for (Object field : tuple.fields.keySet()) {
-      if (! field.equals(VERSION_FIELD)) {
+    for (Object field : tuple.getFields().keySet()) {
+
+      if (! (field.equals(CommonParams.VERSION_FIELD) && pruneVersionField)) {
         Object value = tuple.get(field);
         if (value instanceof List) {
           addMultivaluedField(doc, (String)field, (List<Object>)value);
@@ -279,7 +308,7 @@ public class UpdateStream extends TupleStream implements Expressible {
         }
       }
     }
-    LOG.debug("Tuple [{}] was converted into SolrInputDocument [{}].", tuple, doc);
+    log.debug("Tuple [{}] was converted into SolrInputDocument [{}].", tuple, doc);
     
     return doc;
   }
@@ -290,7 +319,11 @@ public class UpdateStream extends TupleStream implements Expressible {
     }
   }
   
-  private void uploadBatchToCollection(List<SolrInputDocument> documentBatch) throws IOException {
+  /**
+   * This method will be called on every batch of tuples comsumed, after converting each tuple 
+   * in that batch to a Solr Input Document.
+   */
+  protected void uploadBatchToCollection(List<SolrInputDocument> documentBatch) throws IOException {
     if (documentBatch.size() == 0) {
       return;
     }
@@ -298,7 +331,13 @@ public class UpdateStream extends TupleStream implements Expressible {
     try {
       cloudSolrClient.add(collection, documentBatch);
     } catch (SolrServerException | IOException e) {
-      LOG.warn("Unable to add documents to collection due to unexpected error.", e);
+      // TODO: it would be nice if there was an option to "skipFailedBatches"
+      // TODO: and just record the batch failure info in the summary tuple for that batch and continue
+      //
+      // TODO: The summary batches (and/or stream error) should also pay attention to the error metadata
+      // from the SolrServerException ... and ideally also any TolerantUpdateProcessor metadata
+
+      log.warn("Unable to add documents to collection due to unexpected error.", e);
       String className = e.getClass().getName();
       String message = e.getMessage();
       throw new IOException(String.format(Locale.ROOT,"Unexpected error when adding documents to collection %s- %s:%s", collection, className, message));
@@ -307,16 +346,16 @@ public class UpdateStream extends TupleStream implements Expressible {
   
   private Tuple createBatchSummaryTuple(int batchSize) {
     assert batchSize > 0;
-    Map m = new HashMap();
+    Tuple tuple = new Tuple();
     this.totalDocsIndex += batchSize;
     ++batchNumber;
-    m.put(BATCH_INDEXED_FIELD_NAME, batchSize);
-    m.put("totalIndexed", this.totalDocsIndex);
-    m.put("batchNumber", batchNumber);
-    if(coreName != null) {
-      m.put("worker", coreName);
+    tuple.put(BATCH_INDEXED_FIELD_NAME, batchSize);
+    tuple.put("totalIndexed", this.totalDocsIndex);
+    tuple.put("batchNumber", batchNumber);
+    if (coreName != null) {
+      tuple.put("worker", coreName);
     }
-    return new Tuple(m);
+    return tuple;
   }
 
 }

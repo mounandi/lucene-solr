@@ -1,6 +1,4 @@
 = Solr JDBC - Python/Jython
-:page-shortname: solr-jdbc-python-jython
-:page-permalink: solr-jdbc-python-jython.html
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -31,7 +29,7 @@ Python supports accessing JDBC using the https://pypi.python.org/pypi/JayDeBeApi
 [source,bash]
 ----
 #!/usr/bin/env bash
-# Java 8 must already be installed
+# Java must already be installed
 
 pip install JayDeBeApi
 
@@ -72,7 +70,7 @@ Jython supports accessing JDBC natively with Java interfaces or with the zxJDBC 
 [source,bash]
 ----
 #!/usr/bin/env bash
-# Java 8 and Jython must already be installed
+# Java and Jython must already be installed
 
 export CLASSPATH="$(echo $(ls /opt/solr/dist/solr-solrj* /opt/solr/dist/solrj-lib/*) | tr ' ' ':')"
 

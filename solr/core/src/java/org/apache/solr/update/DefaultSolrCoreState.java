@@ -18,12 +18,10 @@ package org.apache.solr.update;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -34,8 +32,8 @@ import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.search.Sort;
 import org.apache.solr.cloud.ActionThrottle;
 import org.apache.solr.cloud.RecoveryStrategy;
-import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.common.SolrException;
+import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.CoreDescriptor;
 import org.apache.solr.core.DirectoryFactory;
@@ -79,13 +77,6 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   
   protected final ReentrantLock commitLock = new ReentrantLock();
 
-
-  private AtomicBoolean cdcrRunning = new AtomicBoolean();
-
-  private volatile Future<Boolean> cdcrBootstrapFuture;
-
-  private volatile Callable cdcrBootstrapCallable;
-
   @Deprecated
   public DefaultSolrCoreState(DirectoryFactory directoryFactory) {
     this(directoryFactory, new RecoveryStrategy.Builder());
@@ -116,7 +107,10 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   @Override
   public RefCounted<IndexWriter> getIndexWriter(SolrCore core)
       throws IOException {
-
+    if (core != null && (!core.indexEnabled || core.readOnly)) {
+      throw new SolrException(SolrException.ErrorCode.SERVICE_UNAVAILABLE,
+                              "Indexing is temporarily disabled");
+    }
     boolean succeeded = false;
     lock(iwLock.readLock());
     try {
@@ -201,14 +195,14 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
     if (iw != null) {
       if (!rollback) {
         try {
-          log.debug("Closing old IndexWriter... core=" + coreName);
+          log.debug("Closing old IndexWriter... core= {}", coreName);
           iw.close();
         } catch (Exception e) {
           SolrException.log(log, "Error closing old IndexWriter. core=" + coreName, e);
         }
       } else {
         try {
-          log.debug("Rollback old IndexWriter... core=" + coreName);
+          log.debug("Rollback old IndexWriter... core={}", coreName);
           iw.rollback();
         } catch (Exception e) {
           SolrException.log(log, "Error rolling back old IndexWriter. core=" + coreName, e);
@@ -308,19 +302,20 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
           // after the current one, and if there is, bail
           boolean locked = recoveryLock.tryLock();
           try {
-            if (!locked) {
-              if (recoveryWaiting.get() > 0) {
-                return;
-              }
-              recoveryWaiting.incrementAndGet();
-            } else {
-              recoveryWaiting.incrementAndGet();
-              cancelRecovery();
+            if (!locked && recoveryWaiting.get() > 0) {
+              return;
             }
+
+            recoveryWaiting.incrementAndGet();
+            cancelRecovery();
             
             recoveryLock.lock();
             try {
-              recoveryWaiting.decrementAndGet();
+              // don't use recoveryLock.getQueueLength() for this
+              if (recoveryWaiting.decrementAndGet() > 0) {
+                // another recovery waiting behind us, let it run now instead of after we finish
+                return;
+              }
               
               // to be air tight we must also check after lock
               if (cc.isShutDown()) {
@@ -359,11 +354,8 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
       // have to 'wait in line' a bit or bail if a recovery is 
       // already queued up - the recovery execution itself is run
       // in another thread on another 'recovery' executor.
-      // The update executor is interrupted on shutdown and should 
-      // not do disk IO.
-      // The recovery executor is not interrupted on shutdown.
       //
-      // avoid deadlock: we can't use the recovery executor here
+      // avoid deadlock: we can't use the recovery executor here!
       cc.getUpdateShardHandler().getUpdateExecutor().submit(recoveryTask);
     } catch (RejectedExecutionException e) {
       // fine, we are shutting down
@@ -424,35 +416,5 @@ public final class DefaultSolrCoreState extends SolrCoreState implements Recover
   @Override
   public Lock getRecoveryLock() {
     return recoveryLock;
-  }
-
-  @Override
-  public boolean getCdcrBootstrapRunning() {
-    return cdcrRunning.get();
-  }
-
-  @Override
-  public void setCdcrBootstrapRunning(boolean cdcrRunning) {
-    this.cdcrRunning.set(cdcrRunning);
-  }
-
-  @Override
-  public Future<Boolean> getCdcrBootstrapFuture() {
-    return cdcrBootstrapFuture;
-  }
-
-  @Override
-  public void setCdcrBootstrapFuture(Future<Boolean> cdcrBootstrapFuture) {
-    this.cdcrBootstrapFuture = cdcrBootstrapFuture;
-  }
-
-  @Override
-  public Callable getCdcrBootstrapCallable() {
-    return cdcrBootstrapCallable;
-  }
-
-  @Override
-  public void setCdcrBootstrapCallable(Callable cdcrBootstrapCallable) {
-    this.cdcrBootstrapCallable = cdcrBootstrapCallable;
   }
 }

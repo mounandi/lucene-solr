@@ -18,7 +18,6 @@ package org.apache.lucene.util;
 
 import java.util.Arrays;
 
-
 /** Represents long[], as a slice (offset + length) into an
  *  existing long[].  The {@link #longs} member should never be null; use
  *  {@link #EMPTY_LONGS} if necessary.
@@ -73,7 +72,7 @@ public final class LongsRef implements Comparable<LongsRef>, Cloneable {
   public int hashCode() {
     final int prime = 31;
     int result = 0;
-    final long end = offset + length;
+    final long end = (long) offset + length;
     for(int i = offset; i < end; i++) {
       result = prime * result + (int) (longs[i] ^ (longs[i]>>>32));
     }
@@ -92,52 +91,22 @@ public final class LongsRef implements Comparable<LongsRef>, Cloneable {
   }
 
   public boolean longsEquals(LongsRef other) {
-    if (length == other.length) {
-      int otherUpto = other.offset;
-      final long[] otherInts = other.longs;
-      final long end = offset + length;
-      for(int upto=offset; upto<end; upto++,otherUpto++) {
-        if (longs[upto] != otherInts[otherUpto]) {
-          return false;
-        }
-      }
-      return true;
-    } else {
-      return false;
-    }
+    return Arrays.equals(this.longs, this.offset, this.offset + this.length, 
+                               other.longs, other.offset, other.offset + other.length);
   }
 
   /** Signed int order comparison */
   @Override
   public int compareTo(LongsRef other) {
-    if (this == other) return 0;
-
-    final long[] aInts = this.longs;
-    int aUpto = this.offset;
-    final long[] bInts = other.longs;
-    int bUpto = other.offset;
-
-    final long aStop = aUpto + Math.min(this.length, other.length);
-
-    while(aUpto < aStop) {
-      long aInt = aInts[aUpto++];
-      long bInt = bInts[bUpto++];
-      if (aInt > bInt) {
-        return 1;
-      } else if (aInt < bInt) {
-        return -1;
-      }
-    }
-
-    // One is a prefix of the other, or, they are equal:
-    return this.length - other.length;
+    return Arrays.compare(this.longs, this.offset, this.offset + this.length, 
+                                other.longs, other.offset, other.offset + other.length);
   }
 
   @Override
   public String toString() {
     StringBuilder sb = new StringBuilder();
     sb.append('[');
-    final long end = offset + length;
+    final long end = (long) offset + length;
     for(int i=offset;i<end;i++) {
       if (i > offset) {
         sb.append(' ');
@@ -156,7 +125,7 @@ public final class LongsRef implements Comparable<LongsRef>, Cloneable {
    * and an offset of zero.
    */
   public static LongsRef deepCopyOf(LongsRef other) {
-    return new LongsRef(Arrays.copyOfRange(other.longs, other.offset, other.offset + other.length), 0, other.length);
+    return new LongsRef(ArrayUtil.copyOfSubArray(other.longs, other.offset, other.offset + other.length), 0, other.length);
   }
   
   /** 

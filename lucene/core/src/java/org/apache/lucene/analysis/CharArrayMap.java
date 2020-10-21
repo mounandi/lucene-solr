@@ -24,8 +24,6 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.lucene.analysis.CharacterUtils;
-
 /**
  * A simple class that stores key Strings as char[]'s in a
  * hash table. Note that this is not a general purpose
@@ -525,6 +523,7 @@ public class CharArrayMap<V> extends AbstractMap<Object,V> {
    * @throws NullPointerException
    *           if the given map is <code>null</code>.
    */
+  @SuppressWarnings("ReferenceEquality")
   public static <V> CharArrayMap<V> unmodifiableMap(CharArrayMap<V> map) {
     if (map == null)
       throw new NullPointerException("Given map is null");

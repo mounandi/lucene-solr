@@ -154,11 +154,17 @@ public final class RunListenerPrintReproduceInfo extends RunListener {
     }
 
     final StringBuilder b = new StringBuilder();
-    b.append("NOTE: reproduce with: ant test ");
+    b.append("NOTE: reproduce with: gradlew test ");
 
-    // Test case, method, seed.
-    addVmOpt(b, "testcase", RandomizedContext.current().getTargetClass().getSimpleName());
-    addVmOpt(b, "tests.method", testName);
+    // Figure out the test case name and method, if any.
+    String testClass = RandomizedContext.current().getTargetClass().getSimpleName();
+    b.append("--tests ");
+    b.append(testClass);
+    if (testName != null) {
+      b.append(".").append(testName);
+    }
+
+    // Pass the master seed.
     addVmOpt(b, "tests.seed", RandomizedContext.current().getRunnerSeedAsString());
 
     // Test groups and multipliers.
@@ -166,7 +172,9 @@ public final class RunListenerPrintReproduceInfo extends RunListener {
     if (TEST_NIGHTLY) addVmOpt(b, SYSPROP_NIGHTLY, TEST_NIGHTLY);
     if (TEST_WEEKLY) addVmOpt(b, SYSPROP_WEEKLY, TEST_WEEKLY);
     if (TEST_SLOW) addVmOpt(b, SYSPROP_SLOW, TEST_SLOW);
+    if (TEST_MONSTER) addVmOpt(b, SYSPROP_MONSTER, TEST_MONSTER);
     if (TEST_AWAITSFIX) addVmOpt(b, SYSPROP_AWAITSFIX, TEST_AWAITSFIX);
+    if (TEST_BADAPPLES) addVmOpt(b, SYSPROP_BADAPPLES, TEST_BADAPPLES);
 
     // Codec, postings, directories.
     if (!TEST_CODEC.equals("random")) addVmOpt(b, "tests.codec", TEST_CODEC);

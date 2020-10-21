@@ -20,20 +20,18 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.solr.util.hll.HLL;
-import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.solr.common.util.Hash;
 import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.schema.SchemaField;
+import org.apache.solr.util.hll.HLL;
 
 abstract class UniqueSlotAcc extends SlotAcc {
   HLLAgg.HLLFactory factory;
   SchemaField field;
   FixedBitSet[] arr;
-  int currentDocBase;
   int[] counts;  // populated with the cardinality once
   int nTerms;
 
@@ -54,23 +52,29 @@ abstract class UniqueSlotAcc extends SlotAcc {
   }
 
   @Override
-  public void setNextReader(LeafReaderContext readerContext) throws IOException {
-    currentDocBase = readerContext.docBase;
-  }
-
-  @Override
   public Object getValue(int slot) throws IOException {
     if (fcontext.isShard()) {
       return getShardValue(slot);
     }
-    if (counts != null) {  // will only be pre-populated if this was used for sorting.
-      return counts[slot];
-    }
-
-    FixedBitSet bs = arr[slot];
-    return bs==null ? 0 : bs.cardinality();
+    return getNonShardValue(slot);
   }
 
+  /**
+   * Returns the current slot value as long
+   * This is used to get non-sharded value
+   */
+  public long getNonShardValue(int slot) {
+    long res;
+    if (counts != null) {  // will only be pre-populated if this was used for sorting.
+      res = counts[slot];
+    } else {
+      FixedBitSet bs = arr[slot];
+      res = bs == null ? 0 : bs.cardinality();
+    }
+    return res;
+  }
+
+  @SuppressWarnings({"unchecked", "rawtypes"})
   private Object getShardHLL(int slot) throws IOException {
     FixedBitSet ords = arr[slot];
     if (ords == null) return HLLAgg.NO_VALUES;
@@ -94,6 +98,7 @@ abstract class UniqueSlotAcc extends SlotAcc {
     return map;
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   private Object getShardValue(int slot) throws IOException {
     if (factory != null) return getShardHLL(slot);
     FixedBitSet ords = arr[slot];
@@ -115,8 +120,8 @@ abstract class UniqueSlotAcc extends SlotAcc {
 
       List lst = new ArrayList( Math.min(unique, maxExplicit) );
 
-      long maxOrd = ords.length();
-      if (ords != null && ords.length() > 0) {
+      int maxOrd = ords.length();
+      if (maxOrd > 0) {
         for (int ord=0; lst.size() < maxExplicit;) {
           ord = ords.nextSetBit(ord);
           if (ord == DocIdSetIterator.NO_MORE_DOCS) break;
@@ -155,5 +160,8 @@ abstract class UniqueSlotAcc extends SlotAcc {
   @Override
   public void resize(Resizer resizer) {
     arr = resizer.resize(arr, null);
+    if (counts != null) {
+      counts = resizer.resize(counts, 0);
+    }
   }
 }

@@ -25,7 +25,7 @@ import java.io.IOException;
  *
  * @lucene.internal
  */
-class GeoDegeneratePoint extends GeoPoint implements GeoBBox, GeoCircle {
+class GeoDegeneratePoint extends GeoPoint implements GeoPointShape {
   /** Current planet model, since we don't extend BasePlanetObject */
   protected final PlanetModel planetModel;
   /** Edge point is an area containing just this */
@@ -86,9 +86,10 @@ class GeoDegeneratePoint extends GeoPoint implements GeoBBox, GeoCircle {
 
   @Override
   public boolean intersects(GeoShape geoShape) {
-    return false;
+    // We have no way of computing this properly, so return isWithin(), as we are allowed by contract.
+    return geoShape.isWithin(this);
   }
-
+  
   @Override
   public void getBounds(Bounds bounds) {
     bounds.addPoint(this);
@@ -124,7 +125,7 @@ class GeoDegeneratePoint extends GeoPoint implements GeoBBox, GeoCircle {
 
   @Override
   public boolean isWithin(final double x, final double y, final double z) {
-    return x == this.x && y == this.y && z == this.z;
+    return this.isIdentical(x, y, z);
   }
 
   @Override

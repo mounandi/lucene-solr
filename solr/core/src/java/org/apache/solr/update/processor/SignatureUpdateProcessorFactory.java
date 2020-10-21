@@ -36,6 +36,9 @@ import org.apache.solr.core.SolrCore;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.util.plugin.SolrCoreAware;
 
+/**
+ * @since 3.1
+ **/
 public class SignatureUpdateProcessorFactory 
   extends UpdateRequestProcessorFactory 
   implements SolrCoreAware {
@@ -50,9 +53,9 @@ public class SignatureUpdateProcessorFactory
   private SolrParams params;
 
   @Override
-  public void init(final NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})final NamedList args) {
     if (args != null) {
-      SolrParams params = SolrParams.toSolrParams(args);
+      SolrParams params = args.toSolrParams();
       boolean enabled = params.getBool("enabled", true);
       this.enabled = enabled;
 

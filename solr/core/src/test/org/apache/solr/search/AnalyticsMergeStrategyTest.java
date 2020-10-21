@@ -18,7 +18,6 @@ package org.apache.solr.search;
 
 import org.apache.solr.BaseDistributedSearchTestCase;
 import org.apache.solr.SolrTestCaseJ4;
-import org.apache.solr.SolrTestCaseJ4.SuppressObjectReleaseTracker;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.util.NamedList;
@@ -35,7 +34,6 @@ import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope.Scope;
  */
 
 @SolrTestCaseJ4.SuppressSSL(bugUrl="https://issues.apache.org/jira/browse/SOLR-8433")
-@SuppressObjectReleaseTracker(bugUrl="https://issues.apache.org/jira/browse/SOLR-8899")
 @ThreadLeakScope(Scope.NONE)
 public class AnalyticsMergeStrategyTest extends BaseDistributedSearchTestCase {
 
@@ -98,7 +96,9 @@ public class AnalyticsMergeStrategyTest extends BaseDistributedSearchTestCase {
   }
 
   private void assertCountOnly(QueryResponse rsp, int count) throws Exception {
+    @SuppressWarnings({"rawtypes"})
     NamedList response = rsp.getResponse();
+    @SuppressWarnings({"rawtypes"})
     NamedList analytics = (NamedList)response.get("analytics");
     Integer c = (Integer)analytics.get("mycount");
     if(c.intValue() != count) {
@@ -107,7 +107,9 @@ public class AnalyticsMergeStrategyTest extends BaseDistributedSearchTestCase {
   }
 
   private void assertCount(QueryResponse rsp, int count) throws Exception {
+    @SuppressWarnings({"rawtypes"})
     NamedList response = rsp.getResponse();
+    @SuppressWarnings({"rawtypes"})
     NamedList analytics = (NamedList)response.get("analytics");
     Integer c = (Integer)analytics.get("mycount");
     if(c.intValue() != count) {

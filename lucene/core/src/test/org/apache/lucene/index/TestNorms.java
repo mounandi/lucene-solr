@@ -33,18 +33,13 @@ import org.apache.lucene.search.similarities.ClassicSimilarity;
 import org.apache.lucene.search.similarities.PerFieldSimilarityWrapper;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.util.LineFileDocs;
 import org.apache.lucene.util.LuceneTestCase;
-import org.apache.lucene.util.LuceneTestCase.Slow;
-import org.apache.lucene.util.LuceneTestCase.SuppressCodecs;
 import org.apache.lucene.util.TestUtil;
 
 /**
  * Test that norms info is preserved during index life - including
  * separate norms, addDocument, addIndexes, forceMerge.
  */
-@SuppressCodecs({ "Memory", "Direct", "SimpleText" })
-@Slow
 public class TestNorms extends LuceneTestCase {
   static final String BYTE_TEST_FIELD = "normsTestByte";
   
@@ -69,28 +64,24 @@ public class TestNorms extends LuceneTestCase {
   public void buildIndex(Directory dir) throws IOException {
     Random random = random();
     MockAnalyzer analyzer = new MockAnalyzer(random());
-    analyzer.setMaxTokenLength(TestUtil.nextInt(random(), 1, IndexWriter.MAX_TERM_LENGTH));
+    // we need at least 3 for maxTokenLength otherwise norms are messed up
+    analyzer.setMaxTokenLength(TestUtil.nextInt(random(), 3, IndexWriter.MAX_TERM_LENGTH));
     IndexWriterConfig config = newIndexWriterConfig(analyzer);
     Similarity provider = new MySimProvider();
     config.setSimilarity(provider);
     RandomIndexWriter writer = new RandomIndexWriter(random, dir, config);
-    final LineFileDocs docs = new LineFileDocs(random);
     int num = atLeast(100);
     for (int i = 0; i < num; i++) {
-      Document doc = docs.nextDoc();
+      Document doc = new Document();
       int boost = TestUtil.nextInt(random, 1, 255);
       String value = IntStream.range(0, boost).mapToObj(k -> Integer.toString(boost)).collect(Collectors.joining(" "));
       Field f = new TextField(BYTE_TEST_FIELD, value, Field.Store.YES);
       doc.add(f);
       writer.addDocument(doc);
       doc.removeField(BYTE_TEST_FIELD);
-      if (rarely()) {
-        writer.commit();
-      }
     }
     writer.commit();
     writer.close();
-    docs.close();
   }
 
 
@@ -116,12 +107,7 @@ public class TestNorms extends LuceneTestCase {
     }
 
     @Override
-    public SimWeight computeWeight(float boost, CollectionStatistics collectionStats, TermStatistics... termStats) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public SimScorer simScorer(SimWeight weight, LeafReaderContext context) throws IOException {
+    public SimScorer scorer(float boost, CollectionStatistics collectionStats, TermStatistics... termStats) {
       throw new UnsupportedOperationException();
     }
   } 

@@ -28,6 +28,8 @@ import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Weight;
 
@@ -82,10 +84,13 @@ public class SolrConstantScoreQuery extends Query implements ExtendedQuery {
   }
 
   protected class ConstantWeight extends ConstantScoreWeight {
+    @SuppressWarnings({"rawtypes"})
     private Map context;
+    private ScoreMode scoreMode;
 
-    public ConstantWeight(IndexSearcher searcher, float boost) throws IOException {
+    public ConstantWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
       super(SolrConstantScoreQuery.this, boost);
+      this.scoreMode = scoreMode;
       this.context = ValueSource.newContext(searcher);
       if (filter instanceof SolrFilter)
         ((SolrFilter)filter).createWeight(context, searcher);
@@ -101,14 +106,19 @@ public class SolrConstantScoreQuery extends Query implements ExtendedQuery {
       if (iterator == null) {
         return null;
       }
-      return new ConstantScoreScorer(this, score(), iterator);
+      return new ConstantScoreScorer(this, score(), scoreMode, iterator);
+    }
+
+    @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return false;
     }
 
   }
 
   @Override
-  public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
-    return new SolrConstantScoreQuery.ConstantWeight(searcher, boost);
+  public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
+    return new SolrConstantScoreQuery.ConstantWeight(searcher, scoreMode, boost);
   }
 
   /** Prints a user-readable version of this query. */
@@ -128,6 +138,11 @@ public class SolrConstantScoreQuery extends Query implements ExtendedQuery {
   @Override
   public int hashCode() {
     return 31 * classHash() + filter.hashCode();
+  }
+
+  @Override
+  public void visit(QueryVisitor visitor) {
+    visitor.visitLeaf(this);
   }
 
 }

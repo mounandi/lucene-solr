@@ -39,12 +39,12 @@ public class JsonValidatorTest extends SolrTestCaseJ4  {
     checkSchema("cluster.security.RuleBasedAuthorization");
     checkSchema("core.config.Commands");
     checkSchema("core.SchemaEdit");
-    checkSchema("cluster.configs.Commands");
   }
 
 
   public void testSchemaValidation() {
     ValidatingJsonMap spec = Utils.getSpec("collections.Commands").getSpec();
+    @SuppressWarnings({"rawtypes"})
     Map createSchema = spec.getMap("commands", NOT_NULL).getMap("create-alias", NOT_NULL);
     JsonSchemaValidator validator = new JsonSchemaValidator(createSchema);
     List<String> errs = validator.validateJson(Utils.fromJSONString("{name : x, collections: [ c1 , c2]}"));
@@ -75,19 +75,17 @@ public class JsonValidatorTest extends SolrTestCaseJ4  {
 
     errs = validator.validateJson(Utils.fromJSONString("{name:x, age:'x21', adult:'true'}"));
     assertEquals(1, errs.size());
-    try {
-      validator = new JsonSchemaValidator("{" +
+    Exception e = expectThrows(Exception.class, () -> {
+      new JsonSchemaValidator("{" +
           "  type:object," +
           "  properties: {" +
           "   age : {type: int}," +
           "   adult : {type: Boolean}," +
           "   name: {type: string}}}");
-      fail("should have failed");
-    } catch (Exception e) {
-      assertTrue(e.getMessage().contains("Unknown type"));
-    }
+    });
+    assertTrue(e.getMessage().contains("Unknown type"));
 
-    try {
+    e = expectThrows(Exception.class, () -> {
       new JsonSchemaValidator("{" +
           "  type:object," +
           "   x : y," +
@@ -95,21 +93,18 @@ public class JsonValidatorTest extends SolrTestCaseJ4  {
           "   age : {type: number}," +
           "   adult : {type: boolean}," +
           "   name: {type: string}}}");
-      fail("should have failed");
-    } catch (Exception e) {
-      assertTrue(e.getMessage().contains("Unknown key"));
-    }
-    try {
+    });
+    assertTrue(e.getMessage().contains("Unknown key"));
+
+    e = expectThrows(Exception.class, () -> {
       new JsonSchemaValidator("{" +
           "  type:object," +
           "  propertes: {" +
           "   age : {type: number}," +
           "   adult : {type: boolean}," +
           "   name: {type: string}}}");
-      fail("should have failed");
-    } catch (Exception e) {
-      assertTrue(e.getMessage().contains("Unknown key : propertes"));
-    }
+    });
+    assertTrue(e.getMessage().contains("Unknown key : propertes"));
 
     validator = new JsonSchemaValidator("{" +
         "  type:object," +
@@ -178,8 +173,10 @@ public class JsonValidatorTest extends SolrTestCaseJ4  {
 
   private void checkSchema(String name) {
     ValidatingJsonMap spec = Utils.getSpec(name).getSpec();
+    @SuppressWarnings({"rawtypes"})
     Map commands = (Map) spec.get("commands");
     for (Object o : commands.entrySet()) {
+      @SuppressWarnings({"rawtypes"})
       Map.Entry cmd = (Map.Entry) o;
       try {
         JsonSchemaValidator validator = new JsonSchemaValidator((Map) cmd.getValue());

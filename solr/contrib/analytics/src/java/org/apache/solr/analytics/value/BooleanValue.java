@@ -20,6 +20,7 @@ import java.util.function.Consumer;
 
 import org.apache.solr.analytics.facet.compare.ExpressionComparator;
 import org.apache.solr.analytics.util.function.BooleanConsumer;
+import org.apache.solr.analytics.value.constant.ConstantBooleanValue;
 
 /**
  * A single-valued analytics value that can be represented as a boolean.
@@ -32,16 +33,16 @@ public interface BooleanValue extends BooleanValueStream, AnalyticsValue {
    * Get the boolean representation of the current value.
    * <p>
    * NOTE: The value returned is not valid unless calling {@link #exists()} afterwards returns {@code TRUE}.
-   * 
+   *
    * @return the current value
    */
   boolean getBoolean();
-  
+
   /**
-   * An interface that represents all of the types a {@link BooleanValue} should be able to cast to. 
+   * An interface that represents all of the types a {@link BooleanValue} should be able to cast to.
    */
   public static interface CastingBooleanValue extends BooleanValue, StringValue, ComparableValue {}
-  
+
   /**
    * An abstract base for {@link CastingBooleanValue} that automatically casts to all types if {@link #getBoolean()} and {@link #exists()} are implemented.
    */
@@ -76,6 +77,13 @@ public interface BooleanValue extends BooleanValueStream, AnalyticsValue {
       if (exists()) {
         cons.accept(val);
       }
+    }
+    @Override
+    public AnalyticsValue convertToConstant() {
+      if (getExpressionType().equals(ExpressionType.CONST)) {
+        return new ConstantBooleanValue(getBoolean());
+      }
+      return this;
     }
     @Override
     public ExpressionComparator<Boolean> getObjectComparator(String expression) {

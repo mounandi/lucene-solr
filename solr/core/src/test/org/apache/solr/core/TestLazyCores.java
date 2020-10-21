@@ -30,12 +30,13 @@ import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableList;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang.StringUtils;
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.common.SolrException;
+import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.CoreAdminParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.handler.admin.CoreAdminHandler;
+import org.apache.solr.handler.admin.MetricsHandler;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
@@ -59,7 +60,7 @@ public class TestLazyCores extends SolrTestCaseJ4 {
   }
 
   private static CoreDescriptor makeCoreDescriptor(CoreContainer cc, String coreName, String isTransient, String loadOnStartup) {
-    return new CoreDescriptor(coreName, cc.getCoreRootDirectory().resolve(coreName), cc.getContainerProperties(), false,
+    return new CoreDescriptor(coreName, cc.getCoreRootDirectory().resolve(coreName), cc,
         CoreDescriptor.CORE_TRANSIENT, isTransient,
         CoreDescriptor.CORE_LOADONSTARTUP, loadOnStartup);
   }
@@ -239,6 +240,22 @@ public class TestLazyCores extends SolrTestCaseJ4 {
           "collection8", "collection9");
       checkNotInCores(cc, Arrays.asList("collection2", "collection3"));
 
+      // verify that getting metrics from an unloaded core doesn't cause exceptions (SOLR-12541)
+      try (MetricsHandler handler = new MetricsHandler(h.getCoreContainer())) {
+
+        SolrQueryResponse resp = new SolrQueryResponse();
+        handler.handleRequest(makeReq(core1, CommonParams.QT, "/admin/metrics"), resp);
+        @SuppressWarnings({"rawtypes"})
+        NamedList values = resp.getValues();
+        assertNotNull(values.get("metrics"));
+        values = (NamedList) values.get("metrics");
+        @SuppressWarnings({"rawtypes"})
+        NamedList nl = (NamedList) values.get("solr.core.collection2");
+        assertNotNull(nl);
+        Object o = nl.get("REPLICATION./replication.indexPath");
+        assertNotNull(o);
+      }
+
 
       // Note decrementing the count when the core is removed from the lazyCores list is appropriate, since the
       // refcount is 1 when constructed. anyone _else_ who's opened up one has to close it.
@@ -293,7 +310,7 @@ public class TestLazyCores extends SolrTestCaseJ4 {
   }
 
   private void tryCreateFail(CoreAdminHandler admin, String name, String dataDir, String... errs) throws Exception {
-    try {
+    SolrException thrown = expectThrows(SolrException.class, () -> {
       SolrQueryResponse resp = new SolrQueryResponse();
 
       SolrQueryRequest request = req(CoreAdminParams.ACTION,
@@ -304,14 +321,11 @@ public class TestLazyCores extends SolrTestCaseJ4 {
           "config", "solrconfig.xml");
 
       admin.handleRequestBody(request, resp);
-      fail("Should have thrown an error");
-    } catch (SolrException se) {
-      //SolrException cause = (SolrException)se.getCause();
-      assertEquals("Exception code should be 500", 500, se.code());
-      for (String err : errs) {
-       assertTrue("Should have seen an exception containing the an error",
-            se.getMessage().contains(err));
-      }
+    });
+    assertEquals("Exception code should be 500", 500, thrown.code());
+    for (String err : errs) {
+      assertTrue("Should have seen an exception containing the an error",
+          thrown.getMessage().contains(err));
     }
   }
   @Test
@@ -350,28 +364,29 @@ public class TestLazyCores extends SolrTestCaseJ4 {
   private void createViaAdmin(CoreContainer cc, String name, boolean isTransient,
                               boolean loadOnStartup) throws Exception {
 
-    final CoreAdminHandler admin = new CoreAdminHandler(cc);
-    SolrQueryResponse resp = new SolrQueryResponse();
-    admin.handleRequestBody
-        (req(CoreAdminParams.ACTION,
-            CoreAdminParams.CoreAdminAction.CREATE.toString(),
-            CoreAdminParams.NAME, name,
-            CoreAdminParams.TRANSIENT, Boolean.toString(isTransient),
-            CoreAdminParams.LOAD_ON_STARTUP, Boolean.toString(loadOnStartup)),
-            resp);
+    try (final CoreAdminHandler admin = new CoreAdminHandler(cc)) {
+      SolrQueryResponse resp = new SolrQueryResponse();
+      admin.handleRequestBody
+          (req(CoreAdminParams.ACTION,
+              CoreAdminParams.CoreAdminAction.CREATE.toString(),
+              CoreAdminParams.NAME, name,
+              CoreAdminParams.TRANSIENT, Boolean.toString(isTransient),
+              CoreAdminParams.LOAD_ON_STARTUP, Boolean.toString(loadOnStartup)),
+              resp);
+    }
 
   }
 
   private void unloadViaAdmin(CoreContainer cc, String name) throws Exception {
 
-    final CoreAdminHandler admin = new CoreAdminHandler(cc);
-    SolrQueryResponse resp = new SolrQueryResponse();
-    admin.handleRequestBody
-        (req(CoreAdminParams.ACTION,
-            CoreAdminParams.CoreAdminAction.UNLOAD.toString(),
-            CoreAdminParams.CORE, name),
-            resp);
-
+    try (final CoreAdminHandler admin = new CoreAdminHandler(cc)) {
+      SolrQueryResponse resp = new SolrQueryResponse();
+      admin.handleRequestBody
+          (req(CoreAdminParams.ACTION,
+              CoreAdminParams.CoreAdminAction.UNLOAD.toString(),
+              CoreAdminParams.CORE, name),
+              resp);
+    }
   }
   
   // Make sure that creating a transient core from the admin handler correctly respects the transient limits etc.
@@ -604,8 +619,7 @@ public class TestLazyCores extends SolrTestCaseJ4 {
       writeCustomConfig(coreName, min_config, bad_schema, rand_snip);
     }
 
-    SolrResourceLoader loader = new SolrResourceLoader(solrHomeDirectory.toPath());
-    NodeConfig config = SolrXmlConfig.fromString(loader, "<solr/>");
+    NodeConfig config = SolrXmlConfig.fromString(solrHomeDirectory.toPath(), "<solr/>");
 
     // OK this should succeed, but at the end we should have recorded a series of errors.
     return createCoreContainer(config, new CorePropertiesLocator(config.getCoreRootDirectory()));
@@ -624,13 +638,15 @@ public class TestLazyCores extends SolrTestCaseJ4 {
   // if ok==false, the core being examined should have a failure in the list.
   private void checkStatus(CoreContainer cc, Boolean ok, String core) throws Exception {
     SolrQueryResponse resp = new SolrQueryResponse();
-    final CoreAdminHandler admin = new CoreAdminHandler(cc);
-    admin.handleRequestBody
-        (req(CoreAdminParams.ACTION,
-            CoreAdminParams.CoreAdminAction.STATUS.toString(),
-            CoreAdminParams.CORE, core),
-            resp);
+    try (final CoreAdminHandler admin = new CoreAdminHandler(cc)) {
+      admin.handleRequestBody
+          (req(CoreAdminParams.ACTION,
+              CoreAdminParams.CoreAdminAction.STATUS.toString(),
+              CoreAdminParams.CORE, core),
+              resp);
+    }
 
+    @SuppressWarnings({"unchecked"})
     Map<String, Exception> failures =
         (Map<String, Exception>) resp.getValues().get("initFailures");
 
@@ -707,6 +723,7 @@ public class TestLazyCores extends SolrTestCaseJ4 {
     updater.addDoc(cmd);
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   private LocalSolrQueryRequest makeReq(SolrCore core, String... q) {
     if (q.length == 1) {
       return new LocalSolrQueryRequest(core,
@@ -723,7 +740,7 @@ public class TestLazyCores extends SolrTestCaseJ4 {
   }
 
   private static final String makePath(String... args) {
-    return StringUtils.join(args, File.separator);
+    return String.join(File.separator, args);
   }
 
   @Test
@@ -781,7 +798,6 @@ public class TestLazyCores extends SolrTestCaseJ4 {
     }
   }
 
-  @BadApple(bugUrl = "https://issues.apache.org/jira/browse/SOLR-10101")
   // Insure that when a core is aged out of the transient cache, any uncommitted docs are preserved.
   // Note, this needs FS-based indexes to persist!
   // Cores 2, 3, 6, 7, 8, 9 are transient
@@ -814,7 +830,8 @@ public class TestLazyCores extends SolrTestCaseJ4 {
       openCores.clear();
       
       // We still should have 6, 7, 8, 9 loaded, their reference counts have NOT dropped to zero 
-      checkInCores(cc, "collection6", "collection7", "collection8", "collection9");
+      checkInCores(cc, "collection1", "collection5",
+          "collection6", "collection7", "collection8", "collection9");
 
       for (String coreName : coreList) {
         // The point of this test is to insure that when cores are aged out and re-opened

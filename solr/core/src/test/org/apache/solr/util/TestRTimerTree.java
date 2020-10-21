@@ -16,10 +16,10 @@
  */
 package org.apache.solr.util;
 
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.common.util.NamedList;
 
-public class TestRTimerTree extends LuceneTestCase {
+public class TestRTimerTree extends SolrTestCase {
 
   private static class MockTimerImpl implements RTimer.TimerImpl {
     static private long systemTime;
@@ -75,11 +75,14 @@ public class TestRTimerTree extends LuceneTestCase {
     assertEquals(120, (int) subt.getTime());
     assertEquals(220, (int) rt.getTime());
 
+    @SuppressWarnings({"rawtypes"})
     NamedList nl = rt.asNamedList();
     assertEquals(220, ((Double) nl.get("time")).intValue());
+    @SuppressWarnings({"rawtypes"})
     NamedList sub1nl = (NamedList) nl.get("sub1");
     assertNotNull(sub1nl);
     assertEquals(120, ((Double) sub1nl.get("time")).intValue());
+    @SuppressWarnings({"rawtypes"})
     NamedList sub11nl = (NamedList) sub1nl.get("sub1.1");
     assertNotNull(sub11nl);
     assertEquals(20, ((Double) sub11nl.get("time")).intValue());

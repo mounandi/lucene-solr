@@ -51,9 +51,11 @@ public class SolrCoreMetricManagerTest extends SolrTestCaseJ4 {
 
   @After
   public void afterTest() throws IOException {
-    coreMetricManager.close();
-    assertTrue(metricManager.getReporters(coreMetricManager.getRegistryName()).isEmpty());
-    deleteCore();
+    if (null != coreMetricManager) {
+      coreMetricManager.close();
+      assertTrue(metricManager.getReporters(coreMetricManager.getRegistryName()).isEmpty());
+      deleteCore();
+    }
   }
 
   @Test
@@ -117,8 +119,8 @@ public class SolrCoreMetricManagerTest extends SolrTestCaseJ4 {
     PluginInfo pluginInfo = shouldDefinePlugin ? new PluginInfo(TestUtil.randomUnicodeString(random), attrs) : null;
 
     try {
-      metricManager.loadReporter(coreMetricManager.getRegistryName(), coreMetricManager.getCore().getResourceLoader(),
-          pluginInfo, String.valueOf(coreMetricManager.getCore().hashCode()));
+      metricManager.loadReporter(coreMetricManager.getRegistryName(), coreMetricManager.getCore(),
+          pluginInfo, coreMetricManager.getTag());
       assertNotNull(pluginInfo);
       Map<String, SolrMetricReporter> reporters = metricManager.getReporters(coreMetricManager.getRegistryName());
       assertTrue("reporters.size should be > 0, but was + " + reporters.size(), reporters.size() > 0);

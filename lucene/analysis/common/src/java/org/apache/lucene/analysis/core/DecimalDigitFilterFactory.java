@@ -20,9 +20,7 @@ package org.apache.lucene.analysis.core;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link DecimalDigitFilter}. 
@@ -33,8 +31,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.DecimalDigitFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 5.4.0
+ * @lucene.spi {@value #NAME}
  */
-public class DecimalDigitFilterFactory extends TokenFilterFactory implements MultiTermAwareComponent {
+public class DecimalDigitFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "decimalDigit";
   
   /** Creates a new DecimalDigitFilterFactory */
   public DecimalDigitFilterFactory(Map<String,String> args) {
@@ -44,13 +47,18 @@ public class DecimalDigitFilterFactory extends TokenFilterFactory implements Mul
     }
   }
 
+  /** Default ctor for compatibility with SPI */
+  public DecimalDigitFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
-  public DecimalDigitFilter create(TokenStream input) {
+  public TokenStream create(TokenStream input) {
     return new DecimalDigitFilter(input);
   }
 
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

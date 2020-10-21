@@ -19,6 +19,7 @@ package org.apache.lucene.index;
 
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 
 import org.apache.lucene.analysis.MockAnalyzer;
@@ -28,14 +29,16 @@ import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.util.LineFileDocs;
-import org.apache.lucene.util.LuceneTestCase.SuppressFileSystems;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.LuceneTestCase.AwaitsFix;
+import org.apache.lucene.util.LuceneTestCase.SuppressFileSystems;
 import org.apache.lucene.util.TestUtil;
 
 /**
  * Test that a plain default detects index file truncation early (on opening a reader).
  */
 @SuppressFileSystems("ExtrasFS")
+@AwaitsFix(bugUrl="https://issues.apache.org/jira/browse/LUCENE-9409")
 public class TestAllFilesDetectTruncation extends LuceneTestCase {
   public void test() throws Exception {
     Directory dir = newDirectory();
@@ -104,21 +107,15 @@ public class TestAllFilesDetectTruncation extends LuceneTestCase {
         dirCopy.sync(Collections.singleton(name));
       }
 
-      try {
-        // NOTE: we .close so that if the test fails (truncation not detected) we don't also get all these confusing errors about open files:
-        DirectoryReader.open(dirCopy).close();
-        fail("truncation not detected after removing " + lostBytes + " bytes out of " + victimLength + " for file " + victim);
-      } catch (CorruptIndexException | EOFException e) {
-        // expected
-      }
+      // NOTE: we .close so that if the test fails (truncation not detected) we don't also get all these confusing errors about open files:
+      expectThrowsAnyOf(Arrays.asList(CorruptIndexException.class, EOFException.class),
+          () -> DirectoryReader.open(dirCopy).close()
+      );
 
       // CheckIndex should also fail:
-      try {
-        TestUtil.checkIndex(dirCopy, true, true, null);
-        fail("truncation not detected after removing " + lostBytes + " bytes out of " + victimLength + " for file " + victim);
-      } catch (CorruptIndexException | EOFException e) {
-        // expected
-      }
+      expectThrowsAnyOf(Arrays.asList(CorruptIndexException.class, EOFException.class),
+          () -> TestUtil.checkIndex(dirCopy, true, true, null)
+      );
     }
   }
 }

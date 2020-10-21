@@ -119,7 +119,7 @@ public abstract class BaseHandlerApiSupport implements ApiSupport {
         } catch (SolrException e) {
           throw e;
         } catch (Exception e) {
-          throw new SolrException(BAD_REQUEST, e);
+          throw new SolrException(BAD_REQUEST, e); //TODO BAD_REQUEST is a wild guess; should we flip the default?  fail here to investigate how this happens in tests
         } finally {
           req.setParams(params);
         }
@@ -129,6 +129,10 @@ public abstract class BaseHandlerApiSupport implements ApiSupport {
 
   }
 
+  /**
+   * Wrapper for SolrParams that wraps V2 params and exposes them as V1 params.
+   */
+  @SuppressWarnings({"unchecked"})
   private static void wrapParams(final SolrQueryRequest req, final CommandOperation co, final ApiCommand cmd, final boolean useRequestParams) {
     final Map<String, String> pathValues = req.getPathTemplateValues();
     final Map<String, Object> map = co == null || !(co.getCommandData() instanceof Map) ?
@@ -148,13 +152,14 @@ public abstract class BaseHandlerApiSupport implements ApiSupport {
           }
 
           private Object getParams0(String param) {
-            param = cmd.meta().getParamSubstitute(param);
+            param = cmd.meta().getParamSubstitute(param); // v1 -> v2, possibly dotted path
             Object o = param.indexOf('.') > 0 ?
                 Utils.getObjectByPath(map, true, splitSmart(param, '.')) :
                 map.get(param);
             if (o == null) o = pathValues.get(param);
             if (o == null && useRequestParams) o = origParams.getParams(param);
             if (o instanceof List) {
+              @SuppressWarnings({"rawtypes"})
               List l = (List) o;
               return l.toArray(new String[l.size()]);
             }
@@ -172,11 +177,39 @@ public abstract class BaseHandlerApiSupport implements ApiSupport {
 
           @Override
           public Iterator<String> getParameterNamesIterator() {
-            return cmd.meta().getParamNames(co).iterator();
-
+            return cmd.meta().getParamNamesIterator(co);
           }
 
-
+          @Override
+          public Map<String, Object> toMap(Map<String, Object> suppliedMap) {
+            for(Iterator<String> it=getParameterNamesIterator(); it.hasNext(); ) {
+              final String param = it.next();
+              String key = cmd.meta().getParamSubstitute(param);
+              Object o = key.indexOf('.') > 0 ?
+                  Utils.getObjectByPath(map, true, splitSmart(key, '.')) :
+                  map.get(key);
+              if (o == null) o = pathValues.get(key);
+              if (o == null && useRequestParams) o = origParams.getParams(key);
+              // make strings out of as many things as we can now to minimize differences from
+              // the standard impls that pass through a NamedList/SimpleOrderedMap...
+              Class<?> oClass = o.getClass();
+              if (oClass.isPrimitive() ||
+                  Number.class.isAssignableFrom(oClass) ||
+                  Character.class.isAssignableFrom(oClass) ||
+                  Boolean.class.isAssignableFrom(oClass)) {
+                suppliedMap.put(param,String.valueOf(o));
+              } else if (List.class.isAssignableFrom(oClass) && ((List)o).get(0) instanceof String ) {
+                @SuppressWarnings({"unchecked"})
+                List<String> l = (List<String>) o;
+                suppliedMap.put( param, l.toArray(new String[0]));
+              } else {
+                // Lists pass through but will require special handling downstream
+                // if they contain non-string elements.
+                suppliedMap.put(param, o);
+              }
+            }
+            return suppliedMap;
+          }
         });
 
   }

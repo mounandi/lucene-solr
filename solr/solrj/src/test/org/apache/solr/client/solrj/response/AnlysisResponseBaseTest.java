@@ -16,7 +16,7 @@
  */
 package org.apache.solr.client.solrj.response;
 
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.common.util.NamedList;
 import org.junit.Test;
 
@@ -30,7 +30,7 @@ import java.util.List;
  * @since solr 1.4
  */
 @SuppressWarnings("unchecked")
-public class AnlysisResponseBaseTest extends LuceneTestCase {
+public class AnlysisResponseBaseTest extends SolrTestCase {
 
   /**
    * Tests the {@link AnalysisResponseBase#buildTokenInfo(org.apache.solr.common.util.NamedList)} method.
@@ -38,6 +38,7 @@ public class AnlysisResponseBaseTest extends LuceneTestCase {
   @Test
   public void testBuildTokenInfo() throws Exception {
 
+    @SuppressWarnings({"rawtypes"})
     NamedList tokenNL = new NamedList();
     tokenNL.add("text", "JUMPING");
     tokenNL.add("type", "word");
@@ -76,6 +77,7 @@ public class AnlysisResponseBaseTest extends LuceneTestCase {
   public void testBuildPhases() throws Exception {
 
     final AnalysisResponseBase.TokenInfo tokenInfo = new AnalysisResponseBase.TokenInfo("text", null, "type", 0, 3, 1, false);
+    @SuppressWarnings({"rawtypes"})
     NamedList nl = new NamedList();
     nl.add("Tokenizer", buildFakeTokenInfoList(6));
     nl.add("Filter1", buildFakeTokenInfoList(5));
@@ -84,7 +86,7 @@ public class AnlysisResponseBaseTest extends LuceneTestCase {
 
     AnalysisResponseBase response = new AnalysisResponseBase() {
       @Override
-      protected TokenInfo buildTokenInfo(NamedList tokenNL) {
+      protected TokenInfo buildTokenInfo(@SuppressWarnings({"rawtypes"})NamedList tokenNL) {
         return tokenInfo;
       }
     };
@@ -98,8 +100,23 @@ public class AnlysisResponseBaseTest extends LuceneTestCase {
     assertPhase(phases.get(3), "Filter3", 3, tokenInfo);
   }
 
+  /**
+   * Tests the {@link AnalysisResponseBase#buildPhases(org.apache.solr.common.util.NamedList)} )}
+   * method for the special case of CharacterFilter.
+   */
+  @Test
+  public void testCharFilterBuildPhases() throws Exception {
+    @SuppressWarnings({"rawtypes"})
+    NamedList nl = new NamedList();
+    nl.add("CharFilter1", "CharFilterOutput"); //not list of tokens
+    AnalysisResponseBase response = new AnalysisResponseBase();
+    List<AnalysisResponseBase.AnalysisPhase> phases = response.buildPhases(nl);
+    assertEquals(1, phases.size());
+  }
+
   //================================================ Helper Methods ==================================================
 
+  @SuppressWarnings({"rawtypes"})
   private List<NamedList> buildFakeTokenInfoList(int numberOfTokens) {
     List<NamedList> list = new ArrayList<>(numberOfTokens);
     for (int i = 0; i < numberOfTokens; i++) {

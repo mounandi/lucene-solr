@@ -25,9 +25,9 @@ import org.apache.lucene.analysis.CharArraySet;
 import org.apache.lucene.analysis.TokenFilter;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.compound.hyphenation.HyphenationTree;
-import org.apache.lucene.analysis.util.ResourceLoader;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenFilterFactory;
 import org.apache.lucene.util.IOUtils;
 import org.xml.sax.InputSource;
 
@@ -57,8 +57,14 @@ import org.xml.sax.InputSource;
  * &lt;/fieldType&gt;</pre>
  *
  * @see HyphenationCompoundWordTokenFilter
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
 public class HyphenationCompoundWordTokenFilterFactory extends TokenFilterFactory implements ResourceLoaderAware {
+
+  /** SPI name */
+  public static final String NAME = "hyphenationCompoundWord";
+
   private CharArraySet dictionary;
   private HyphenationTree hyphenator;
   private final String dictFile;
@@ -84,6 +90,11 @@ public class HyphenationCompoundWordTokenFilterFactory extends TokenFilterFactor
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public HyphenationCompoundWordTokenFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public void inform(ResourceLoader loader) throws IOException {
     InputStream stream = null;

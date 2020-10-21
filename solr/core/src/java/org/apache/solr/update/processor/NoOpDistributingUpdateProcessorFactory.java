@@ -21,24 +21,25 @@ import org.apache.solr.response.SolrQueryResponse;
 
 /**
  * A No-Op implementation of DistributingUpdateProcessorFactory that 
- * allways returns null.
+ * allways returns the next processor instead of inserting a new URP in front of it.
  * <p> 
  * This implementation may be useful for Solr installations in which neither 
  * the <code>{@link DistributedUpdateProcessorFactory}</code> nor any custom 
  * implementation of <code>{@link DistributingUpdateProcessorFactory}</code> 
  * is desired (ie: shards are managed externally from Solr)
  * </p>
+ * @since 4.0.0
  */
 public class NoOpDistributingUpdateProcessorFactory 
   extends UpdateRequestProcessorFactory 
   implements DistributingUpdateProcessorFactory {    
 
-  /** Returns null 
+  /** Returns the next
    */
   @Override
   public UpdateRequestProcessor getInstance(SolrQueryRequest req, 
                                             SolrQueryResponse rsp, 
                                             UpdateRequestProcessor next ) {
-    return null;
+    return next;
   }
 }

@@ -79,7 +79,7 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.SELE
  * In the ExampleFieldMutatingUpdateProcessorFactory configured below, 
  * fields will be mutated if the name starts with "foo" <i>or</i> "bar"; 
  * <b>unless</b> the field name contains the substring "SKIP" <i>or</i> 
- * the fieldType is (or subclasses) TrieDateField.  Meaning a field named
+ * the fieldType is (or subclasses) DatePointField.  Meaning a field named
  * "foo_SKIP" is guaranteed not to be selected, but a field named "bar_smith" 
  * that uses StrField will be selected.
  * </p>
@@ -92,7 +92,7 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.SELE
  *     &lt;str name="fieldRegex"&gt;.*SKIP.*&lt;/str&gt;
  *   &lt;/lst&gt;
  *   &lt;lst name="exclude"&gt;
- *     &lt;str name="typeClass"&gt;solr.TrieDateField&lt;/str&gt;
+ *     &lt;str name="typeClass"&gt;solr.DatePointField&lt;/str&gt;
  *   &lt;/lst&gt;
  * &lt;/processor&gt;</pre>
  * 
@@ -105,6 +105,7 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.SELE
  * @see FieldMutatingUpdateProcessor
  * @see FieldValueMutatingUpdateProcessor
  * @see FieldNameSelector
+ * @since 4.0.0
  */
 public abstract class FieldMutatingUpdateProcessorFactory
   extends UpdateRequestProcessorFactory 
@@ -137,7 +138,9 @@ public abstract class FieldMutatingUpdateProcessorFactory
         "selector was never initialized, inform(SolrCore) never called???");
   }
 
-  public static SelectorParams parseSelectorParams(NamedList args) {
+
+  @SuppressWarnings({"unchecked"})
+  public static SelectorParams parseSelectorParams(@SuppressWarnings({"rawtypes"})NamedList args) {
     SelectorParams params = new SelectorParams();
     
     params.fieldName = new HashSet<>(args.removeConfigArgs("fieldName"));
@@ -167,8 +170,10 @@ public abstract class FieldMutatingUpdateProcessorFactory
     return params;
   }
                                
-  public static Collection<SelectorParams> parseSelectorExclusionParams(NamedList args) {
+  public static Collection<SelectorParams> parseSelectorExclusionParams(
+          @SuppressWarnings({"rawtypes"})NamedList args) {
     Collection<SelectorParams> exclusions = new ArrayList<>();
+    @SuppressWarnings({"unchecked"})
     List<Object> excList = args.getAll("exclude");
     for (Object excObj : excList) {
       if (null == excObj) {
@@ -179,6 +184,7 @@ public abstract class FieldMutatingUpdateProcessorFactory
         throw new SolrException (SolrException.ErrorCode.SERVER_ERROR,
             "'exclude' init param must be <lst/>");
       }
+      @SuppressWarnings({"rawtypes"})
       NamedList exc = (NamedList) excObj;
       exclusions.add(parseSelectorParams(exc));
       if (0 < exc.size()) {
@@ -202,7 +208,7 @@ public abstract class FieldMutatingUpdateProcessorFactory
    */
   @SuppressWarnings("unchecked")
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
 
     inclusions = parseSelectorParams(args);
     exclusions = parseSelectorExclusionParams(args);

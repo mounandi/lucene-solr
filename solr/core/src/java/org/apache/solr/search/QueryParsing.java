@@ -97,12 +97,12 @@ public class QueryParsing {
         throw new SyntaxError("Expected ending character '" + endChar + "' parsing local params '" + txt + '"');
 
       }
-      String val = null;
+      String[] val = new String[1];
 
       ch = p.peek();
       if (ch != '=') {
         // single word... treat {!func} as type=func for easy lookup
-        val = id;
+        val[0] = id;
         id = TYPE;
       } else {
         // saw equals, so read value
@@ -116,7 +116,7 @@ public class QueryParsing {
         }
 
         if (ch == '\"' || ch == '\'') {
-          val = p.getQuotedString();
+          val[0] = p.getQuotedString();
         } else {
           // read unquoted literal ended by whitespace or endChar (normally '}')
           // there is no escaping.
@@ -127,7 +127,7 @@ public class QueryParsing {
             }
             char c = p.val.charAt(p.pos);
             if (c == endChar || Character.isWhitespace(c)) {
-              val = p.val.substring(valStart, p.pos);
+              val[0] = p.val.substring(valStart, p.pos);
               break;
             }
             p.pos++;
@@ -136,7 +136,7 @@ public class QueryParsing {
 
         if (deref) {  // dereference parameter
           if (params != null) {
-            val = params.get(val);
+            val = params.getParams(val[0]);
           }
         }
       }
@@ -178,7 +178,7 @@ public class QueryParsing {
     ft = schema.getFieldTypeNoEx(name);
     out.append(name);
     if (ft == null) {
-      out.append("(UNKNOWN FIELD " + name + ')');
+      out.append("(UNKNOWN FIELD ").append(name).append(String.valueOf(')'));
     }
     out.append(':');
     return ft;
@@ -251,6 +251,7 @@ public class QueryParsing {
 
       out.append(q.includesUpper() ? ']' : '}');
     } else if (query instanceof LegacyNumericRangeQuery) {
+      @SuppressWarnings({"rawtypes"})
       LegacyNumericRangeQuery q = (LegacyNumericRangeQuery) query;
       String fname = q.getField();
       FieldType ft = writeFieldName(fname, schema, out, flags);
@@ -328,12 +329,11 @@ public class QueryParsing {
     } else if (query instanceof BoostQuery) {
       BoostQuery q = (BoostQuery)query;
       toString(q.getQuery(), schema, out, subflag | FLAG_BOOSTED);
-      out.append("^");
+      out.append('^');
       out.append(Float.toString(q.getBoost()));
     }
     else {
-      out.append(query.getClass().getSimpleName()
-              + '(' + query.toString() + ')');
+      out.append(query.getClass().getSimpleName()).append('(').append(query.toString()).append(')');
     }
   }
 

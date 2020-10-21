@@ -16,6 +16,8 @@
  */
 package org.apache.lucene.analysis.miscellaneous;
 
+import java.util.Locale;
+
 /**
  * A BreakIterator-like API for iterating over subwords in text, according to WordDelimiterGraphFilter rules.
  * @lucene.internal
@@ -113,7 +115,17 @@ public final class WordDelimiterIterator {
     this.splitOnNumerics = splitOnNumerics;
     this.stemEnglishPossessive = stemEnglishPossessive;
   }
-  
+
+  @Override
+  public String toString() {
+    if (end == DONE) {
+      return "DONE";
+    }
+    return new String(text, current, end - current)
+        + " [" + current + "-" + end + "]"
+        + " type=" + String.format(Locale.ROOT, "%#02x", type());
+  }
+
   /**
    * Advance to the next subword in the string.
    *
@@ -256,7 +268,7 @@ public final class WordDelimiterIterator {
    * Determines if the text at the given position indicates an English possessive which should be removed
    *
    * @param pos Position in the text to check if it indicates an English possessive
-   * @return {@code true} if the text at the position indicates an English posessive, {@code false} otherwise
+   * @return {@code true} if the text at the position indicates an English possessive, {@code false} otherwise
    */
   private boolean endsWithPossessive(int pos) {
     return (stemEnglishPossessive &&

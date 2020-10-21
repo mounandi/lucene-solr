@@ -27,7 +27,7 @@ import static org.apache.solr.common.SolrException.ErrorCode.BAD_REQUEST;
 import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.SELECT_NO_FIELDS;
 
 /**
- * An update processor that keeps only the the maximum value from any selected 
+ * An update processor that keeps only the maximum value from any selected 
  * fields where multiple values are found.  Correct behavior requires tha all 
  * of the values in the SolrInputFields being mutated are mutually comparable; 
  * If this is not the case, then a SolrException will br thrown. 
@@ -50,12 +50,14 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.SELE
  *
  * @see MinFieldValueUpdateProcessorFactory
  * @see Collections#max
+ * @since 4.0.0
  */
 public final class MaxFieldValueUpdateProcessorFactory extends FieldValueSubsetUpdateProcessorFactory {
 
   @Override
-  @SuppressWarnings("unchecked")
-  public Collection pickSubset(Collection values) {
+  @SuppressWarnings({"unchecked"})
+  public Collection<Object> pickSubset(@SuppressWarnings({"rawtypes"})Collection values) {
+    @SuppressWarnings({"rawtypes"})
     Collection result = values;
     try {
       // NOTE: the extra cast to Object is needed to prevent compile

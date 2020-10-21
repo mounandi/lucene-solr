@@ -20,10 +20,14 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.Collection;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.cloud.api.collections.ShardSplitTest;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
@@ -33,10 +37,12 @@ import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.core.CloudConfig;
+import org.apache.solr.handler.component.HttpShardHandler;
 import org.apache.solr.handler.component.HttpShardHandlerFactory;
 import org.apache.solr.update.UpdateShardHandler;
 import org.apache.solr.update.UpdateShardHandlerConfig;
 import org.apache.zookeeper.KeeperException;
+import org.junit.BeforeClass;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -53,10 +59,17 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
 
   static final int TIMEOUT = 10000;
   private AtomicInteger killCounter = new AtomicInteger();
+  
+  @BeforeClass
+  public static void beforeSuperClass() {
+    System.clearProperty("solr.httpclient.retries");
+    System.clearProperty("solr.retries.on.forward");
+    System.clearProperty("solr.retries.to.followers"); 
+  }
 
   @Test
   public void test() throws Exception {
-    waitForThingsToLevelOut(15);
+    waitForThingsToLevelOut(15, TimeUnit.SECONDS);
 
     ClusterState clusterState = cloudClient.getZkStateReader().getClusterState();
     final DocRouter router = clusterState.getCollection(AbstractDistribZkTestBase.DEFAULT_COLLECTION).getRouter();
@@ -65,6 +78,7 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
     final List<DocRouter.Range> ranges = router.partitionRange(2, shard1Range);
     final int[] docCounts = new int[ranges.size()];
     int numReplicas = shard1.getReplicas().size();
+    final Set<String> documentIds = ConcurrentHashMap.newKeySet(1024);
 
     Thread indexThread = null;
     OverseerRestarter killer = null;
@@ -74,7 +88,7 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
     try {
       del("*:*");
       for (int id = 0; id < 100; id++) {
-        indexAndUpdateCount(router, ranges, docCounts, String.valueOf(id), id);
+        indexAndUpdateCount(router, ranges, docCounts, String.valueOf(id), id, documentIds);
       }
       commit();
 
@@ -84,7 +98,7 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
           int max = atLeast(401);
           for (int id = 101; id < max; id++) {
             try {
-              indexAndUpdateCount(router, ranges, docCounts, String.valueOf(id), id);
+              indexAndUpdateCount(router, ranges, docCounts, String.valueOf(id), id, documentIds);
               Thread.sleep(atLeast(25));
             } catch (Exception e) {
               log.error("Exception while adding doc", e);
@@ -96,11 +110,11 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
 
       // kill the leader
       CloudJettyRunner leaderJetty = shardToLeaderJetty.get("shard1");
-      chaosMonkey.killJetty(leaderJetty);
+      leaderJetty.jetty.stop();
 
       Thread.sleep(2000);
 
-      waitForThingsToLevelOut(90);
+      waitForThingsToLevelOut(90, TimeUnit.SECONDS);
 
       Thread.sleep(1000);
       checkShardConsistency(false, true);
@@ -118,7 +132,7 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
       }
 
       // bring back dead node
-      ChaosMonkey.start(deadJetty.jetty); // he is not the leader anymore
+      deadJetty.jetty.start(); // he is not the leader anymore
 
       waitTillRecovered();
 
@@ -129,7 +143,7 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
       killerThread.start();
       killCounter.incrementAndGet();
 
-      splitShard(AbstractDistribZkTestBase.DEFAULT_COLLECTION, SHARD1, null, null);
+      splitShard(AbstractDistribZkTestBase.DEFAULT_COLLECTION, SHARD1, null, null, false);
 
       log.info("Layout after split: \n");
       printLayout();
@@ -148,7 +162,7 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
       }
     }
 
-    checkDocCountsAndShardStates(docCounts, numReplicas);
+    checkDocCountsAndShardStates(docCounts, numReplicas, documentIds);
 
     // todo - can't call waitForThingsToLevelOut because it looks for
     // jettys of all shards
@@ -246,14 +260,15 @@ public class ChaosMonkeyShardSplitTest extends ShardSplitTest {
     ZkStateReader reader = new ZkStateReader(zkClient);
     LeaderElector overseerElector = new LeaderElector(zkClient);
     UpdateShardHandler updateShardHandler = new UpdateShardHandler(UpdateShardHandlerConfig.DEFAULT);
-    // TODO: close Overseer
-    Overseer overseer = new Overseer(new HttpShardHandlerFactory().getShardHandler(), updateShardHandler, "/admin/cores",
-        reader, null, new CloudConfig.CloudConfigBuilder("127.0.0.1", 8983, "solr").build());
-    overseer.close();
-    ElectionContext ec = new OverseerElectionContext(zkClient, overseer,
-        address.replaceAll("/", "_"));
-    overseerElector.setup(ec);
-    overseerElector.joinElection(ec, false);
+    try (HttpShardHandlerFactory hshf = new HttpShardHandlerFactory()) {
+      Overseer overseer = new Overseer((HttpShardHandler) hshf.getShardHandler(), updateShardHandler, "/admin/cores",
+          reader, null, new CloudConfig.CloudConfigBuilder("127.0.0.1", 8983, "solr").build());
+      overseer.close();
+      ElectionContext ec = new OverseerElectionContext(zkClient, overseer,
+          address.replaceAll("/", "_"));
+      overseerElector.setup(ec);
+      overseerElector.joinElection(ec, false);
+    }
     reader.close();
     return zkClient;
   }

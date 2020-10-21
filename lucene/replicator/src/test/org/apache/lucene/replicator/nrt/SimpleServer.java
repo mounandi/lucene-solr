@@ -51,7 +51,7 @@ import org.apache.lucene.util.TestUtil;
 
 /** Child process with silly naive TCP socket server to handle
  *  between-node commands, launched for each node  by TestNRTReplication. */
-@SuppressCodecs({"MockRandom", "Memory", "Direct", "SimpleText"})
+@SuppressCodecs({"MockRandom", "Direct", "SimpleText"})
 @SuppressSysoutChecks(bugUrl = "Stuff gets printed, important stuff for debugging a failure")
 @SuppressForbidden(reason = "We need Unsafe to actually crush :-)")
 public class SimpleServer extends LuceneTestCase {
@@ -220,6 +220,7 @@ public class SimpleServer extends LuceneTestCase {
     return new CopyState(files, version, gen, infosBytes, completedMergeFiles, primaryGen, null);
   }
 
+  @SuppressWarnings("try")
   public void test() throws Exception {
 
     int id = Integer.parseInt(System.getProperty("tests.nrtreplication.nodeid"));

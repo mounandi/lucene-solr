@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -82,7 +83,7 @@ import org.apache.lucene.util.Version;
  *  since they will just be regnerated (at a cost though). */
 
 // @SuppressSysoutChecks(bugUrl="we print stuff")
-
+// See: https://issues.apache.org/jira/browse/SOLR-12028 Tests cannot remove files on Windows machines occasionally
 public class TestDemoParallelLeafReader extends LuceneTestCase {
 
   static final boolean DEBUG = false;
@@ -129,17 +130,14 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
       }
       w = new IndexWriter(indexDir, iwc);
 
-      w.getConfig().setMergedSegmentWarmer(new IndexWriter.IndexReaderWarmer() {
-          @Override
-          public void warm(LeafReader reader) throws IOException {
-            // This will build the parallel index for the merged segment before the merge becomes visible, so reopen delay is only due to
-            // newly flushed segments:
-            if (DEBUG) System.out.println(Thread.currentThread().getName() +": TEST: now warm " + reader);
-            // TODO: it's not great that we pass false here; it means we close the reader & reopen again for NRT reader; still we did "warm" by
-            // building the parallel index, if necessary
-            getParallelLeafReader(reader, false, getCurrentSchemaGen());
-          }
-        });
+      w.getConfig().setMergedSegmentWarmer((reader) -> {
+        // This will build the parallel index for the merged segment before the merge becomes visible, so reopen delay is only due to
+        // newly flushed segments:
+        if (DEBUG) System.out.println(Thread.currentThread().getName() +": TEST: now warm " + reader);
+        // TODO: it's not great that we pass false here; it means we close the reader & reopen again for NRT reader; still we did "warm" by
+        // building the parallel index, if necessary
+        getParallelLeafReader(reader, false, getCurrentSchemaGen());
+      });
 
       // start with empty commit:
       w.commit();
@@ -511,7 +509,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     }
 
     /** Just replaces the sub-readers with parallel readers, so reindexed fields are merged into new segments. */
-    private class ReindexingMergePolicy extends MergePolicyWrapper {
+    private class ReindexingMergePolicy extends FilterMergePolicy {
 
       class ReindexingOneMerge extends OneMerge {
 
@@ -532,7 +530,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
 
         @Override
         public CodecReader wrapForMerge(CodecReader reader) throws IOException {
-          LeafReader wrapped = getCurrentReader((SegmentReader)reader, schemaGen);
+          LeafReader wrapped = getCurrentReader(reader, schemaGen);
           if (wrapped instanceof ParallelLeafReader) {
             parallelReaders.add((ParallelLeafReader) wrapped);
           }
@@ -540,7 +538,8 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
         }
 
         @Override
-        public void mergeFinished() throws IOException {
+        public void mergeFinished(boolean success, boolean segmentDropped) throws IOException {
+          super.mergeFinished(success, segmentDropped);
           Throwable th = null;
           for (ParallelLeafReader r : parallelReaders) {
             try {
@@ -560,7 +559,9 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
         @Override
         public void setMergeInfo(SegmentCommitInfo info) {
           // Record that this merged segment is current as of this schemaGen:
-          info.info.getDiagnostics().put(SCHEMA_GEN_KEY, Long.toString(schemaGen));
+          Map<String, String> copy = new HashMap<>(info.info.getDiagnostics());
+          copy.put(SCHEMA_GEN_KEY, Long.toString(schemaGen));
+          info.info.setDiagnostics(copy);
           super.setMergeInfo(info);
         }
 
@@ -596,28 +597,28 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
 
       @Override
       public MergeSpecification findMerges(MergeTrigger mergeTrigger,
-                                           SegmentInfos segmentInfos, IndexWriter writer) throws IOException {
-        return wrap(in.findMerges(mergeTrigger, segmentInfos, writer));
+                                           SegmentInfos segmentInfos, MergeContext mergeContext) throws IOException {
+        return wrap(in.findMerges(mergeTrigger, segmentInfos, mergeContext));
       }
 
       @Override
       public MergeSpecification findForcedMerges(SegmentInfos segmentInfos,
-                                                 int maxSegmentCount, Map<SegmentCommitInfo,Boolean> segmentsToMerge, IndexWriter writer)
+                                                 int maxSegmentCount, Map<SegmentCommitInfo,Boolean> segmentsToMerge, MergeContext mergeContext)
         throws IOException {
         // TODO: do we need to force-force this?  Ie, wrapped MP may think index is already optimized, yet maybe its schemaGen is old?  need test!
-        return wrap(in.findForcedMerges(segmentInfos, maxSegmentCount, segmentsToMerge, writer));
+        return wrap(in.findForcedMerges(segmentInfos, maxSegmentCount, segmentsToMerge, mergeContext));
       }
 
       @Override
-      public MergeSpecification findForcedDeletesMerges(SegmentInfos segmentInfos, IndexWriter writer)
+      public MergeSpecification findForcedDeletesMerges(SegmentInfos segmentInfos, MergeContext mergeContext)
         throws IOException {
-        return wrap(in.findForcedDeletesMerges(segmentInfos, writer));
+        return wrap(in.findForcedDeletesMerges(segmentInfos, mergeContext));
       }
 
       @Override
       public boolean useCompoundFile(SegmentInfos segments,
-                                     SegmentCommitInfo newSegment, IndexWriter writer) throws IOException {
-        return in.useCompoundFile(segments, newSegment, writer);
+                                     SegmentCommitInfo newSegment, MergeContext mergeContext) throws IOException {
+        return in.useCompoundFile(segments, newSegment, mergeContext);
       }
 
       @Override
@@ -952,7 +953,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     ReindexingReader reindexer = null;
 
     // TODO: separate refresh thread, search threads, indexing threads
-    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 1000);
+    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 200);
     int maxID = 0;
     Path root = createTempDir();
     int refreshEveryNumDocs = 100;
@@ -1037,7 +1038,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     ReindexingReader reindexer = null;
 
     // TODO: separate refresh thread, search threads, indexing threads
-    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 1000);
+    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 200);
     int maxID = 0;
     Path root = createTempDir();
     int refreshEveryNumDocs = 100;
@@ -1215,7 +1216,7 @@ public class TestDemoParallelLeafReader extends LuceneTestCase {
     ReindexingReader reindexer = null;
 
     // TODO: separate refresh thread, search threads, indexing threads
-    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 1000);
+    int numDocs = atLeast(TEST_NIGHTLY ? 20000 : 200);
     int maxID = 0;
     int refreshEveryNumDocs = 100;
     int commitCloseNumDocs = 1000;

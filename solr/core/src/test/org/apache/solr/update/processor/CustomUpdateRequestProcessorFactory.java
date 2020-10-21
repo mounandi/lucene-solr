@@ -19,8 +19,6 @@ package org.apache.solr.update.processor;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
-import org.apache.solr.update.processor.UpdateRequestProcessor;
-import org.apache.solr.update.processor.UpdateRequestProcessorFactory;
 
 
 /**
@@ -28,10 +26,11 @@ import org.apache.solr.update.processor.UpdateRequestProcessorFactory;
  */
 public class CustomUpdateRequestProcessorFactory extends UpdateRequestProcessorFactory 
 {
+  @SuppressWarnings({"rawtypes"})
   public NamedList args = null;
   
   @Override
-  public void init( NamedList args )
+  public void init( @SuppressWarnings({"rawtypes"})NamedList args )
   {
     this.args = args;
   }

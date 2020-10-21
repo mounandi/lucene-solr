@@ -29,7 +29,6 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DocumentStoredFieldVisitor;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.util.Bits;  // javadocs
-import org.apache.lucene.util.IOUtils;
 
 /**
  IndexReader is an abstract class, providing an interface for accessing a
@@ -69,7 +68,7 @@ import org.apache.lucene.util.IOUtils;
  rely on a given document having the same number between sessions.
 
  <p>
- <a name="thread-safety"></a><p><b>NOTE</b>: {@link
+ <a id="thread-safety"></a><p><b>NOTE</b>: {@link
  IndexReader} instances are completely thread
  safe, meaning multiple threads can call any of its methods,
  concurrently.  If your application requires external
@@ -142,16 +141,13 @@ public abstract class IndexReader implements Closeable {
   }
 
   // overridden by StandardDirectoryReader and SegmentReader
-  void notifyReaderClosedListeners(Throwable th) throws IOException {
-    // nothing to notify in the base impl, just rethrow
-    if (th != null) {
-      throw IOUtils.rethrowAlways(th);
-    }
+  void notifyReaderClosedListeners() throws IOException {
+    // nothing to notify in the base impl
   }
 
-  private void reportCloseToParentReaders() {
-    synchronized(parentReaders) {
-      for(IndexReader parent : parentReaders) {
+  private void reportCloseToParentReaders() throws IOException {
+    synchronized (parentReaders) {
+      for (IndexReader parent : parentReaders) {
         parent.closedByChild = true;
         // cross memory barrier by a fake write:
         parent.refCount.addAndGet(0);
@@ -232,6 +228,7 @@ public abstract class IndexReader implements Closeable {
    *
    * @see #incRef
    */
+  @SuppressWarnings("try")
   public final void decRef() throws IOException {
     // only check refcount here (don't call ensureOpen()), so we can
     // still close the reader if it was made invalid by a child:
@@ -242,17 +239,9 @@ public abstract class IndexReader implements Closeable {
     final int rc = refCount.decrementAndGet();
     if (rc == 0) {
       closed = true;
-      Throwable throwable = null;
-      try {
+      try (Closeable finalizer = this::reportCloseToParentReaders;
+            Closeable finalizer1 = this::notifyReaderClosedListeners) {
         doClose();
-      } catch (Throwable th) {
-        throwable = th;
-      } finally {
-        try {
-          reportCloseToParentReaders();
-        } finally {
-          notifyReaderClosedListeners(throwable);
-        }
       }
     } else if (rc < 0) {
       throw new IllegalStateException("too many decRef calls: refCount is " + rc + " after decrement");
@@ -312,7 +301,9 @@ public abstract class IndexReader implements Closeable {
     return vectors.terms(field);
   }
 
-  /** Returns the number of documents in this index. */
+  /** Returns the number of documents in this index.
+   *  <p><b>NOTE</b>: This operation may run in O(maxDoc). Implementations that
+   *  can't return this number in constant-time should cache it. */
   public abstract int numDocs();
 
   /** Returns one greater than the largest possible document number.
@@ -321,7 +312,8 @@ public abstract class IndexReader implements Closeable {
    */
   public abstract int maxDoc();
 
-  /** Returns the number of deleted documents. */
+  /** Returns the number of deleted documents.
+   *  <p><b>NOTE</b>: This operation may run in O(maxDoc). */
   public final int numDeletedDocs() {
     return maxDoc() - numDocs();
   }
@@ -342,7 +334,7 @@ public abstract class IndexReader implements Closeable {
    * requested document is deleted, and therefore asking for a deleted document
    * may yield unspecified results. Usually this is not required, however you
    * can test if the doc is deleted by checking the {@link
-   * Bits} returned from {@link MultiFields#getLiveDocs}.
+   * Bits} returned from {@link MultiBits#getLiveDocs}.
    *
    * <b>NOTE:</b> only the content of a field is returned,
    * if that field was stored during indexing.  Metadata
@@ -450,25 +442,25 @@ public abstract class IndexReader implements Closeable {
   
   /**
    * Returns the total number of occurrences of {@code term} across all
-   * documents (the sum of the freq() for each doc that has this term). This
-   * will be -1 if the codec doesn't support this measure. Note that, like other
-   * term measures, this measure does not take deleted documents into account.
+   * documents (the sum of the freq() for each doc that has this term).
+   * Note that, like other term measures, this measure does not take
+   * deleted documents into account.
    */
   public abstract long totalTermFreq(Term term) throws IOException;
   
   /**
-   * Returns the sum of {@link TermsEnum#docFreq()} for all terms in this field,
-   * or -1 if this measure isn't stored by the codec. Note that, just like other
-   * term measures, this measure does not take deleted documents into account.
+   * Returns the sum of {@link TermsEnum#docFreq()} for all terms in this field.
+   * Note that, just like other term measures, this measure does not take deleted
+   * documents into account.
    * 
    * @see Terms#getSumDocFreq()
    */
   public abstract long getSumDocFreq(String field) throws IOException;
   
   /**
-   * Returns the number of documents that have at least one term for this field,
-   * or -1 if this measure isn't stored by the codec. Note that, just like other
-   * term measures, this measure does not take deleted documents into account.
+   * Returns the number of documents that have at least one term for this field.
+   * Note that, just like other term measures, this measure does not take deleted 
+   * documents into account.
    * 
    * @see Terms#getDocCount()
    */
@@ -476,9 +468,8 @@ public abstract class IndexReader implements Closeable {
 
   /**
    * Returns the sum of {@link TermsEnum#totalTermFreq} for all terms in this
-   * field, or -1 if this measure isn't stored by the codec (or if this fields
-   * omits term freq and positions). Note that, just like other term measures,
-   * this measure does not take deleted documents into account.
+   * field. Note that, just like other term measures, this measure does not take
+   * deleted documents into account.
    * 
    * @see Terms#getSumTotalTermFreq()
    */

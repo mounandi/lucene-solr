@@ -19,9 +19,8 @@ package org.apache.solr.client.solrj.io.stream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.lang.invoke.MethodHandles;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -43,17 +42,15 @@ import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
+import org.apache.solr.common.params.StreamParams;
 import org.apache.solr.common.util.NamedList;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
 *  Queries a single Solr instance and maps SolrDocs to a Stream of Tuples.
+* @since 5.1.0
 **/
 
 public class SolrStream extends TupleStream {
-
-  private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
   private static final long serialVersionUID = 1;
 
@@ -69,6 +66,9 @@ public class SolrStream extends TupleStream {
   private String slice;
   private long checkpoint = -1;
   private CloseableHttpResponse closeableHttpResponse;
+  private boolean distrib = true;
+  private String user;
+  private String password;
 
   /**
    * @param baseUrl Base URL of the stream.
@@ -85,7 +85,7 @@ public class SolrStream extends TupleStream {
   }
 
   public List<TupleStream> children() {
-    return new ArrayList();
+    return new ArrayList<>();
   }
 
   public String getBaseUrl() {
@@ -93,9 +93,15 @@ public class SolrStream extends TupleStream {
   }
 
   public void setStreamContext(StreamContext context) {
+    this.distrib = !context.isLocal();
     this.numWorkers = context.numWorkers;
     this.workerID = context.workerID;
     this.cache = context.getSolrClientCache();
+  }
+
+  public void setCredentials(String user, String password) {
+    this.user = user;
+    this.password = password;
   }
 
   /**
@@ -110,7 +116,11 @@ public class SolrStream extends TupleStream {
     }
 
     try {
-      tupleStreamParser = constructParser(client, loadParams(params));
+      SolrParams requestParams = loadParams(params);
+      if (!distrib) {
+        ((ModifiableSolrParams) requestParams).add("distrib","false");
+      }
+      tupleStreamParser = constructParser(client, requestParams);
     } catch (Exception e) {
       throw new IOException("params " + params, e);
     }
@@ -132,17 +142,15 @@ public class SolrStream extends TupleStream {
     this.checkpoint = checkpoint;
   }
 
-  private SolrParams loadParams(SolrParams paramsIn) throws IOException {
+  private ModifiableSolrParams loadParams(SolrParams paramsIn) throws IOException {
     ModifiableSolrParams solrParams = new ModifiableSolrParams(paramsIn);
     if (params.get("partitionKeys") != null) {
-      if(!params.get("partitionKeys").equals("none")) {
+      if(!params.get("partitionKeys").equals("none") && numWorkers > 1) {
         String partitionFilter = getPartitionFilter();
         solrParams.add("fq", partitionFilter);
       }
-    } else {
-      if(numWorkers > 1) {
+    } else if(numWorkers > 1) {
         throw new IOException("When numWorkers > 1 partitionKeys must be set. Set partitionKeys=none to send the entire stream to each worker.");
-      }
     }
 
     if(checkpoint > 0) {
@@ -170,13 +178,15 @@ public class SolrStream extends TupleStream {
       .withExpressionType(ExpressionType.STREAM_SOURCE)
       .withExpression("non-expressible");
   }
-  
+
   /**
   *  Closes the Stream to a single Solr Instance
   * */
 
   public void close() throws IOException {
-    closeableHttpResponse.close();
+    if (closeableHttpResponse != null) {
+      closeableHttpResponse.close();
+    }
     if(cache == null) {
       client.close();
     }
@@ -186,18 +196,18 @@ public class SolrStream extends TupleStream {
   * Reads a Tuple from the stream. The Stream is completed when Tuple.EOF == true.
   **/
 
+  @SuppressWarnings({"unchecked"})
   public Tuple read() throws IOException {
     try {
+      @SuppressWarnings({"rawtypes"})
       Map fields = tupleStreamParser.next();
 
       if (fields == null) {
         //Return the EOF tuple.
-        Map m = new HashMap();
-        m.put("EOF", true);
-        return new Tuple(m);
+        return Tuple.EOF();
       } else {
 
-        String msg = (String) fields.get("EXCEPTION");
+        String msg = (String) fields.get(StreamParams.EXCEPTION);
         if (msg != null) {
           HandledException ioException = new HandledException(msg);
           throw ioException;
@@ -223,17 +233,26 @@ public class SolrStream extends TupleStream {
     }
   }
 
+  public void setDistrib(boolean distrib) {
+    this.distrib = distrib;
+  }
+
+  public boolean getDistrib() {
+    return distrib;
+  }
+
   public static class HandledException extends IOException {
     public HandledException(String msg) {
       super(msg);
     }
   }
-  
+
   /** There is no known sort applied to a SolrStream */
   public StreamComparator getStreamSort(){
     return null;
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   private Map mapFields(Map fields, Map<String,String> mappings) {
 
     Iterator<Map.Entry<String,String>> it = mappings.entrySet().iterator();
@@ -264,13 +283,18 @@ public class SolrStream extends TupleStream {
     query.setPath(p);
     query.setResponseParser(new InputStreamResponseParser(wt));
     query.setMethod(SolrRequest.METHOD.POST);
+
+    if(user != null && password != null) {
+      query.setBasicAuthCredentials(user, password);
+    }
+
     NamedList<Object> genericResponse = server.request(query);
     InputStream stream = (InputStream) genericResponse.get("stream");
     this.closeableHttpResponse = (CloseableHttpResponse)genericResponse.get("closeableResponse");
     if (CommonParams.JAVABIN.equals(wt)) {
       return new JavabinTupleStreamParser(stream, true);
     } else {
-      InputStreamReader reader = new InputStreamReader(stream, "UTF-8");
+      InputStreamReader reader = new InputStreamReader(stream, StandardCharsets.UTF_8);
       return new JSONTupleStream(reader);
     }
   }

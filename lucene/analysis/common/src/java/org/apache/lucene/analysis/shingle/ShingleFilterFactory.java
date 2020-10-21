@@ -18,7 +18,7 @@ package org.apache.lucene.analysis.shingle;
 
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 import java.util.Map;
 
@@ -32,8 +32,15 @@ import java.util.Map;
  *             outputUnigrams="true" outputUnigramsIfNoShingles="false" tokenSeparator=" " fillerToken="_"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class ShingleFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "shingle";
+
   private final int minShingleSize;
   private final int maxShingleSize;
   private final boolean outputUnigrams;
@@ -63,6 +70,11 @@ public class ShingleFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public ShingleFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

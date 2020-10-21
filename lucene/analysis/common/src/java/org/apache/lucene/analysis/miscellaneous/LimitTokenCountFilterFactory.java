@@ -20,7 +20,7 @@ package org.apache.lucene.analysis.miscellaneous;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link LimitTokenCountFilter}. 
@@ -34,8 +34,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * <p>
  * The {@code consumeAllTokens} property is optional and defaults to {@code false}.  
  * See {@link LimitTokenCountFilter} for an explanation of its use.
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
 public class LimitTokenCountFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "limitTokenCount";
 
   public static final String MAX_TOKEN_COUNT_KEY = "maxTokenCount";
   public static final String CONSUME_ALL_TOKENS_KEY = "consumeAllTokens";
@@ -50,6 +55,11 @@ public class LimitTokenCountFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public LimitTokenCountFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

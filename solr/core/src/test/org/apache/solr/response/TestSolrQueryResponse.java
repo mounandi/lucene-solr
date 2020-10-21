@@ -17,21 +17,19 @@
 package org.apache.solr.response;
 
 import java.io.IOException;
-import java.lang.ArithmeticException;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.SimpleOrderedMap;
-import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.search.ReturnFields;
 import org.apache.solr.search.SolrReturnFields;
 import org.junit.Test;
 
-public class TestSolrQueryResponse extends LuceneTestCase {
+public class TestSolrQueryResponse extends SolrTestCase {
   
   @Test
   public void testName() throws Exception {
@@ -61,6 +59,7 @@ public class TestSolrQueryResponse extends LuceneTestCase {
     assertEquals("values new value", newValue, response.getValues());
     response.add("key2", "value2");
     {
+      @SuppressWarnings({"unchecked"})
       final Iterator<Map.Entry<String,Object>> it = response.getValues().iterator();
       assertTrue(it.hasNext());
       final Map.Entry<String,Object> entry1 = it.next();

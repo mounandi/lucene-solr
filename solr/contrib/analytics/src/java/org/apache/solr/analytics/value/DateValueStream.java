@@ -32,13 +32,13 @@ import java.util.function.Consumer;
 public interface DateValueStream extends LongValueStream {
   /**
    * Stream the date representations of all current values, if any exist.
-   * 
+   *
    * @param cons The consumer to accept the values
    */
   void streamDates(Consumer<Date> cons);
-  
+
   /**
-   * An interface that represents all of the types a {@link DateValueStream} should be able to cast to. 
+   * An interface that represents all of the types a {@link DateValueStream} should be able to cast to.
    */
   public static interface CastingDateValueStream extends DateValueStream, LongValueStream, StringValueStream {}
 
@@ -56,7 +56,11 @@ public interface DateValueStream extends LongValueStream {
     }
     @Override
     public void streamObjects(Consumer<Object> cons) {
-      streamLongs((long val) -> cons.accept(new Date(val)));
+      streamDates((Date val) -> cons.accept(val));
+    }
+    @Override
+    public AnalyticsValueStream convertToConstant() {
+      return this;
     }
   }
 }

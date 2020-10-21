@@ -22,10 +22,12 @@ import static org.apache.solr.common.params.CollectionAdminParams.FLUSH;
 import java.util.Iterator;
 import java.util.Set;
 
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.ZkStateReader;
+import org.apache.solr.common.params.CollectionAdminParams;
+import org.apache.solr.common.params.CoreAdminParams;
 import org.apache.solr.common.params.ShardParams;
 import org.apache.solr.common.params.SolrParams;
 
@@ -35,7 +37,7 @@ import com.google.common.collect.Sets;
  * Tests that default {@link CollectionAdminRequest#getParams()} returns only
  * the required parameters of this request, and none other.
  */
-public class CollectionAdminRequestRequiredParamsTest extends LuceneTestCase {
+public class CollectionAdminRequestRequiredParamsTest extends SolrTestCase {
 
   public void testBalanceShardUnique() {
     CollectionAdminRequest.BalanceShardUnique request = CollectionAdminRequest.balanceReplicaProperty("foo","prop");
@@ -56,7 +58,12 @@ public class CollectionAdminRequestRequiredParamsTest extends LuceneTestCase {
     CollectionAdminRequest.ClusterProp request = CollectionAdminRequest.setClusterProperty("foo","bar");
     assertContainsParams(request.getParams(), ACTION, NAME, "val");
   }
-  
+
+  public void testCollectionProp() {
+    final CollectionAdminRequest.CollectionProp request = CollectionAdminRequest.setCollectionProperty("foo", "bar", "baz");
+    assertContainsParams(request.getParams(), ACTION, CoreAdminParams.NAME, CollectionAdminParams.PROPERTY_NAME, CollectionAdminParams.PROPERTY_VALUE);
+  }
+
   public void testAddRole() {
     CollectionAdminRequest.AddRole request = CollectionAdminRequest.addRole("node","role");
     assertContainsParams(request.getParams(), ACTION, "node", "role");
@@ -138,12 +145,10 @@ public class CollectionAdminRequestRequiredParamsTest extends LuceneTestCase {
   public void testCreateCollection() {
     // shortest form
     assertContainsParams(CollectionAdminRequest.createCollection("foo", null, 1, 1).getParams(),
-                         ACTION, NAME, ZkStateReader.NUM_SHARDS_PROP,
-                         "replicationFactor", ZkStateReader.NRT_REPLICAS);
+                         ACTION, NAME, ZkStateReader.NUM_SHARDS_PROP, ZkStateReader.NRT_REPLICAS);
     // shortest form w/ "explicitly" choosing "implicit" router
     assertContainsParams(CollectionAdminRequest.createCollectionWithImplicitRouter("foo", null, "bar", 1).getParams(),
-                         ACTION, NAME, "shards", "router.name",
-                         "replicationFactor", ZkStateReader.NRT_REPLICAS);
+                         ACTION, NAME, "shards", "router.name", ZkStateReader.NRT_REPLICAS);
   }
   
   public void testReloadCollection() {

@@ -34,7 +34,7 @@ import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.util.ExecutorUtil;
-import org.apache.solr.common.util.SolrjNamedThreadFactory;
+import org.apache.solr.common.util.SolrNamedThreadFactory;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 
@@ -46,20 +46,22 @@ public class HttpSolrClientConPoolTest extends SolrJettyTestBase {
   
   @BeforeClass
   public static void beforeTest() throws Exception {
-    createJetty(legacyExampleCollection1SolrHome());
+    createAndStartJetty(legacyExampleCollection1SolrHome());
     // stealing the first made jetty
     yetty = jetty;
     barUrl = yetty.getBaseUrl().toString() + "/" + "collection1";
     
-    createJetty(legacyExampleCollection1SolrHome());
+    createAndStartJetty(legacyExampleCollection1SolrHome());
     
     fooUrl = jetty.getBaseUrl().toString() + "/" + "collection1";
   }
   
   @AfterClass
   public static void stopYetty() throws Exception {
-    yetty.stop();
-    yetty = null;
+    if (null != yetty) {
+      yetty.stop();
+      yetty = null;
+    }
   }
   
   public void testPoolSize() throws SolrServerException, IOException {
@@ -124,7 +126,7 @@ public class HttpSolrClientConPoolTest extends SolrJettyTestBase {
     final HttpSolrClient client1 ;
     int threadCount = atLeast(2);
     final ExecutorService threads = ExecutorUtil.newMDCAwareFixedThreadPool(threadCount,
-        new SolrjNamedThreadFactory(getClass().getSimpleName()+"TestScheduler"));
+        new SolrNamedThreadFactory(getClass().getSimpleName()+"TestScheduler"));
     CloseableHttpClient httpClient = HttpClientUtil.createClient(new ModifiableSolrParams(), pool);
     try{
       final LBHttpSolrClient roundRobin = new LBHttpSolrClient.Builder().

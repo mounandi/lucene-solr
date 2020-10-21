@@ -16,14 +16,19 @@
  */
 package org.apache.solr.ltr.model;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.Explanation;
+import org.apache.lucene.util.Accountable;
+import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.solr.core.SolrResourceLoader;
 import org.apache.solr.ltr.feature.Feature;
 import org.apache.solr.ltr.feature.FeatureException;
@@ -73,15 +78,18 @@ import org.apache.solr.util.SolrPluginUtils;
  * implement the {@link #score(float[])} and
  * {@link #explain(LeafReaderContext, int, float, List)} methods.
  */
-public abstract class LTRScoringModel {
+public abstract class LTRScoringModel implements Accountable {
+  private static final long BASE_RAM_BYTES = RamUsageEstimator.shallowSizeOfInstance(LTRScoringModel.class);
 
   protected final String name;
   private final String featureStoreName;
   protected final List<Feature> features;
   private final List<Feature> allFeatures;
   private final Map<String,Object> params;
-  private final List<Normalizer> norms;
+  protected final List<Normalizer> norms;
+  private Integer hashCode; // cached since it shouldn't actually change after construction
 
+  @SuppressWarnings({"rawtypes"})
   public static LTRScoringModel getInstance(SolrResourceLoader solrResourceLoader,
       String className, String name, List<Feature> features,
       List<Normalizer> norms,
@@ -111,11 +119,11 @@ public abstract class LTRScoringModel {
       String featureStoreName, List<Feature> allFeatures,
       Map<String,Object> params) {
     this.name = name;
-    this.features = features;
+    this.features = features != null ? Collections.unmodifiableList(new ArrayList<>(features)) : null;
     this.featureStoreName = featureStoreName;
-    this.allFeatures = allFeatures;
-    this.params = params;
-    this.norms = norms;
+    this.allFeatures = allFeatures != null ? Collections.unmodifiableList(new ArrayList<>(allFeatures)) : null;
+    this.params = params != null ? Collections.unmodifiableMap(new LinkedHashMap<>(params)) : null;
+    this.norms = norms != null ? Collections.unmodifiableList(new ArrayList<>(norms)) : null;
   }
 
   /**
@@ -123,6 +131,8 @@ public abstract class LTRScoringModel {
    * {@link ModelException} if they do not make sense.
    */
   protected void validate() throws ModelException {
+    final List<Feature> features = getFeatures();
+    final List<Normalizer> norms = getNorms();
     if (features.isEmpty()) {
       throw new ModelException("no features declared for model "+name);
     }
@@ -142,7 +152,7 @@ public abstract class LTRScoringModel {
    * @return the norms
    */
   public List<Normalizer> getNorms() {
-    return Collections.unmodifiableList(norms);
+    return norms;
   }
 
   /**
@@ -156,7 +166,7 @@ public abstract class LTRScoringModel {
    * @return the features
    */
   public List<Feature> getFeatures() {
-    return Collections.unmodifiableList(features);
+    return features;
   }
 
   public Map<String,Object> getParams() {
@@ -165,13 +175,20 @@ public abstract class LTRScoringModel {
 
   @Override
   public int hashCode() {
+    if(hashCode == null) {
+      hashCode = calculateHashCode();
+    }
+    return hashCode;
+  }
+
+  final private int calculateHashCode() {
     final int prime = 31;
     int result = 1;
-    result = (prime * result) + ((features == null) ? 0 : features.hashCode());
-    result = (prime * result) + ((name == null) ? 0 : name.hashCode());
-    result = (prime * result) + ((params == null) ? 0 : params.hashCode());
-    result = (prime * result) + ((norms == null) ? 0 : norms.hashCode());
-    result = (prime * result) + ((featureStoreName == null) ? 0 : featureStoreName.hashCode());
+    result = (prime * result) + Objects.hashCode(features);
+    result = (prime * result) + Objects.hashCode(name);
+    result = (prime * result) + Objects.hashCode(params);
+    result = (prime * result) + Objects.hashCode(norms);
+    result = (prime * result) + Objects.hashCode(featureStoreName);
     return result;
   }
 
@@ -227,8 +244,15 @@ public abstract class LTRScoringModel {
     return true;
   }
 
-  public boolean hasParams() {
-    return !((params == null) || params.isEmpty());
+  @Override
+  public long ramBytesUsed() {
+    return BASE_RAM_BYTES +
+        RamUsageEstimator.sizeOfObject(allFeatures, RamUsageEstimator.QUERY_DEFAULT_RAM_BYTES_USED) +
+        RamUsageEstimator.sizeOfObject(features, RamUsageEstimator.QUERY_DEFAULT_RAM_BYTES_USED) +
+        RamUsageEstimator.sizeOfObject(featureStoreName) +
+        RamUsageEstimator.sizeOfObject(name) +
+        RamUsageEstimator.sizeOfObject(norms) +
+        RamUsageEstimator.sizeOfObject(params);
   }
 
   public Collection<Feature> getAllFeatures() {

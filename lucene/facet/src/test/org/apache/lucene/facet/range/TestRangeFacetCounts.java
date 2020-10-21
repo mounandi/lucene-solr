@@ -18,8 +18,8 @@ package org.apache.lucene.facet.range;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.lucene.document.Document;
@@ -45,14 +45,16 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.RandomIndexWriter;
-import org.apache.lucene.index.Term;
 import org.apache.lucene.search.DoubleValues;
 import org.apache.lucene.search.DoubleValuesSource;
 import org.apache.lucene.search.Explanation;
+import org.apache.lucene.search.FilterWeight;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LongValuesSource;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.store.Directory;
@@ -94,6 +96,44 @@ public class TestRangeFacetCounts extends FacetTestCase {
     FacetResult result = facets.getTopChildren(10, "field");
     assertEquals("dim=field path=[] value=22 childCount=5\n  less than 10 (10)\n  less than or equal to 10 (11)\n  over 90 (9)\n  90 or above (10)\n  over 1000 (1)\n",
                  result.toString());
+    
+    r.close();
+    d.close();
+  }
+
+  public void testLongGetAllDims() throws Exception {
+    Directory d = newDirectory();
+    RandomIndexWriter w = new RandomIndexWriter(random(), d);
+    Document doc = new Document();
+    NumericDocValuesField field = new NumericDocValuesField("field", 0L);
+    doc.add(field);
+    for(long l=0;l<100;l++) {
+      field.setLongValue(l);
+      w.addDocument(doc);
+    }
+
+    // Also add Long.MAX_VALUE
+    field.setLongValue(Long.MAX_VALUE);
+    w.addDocument(doc);
+
+    IndexReader r = w.getReader();
+    w.close();
+
+    FacetsCollector fc = new FacetsCollector();
+    IndexSearcher s = newSearcher(r);
+    s.search(new MatchAllDocsQuery(), fc);
+
+    Facets facets = new LongRangeFacetCounts("field", fc,
+        new LongRange("less than 10", 0L, true, 10L, false),
+        new LongRange("less than or equal to 10", 0L, true, 10L, true),
+        new LongRange("over 90", 90L, false, 100L, false),
+        new LongRange("90 or above", 90L, true, 100L, false),
+        new LongRange("over 1000", 1000L, false, Long.MAX_VALUE, true));
+
+    List<FacetResult> result = facets.getAllDims(10);
+    assertEquals(1, result.size());
+    assertEquals("dim=field path=[] value=22 childCount=5\n  less than 10 (10)\n  less than or equal to 10 (11)\n  over 90 (9)\n  90 or above (10)\n  over 1000 (1)\n",
+                 result.get(0).toString());
     
     r.close();
     d.close();
@@ -214,7 +254,7 @@ public class TestRangeFacetCounts extends FacetTestCase {
 
     final TaxonomyReader tr = new DirectoryTaxonomyReader(tw);
 
-    IndexSearcher s = newSearcher(r, false);
+    IndexSearcher s = newSearcher(r, false, false);
 
     if (VERBOSE) {
       System.out.println("TEST: searcher=" + s);
@@ -259,7 +299,7 @@ public class TestRangeFacetCounts extends FacetTestCase {
     DrillDownQuery ddq = new DrillDownQuery(config);
     DrillSidewaysResult dsr = ds.search(null, ddq, 10);
 
-    assertEquals(100, dsr.hits.totalHits);
+    assertEquals(100, dsr.hits.totalHits.value);
     assertEquals("dim=dim path=[] value=100 childCount=2\n  b (75)\n  a (25)\n", dsr.facets.getTopChildren(10, "dim").toString());
     assertEquals("dim=field path=[] value=21 childCount=5\n  less than 10 (10)\n  less than or equal to 10 (11)\n  over 90 (9)\n  90 or above (10)\n  over 1000 (0)\n",
                  dsr.facets.getTopChildren(10, "field").toString());
@@ -269,7 +309,7 @@ public class TestRangeFacetCounts extends FacetTestCase {
     ddq.add("dim", "b");
     dsr = ds.search(null, ddq, 10);
 
-    assertEquals(75, dsr.hits.totalHits);
+    assertEquals(75, dsr.hits.totalHits.value);
     assertEquals("dim=dim path=[] value=100 childCount=2\n  b (75)\n  a (25)\n", dsr.facets.getTopChildren(10, "dim").toString());
     assertEquals("dim=field path=[] value=16 childCount=5\n  less than 10 (7)\n  less than or equal to 10 (8)\n  over 90 (7)\n  90 or above (8)\n  over 1000 (0)\n",
                  dsr.facets.getTopChildren(10, "field").toString());
@@ -279,7 +319,7 @@ public class TestRangeFacetCounts extends FacetTestCase {
     ddq.add("field", LongPoint.newRangeQuery("field", 0L, 10L));
     dsr = ds.search(null, ddq, 10);
 
-    assertEquals(11, dsr.hits.totalHits);
+    assertEquals(11, dsr.hits.totalHits.value);
     assertEquals("dim=dim path=[] value=11 childCount=2\n  b (8)\n  a (3)\n", dsr.facets.getTopChildren(10, "dim").toString());
     assertEquals("dim=field path=[] value=21 childCount=5\n  less than 10 (10)\n  less than or equal to 10 (11)\n  over 90 (9)\n  90 or above (10)\n  over 1000 (0)\n",
                  dsr.facets.getTopChildren(10, "field").toString());
@@ -456,7 +496,7 @@ public class TestRangeFacetCounts extends FacetTestCase {
         } else {
           ddq.add("field", range.getQuery(fastMatchQuery, vs));
         }
-        assertEquals(expectedCounts[rangeID], s.search(ddq, 10).totalHits);
+        assertEquals(expectedCounts[rangeID], s.count(ddq));
       }
     }
 
@@ -600,7 +640,7 @@ public class TestRangeFacetCounts extends FacetTestCase {
           ddq.add("field", range.getQuery(fastMatchFilter, vs));
         }
 
-        assertEquals(expectedCounts[rangeID], s.search(ddq, 10).totalHits);
+        assertEquals(expectedCounts[rangeID], s.count(ddq));
       }
     }
 
@@ -676,26 +716,19 @@ public class TestRangeFacetCounts extends FacetTestCase {
     }
 
     @Override
-    public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
-      final Weight in = this.in.createWeight(searcher, needsScores, boost);
-      return new Weight(in.getQuery()) {
+    public void visit(QueryVisitor visitor) {
+      in.visit(visitor);
+    }
 
-        @Override
-        public void extractTerms(Set<Term> terms) {
-          in.extractTerms(terms);
-        }
-
-        @Override
-        public Explanation explain(LeafReaderContext context, int doc) throws IOException {
-          return in.explain(context, doc);
-        }
-
+    @Override
+    public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
+      final Weight in = this.in.createWeight(searcher, scoreMode, boost);
+      return new FilterWeight(in) {
         @Override
         public Scorer scorer(LeafReaderContext context) throws IOException {
           used.set(true);
           return in.scorer(context);
         }
-        
       };
     }
 
@@ -731,8 +764,18 @@ public class TestRangeFacetCounts extends FacetTestCase {
     }
 
     @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return false;
+    }
+
+    @Override
     public Explanation explain(LeafReaderContext ctx, int docId, Explanation scoreExplanation) throws IOException {
       return Explanation.match(docId + 1, "");
+    }
+
+    @Override
+    public DoubleValuesSource rewrite(IndexSearcher searcher) throws IOException {
+      return this;
     }
 
     @Override
@@ -770,7 +813,8 @@ public class TestRangeFacetCounts extends FacetTestCase {
     FacetsCollector fc = new FacetsCollector();
 
     IndexReader r = writer.getReader();
-    IndexSearcher s = newSearcher(r);
+
+    IndexSearcher s = newSearcher(r, false, false);
     s.search(new MatchAllDocsQuery(), fc);
 
     final DoubleRange[] ranges = new DoubleRange[] {
@@ -804,7 +848,7 @@ public class TestRangeFacetCounts extends FacetTestCase {
     ddq.add("field", ranges[1].getQuery(fastMatchFilter, vs));
 
     // Test simple drill-down:
-    assertEquals(1, s.search(ddq, 10).totalHits);
+    assertEquals(1, s.search(ddq, 10).totalHits.value);
 
     // Test drill-sideways after drill-down
     DrillSideways ds = new DrillSideways(s, config, (TaxonomyReader) null) {
@@ -823,11 +867,37 @@ public class TestRangeFacetCounts extends FacetTestCase {
 
 
     DrillSidewaysResult dsr = ds.search(ddq, 10);
-    assertEquals(1, dsr.hits.totalHits);
+    assertEquals(1, dsr.hits.totalHits.value);
     assertEquals("dim=field path=[] value=3 childCount=6\n  < 1 (0)\n  < 2 (1)\n  < 5 (3)\n  < 10 (3)\n  < 20 (3)\n  < 50 (3)\n",
                  dsr.facets.getTopChildren(10, "field").toString());
 
     writer.close();
     IOUtils.close(r, dir);
+  }
+
+  public void testLongRangeEquals() throws Exception {
+    assertEquals(new LongRange("field", -7, true, 17, false),
+                 new LongRange("field", -7, true, 17, false));
+    assertEquals(new LongRange("field", -7, true, 17, false).hashCode(),
+                 new LongRange("field", -7, true, 17, false).hashCode());
+    assertFalse(new LongRange("field", -7, true, 17, false).equals(new LongRange("field", -7, true, 17, true)));
+    assertFalse(new LongRange("field", -7, true, 17, false).hashCode() ==
+                new LongRange("field", -7, true, 17, true).hashCode());
+    assertFalse(new LongRange("field", -7, true, 17, false).equals(new LongRange("field", -7, true, 18, false)));
+    assertFalse(new LongRange("field", -7, true, 17, false).hashCode() ==
+                new LongRange("field", -7, true, 18, false).hashCode());
+  }
+
+  public void testDoubleRangeEquals() throws Exception {
+    assertEquals(new DoubleRange("field", -7d, true, 17d, false),
+                 new DoubleRange("field", -7d, true, 17d, false));
+    assertEquals(new DoubleRange("field", -7d, true, 17d, false).hashCode(),
+                 new DoubleRange("field", -7d, true, 17d, false).hashCode());
+    assertFalse(new DoubleRange("field", -7d, true, 17d, false).equals(new DoubleRange("field", -7d, true, 17d, true)));
+    assertFalse(new DoubleRange("field", -7d, true, 17d, false).hashCode() ==
+                new DoubleRange("field", -7d, true, 17d, true).hashCode());
+    assertFalse(new DoubleRange("field", -7d, true, 17d, false).equals(new DoubleRange("field", -7d, true, 18d, false)));
+    assertFalse(new DoubleRange("field", -7d, true, 17d, false).hashCode() ==
+                new DoubleRange("field", -7d, true, 18, false).hashCode());
   }
 }

@@ -16,25 +16,25 @@
  */
 package org.apache.solr.update.processor;
 
-import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
-
 import java.lang.invoke.MethodHandles;
-import java.util.Arrays;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
+import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.response.SolrQueryResponse;
-import org.apache.solr.util.AbstractSolrTestCase;
 import org.junit.BeforeClass;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.solr.update.processor.DistributingUpdateProcessorFactory.DISTRIB_UPDATE_PARAM;
+
 /**
  * 
  */
-public class UpdateRequestProcessorFactoryTest extends AbstractSolrTestCase {
+public class UpdateRequestProcessorFactoryTest extends SolrTestCaseJ4 {
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -87,7 +87,7 @@ public class UpdateRequestProcessorFactoryTest extends AbstractSolrTestCase {
     assertEquals( custom, core.getUpdateProcessingChain( "custom" ) );
     
     // Make sure the NamedListArgs got through ok
-    assertEquals( "{name={n8=88,n9=99}}", link.args.toString() );
+    assertEquals( "{name={n8=88, n9=99}}", link.args.toString() );
   }
 
   public void testUpdateDistribChainSkipping() throws Exception {
@@ -114,16 +114,22 @@ public class UpdateRequestProcessorFactoryTest extends AbstractSolrTestCase {
       assertNotNull(name, chain);
 
       // either explicitly, or because of injection
-      assertEquals(name + " chain length: " + chain.toString(), EXPECTED_CHAIN_LENGTH,
+      assertEquals(name + " factory chain length: " + chain.toString(), EXPECTED_CHAIN_LENGTH,
                    chain.getProcessors().size());
 
       // test a basic (non distrib) chain
       proc = chain.createProcessor(req(), new SolrQueryResponse());
       procs = procToList(proc);
-      assertEquals(name + " procs size: " + procs.toString(),
-                   // -1 = NoOpDistributingUpdateProcessorFactory produces no processor
-                   EXPECTED_CHAIN_LENGTH - ("distrib-chain-noop".equals(name) ? 1 : 0),
-                   procs.size());
+
+      int expectedProcLen = EXPECTED_CHAIN_LENGTH;
+      if ("distrib-chain-noop".equals(name)) { // NoOpDistributingUpdateProcessorFactory produces no processor
+        expectedProcLen--;
+      }
+      if (procs.stream().anyMatch(p -> p.getClass().getSimpleName().equals("NestedUpdateProcessor"))) {
+        expectedProcLen++; // NestedUpdate sneaks in via RunUpdate's Factory.
+      }
+
+      assertEquals(name + " procs size: " + procs.toString(), expectedProcLen, procs.size());
       
       // Custom comes first in all three of our chains
       assertTrue(name + " first processor isn't a CustomUpdateRequestProcessor: " + procs.toString(),
@@ -141,14 +147,14 @@ public class UpdateRequestProcessorFactoryTest extends AbstractSolrTestCase {
                    && procs.get(1) instanceof LogUpdateProcessorFactory.LogUpdateProcessor));
 
       // fetch the distributed version of this chain
-      proc = chain.createProcessor(req(DISTRIB_UPDATE_PARAM, "non_blank_value"),
+      proc = chain.createProcessor(req(DISTRIB_UPDATE_PARAM, "NONE"), // just some non-blank value
                                    new SolrQueryResponse());
       procs = procToList(proc);
       assertNotNull(name + " (distrib) chain produced null proc", proc);
       assertFalse(name + " (distrib) procs is empty", procs.isEmpty());
 
       // for these 3 (distrib) chains, the first proc should always be LogUpdateProcessor
-      assertTrue(name + " (distrib) first proc should be LogUpdateProcessor because of @RunAllways: "
+      assertTrue(name + " (distrib) first proc should be LogUpdateProcessor because of @RunAlways: "
                  + procs.toString(),
                  ( // compare them both just because i'm going insane and the more checks the better
                    proc instanceof LogUpdateProcessorFactory.LogUpdateProcessor
@@ -156,15 +162,22 @@ public class UpdateRequestProcessorFactoryTest extends AbstractSolrTestCase {
 
       // for these 3 (distrib) chains, the last proc should always be RunUpdateProcessor
       assertTrue(name + " (distrib) last processor isn't a RunUpdateProcessor: " + procs.toString(),
-                 procs.get(procs.size()-1) instanceof RunUpdateProcessor );
+                 procs.get(procs.size()-1) instanceof RunUpdateProcessorFactory.RunUpdateProcessor );
 
       // either 1 proc was droped in distrib mode, or 1 for the "implicit" chain
+
+      expectedProcLen = EXPECTED_CHAIN_LENGTH;
+      expectedProcLen--; // -1 = all chains lose CustomUpdateRequestProcessorFactory
+      if ("distrib-chain-explicit".equals(name) == false) {
+        // -1 = distrib-chain-noop: NoOpDistributingUpdateProcessorFactory produces no processor
+        // -1 = distrib-chain-implicit: does RemoveBlank before distrib
+        expectedProcLen--;
+      }
+      if (procs.stream().anyMatch(p -> p.getClass().getSimpleName().equals("NestedUpdateProcessor"))) {
+        expectedProcLen++; // NestedUpdate sneaks in via RunUpdate's Factory.
+      }
       assertEquals(name + " (distrib) chain has wrong length: " + procs.toString(),
-                   // -1 = all chains lose CustomUpdateRequestProcessorFactory
-                   // -1 = distrib-chain-noop: NoOpDistributingUpdateProcessorFactory produces no processor
-                   // -1 = distrib-chain-implicit: does RemoveBlank before distrib
-                   EXPECTED_CHAIN_LENGTH - ( "distrib-chain-explicit".equals(name) ? 1 : 2),
-                   procs.size());
+          expectedProcLen, procs.size());
     }
 
   }
@@ -173,7 +186,7 @@ public class UpdateRequestProcessorFactoryTest extends AbstractSolrTestCase {
    * walks the "next" values of the proc building up a List of the procs for easier testing
    */
   public static List<UpdateRequestProcessor> procToList(UpdateRequestProcessor proc) {
-    List<UpdateRequestProcessor> result = new ArrayList<UpdateRequestProcessor>(7);
+    List<UpdateRequestProcessor> result = new ArrayList<>(7);
     while (null != proc) {
       result.add(proc);
       proc = proc.next;

@@ -168,6 +168,8 @@ public class TestIndexWriterCommit extends LuceneTestCase {
    * file.  We check this by using MockDirectoryWrapper to
    * measure max temp disk space used.
    */
+  // TODO: can this write less docs/indexes?
+  @Nightly
   public void testCommitOnCloseDiskUsage() throws IOException {
     // MemoryCodec, since it uses FST, is not necessarily
     // "additive", ie if you add up N small FSTs, then merge
@@ -177,7 +179,6 @@ public class TestIndexWriterCommit extends LuceneTestCase {
 
     final String idFormat = TestUtil.getPostingsFormat("id");
     final String contentFormat = TestUtil.getPostingsFormat("content");
-    assumeFalse("This test cannot run with Memory codec", idFormat.equals("Memory") || contentFormat.equals("Memory"));
     MockDirectoryWrapper dir = newMockDirectory();
     Analyzer analyzer;
     if (random().nextBoolean()) {
@@ -446,7 +447,7 @@ public class TestIndexWriterCommit extends LuceneTestCase {
                                .setIndexDeletionPolicy(NoDeletionPolicy.INSTANCE)
                                .setIndexCommit(commit));
 
-    assertEquals(1, w.numDocs());
+    assertEquals(1, w.getDocStats().numDocs);
 
     // commit IndexWriter to "third"
     w.addDocument(doc);

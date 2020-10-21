@@ -60,6 +60,11 @@ public class UsageTrackingQueryCachingPolicy implements QueryCachingPolicy {
       return true;
     }
 
+    if (query instanceof DocValuesFieldExistsQuery) {
+      // We do not bother caching DocValuesFieldExistsQuery queries since they are already plenty fast.
+      return true;
+    }
+
     if (query instanceof MatchAllDocsQuery) {
       // MatchAllDocsQuery has an iterator that is faster than what a bit set could do.
       return true;
@@ -68,7 +73,7 @@ public class UsageTrackingQueryCachingPolicy implements QueryCachingPolicy {
     // For the below queries, it's cheap to notice they cannot match any docs so
     // we do not bother caching them.
     if (query instanceof MatchNoDocsQuery) {
-      return false;
+      return true;
     }
 
     if (query instanceof BooleanQuery) {

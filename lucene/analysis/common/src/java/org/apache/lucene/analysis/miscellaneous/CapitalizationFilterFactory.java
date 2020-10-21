@@ -25,7 +25,7 @@ import java.util.Set;
 
 import org.apache.lucene.analysis.CharArraySet;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link CapitalizationFilter}.
@@ -56,8 +56,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * &lt;/fieldType&gt;</pre>
  *
  * @since solr 1.3
+ * @lucene.spi {@value #NAME}
  */
 public class CapitalizationFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "capitalization";
+
   public static final String KEEP = "keep";
   public static final String KEEP_IGNORE_CASE = "keepIgnoreCase";
   public static final String OK_PREFIX = "okPrefix";
@@ -103,6 +108,11 @@ public class CapitalizationFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public CapitalizationFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

@@ -25,9 +25,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.lucene.analysis.util.ResourceLoader;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.util.AttributeFactory;
 import org.apache.lucene.util.IOUtils;
 
@@ -59,7 +59,7 @@ import com.ibm.icu.text.RuleBasedBreakIterator;
  *
  * <p>
  * To add per-script rules, add a "rulefiles" argument, which should contain a
- * comma-separated list of <tt>code:rulefile</tt> pairs in the following format:
+ * comma-separated list of <code>code:rulefile</code> pairs in the following format:
  * <a href="http://unicode.org/iso15924/iso15924-codes.html"
  * >four-letter ISO 15924 script code</a>, followed by a colon, then a resource
  * path.  E.g. to specify rules for Latin (script code "Latn") and Cyrillic
@@ -72,8 +72,15 @@ import com.ibm.icu.text.RuleBasedBreakIterator;
  *                rulefiles="Latn:my.Latin.rules.rbbi,Cyrl:my.Cyrillic.rules.rbbi"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class ICUTokenizerFactory extends TokenizerFactory implements ResourceLoaderAware {
+
+  /** SPI name */
+  public static final String NAME = "icu";
+
   static final String RULEFILES = "rulefiles";
   private final Map<Integer,String> tailored;
   private ICUTokenizerConfig config;
@@ -101,6 +108,11 @@ public class ICUTokenizerFactory extends TokenizerFactory implements ResourceLoa
     }
   }
 
+  /** Default ctor for compatibility with SPI */
+  public ICUTokenizerFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public void inform(ResourceLoader loader) throws IOException {
     assert tailored != null : "init must be called first!";
@@ -116,9 +128,9 @@ public class ICUTokenizerFactory extends TokenizerFactory implements ResourceLoa
       config = new DefaultICUTokenizerConfig(cjkAsWords, myanmarAsWords) {
         
         @Override
-        public BreakIterator getBreakIterator(int script) {
+        public RuleBasedBreakIterator getBreakIterator(int script) {
           if (breakers[script] != null) {
-            return (BreakIterator) breakers[script].clone();
+            return (RuleBasedBreakIterator) breakers[script].clone();
           } else {
             return super.getBreakIterator(script);
           }

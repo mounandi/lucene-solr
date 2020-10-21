@@ -17,10 +17,8 @@
 package org.apache.lucene.search;
 
 import java.io.IOException;
-import java.util.Set;
 
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.Term;
 
 /**
  * A {@code FilterWeight} contains another {@code Weight} and implements
@@ -47,7 +45,7 @@ public abstract class FilterWeight extends Weight {
   /**
    * Alternative constructor.
    * Use this variant only if the <code>weight</code> was not obtained
-   * via the {@link Query#createWeight(IndexSearcher, boolean, float)}
+   * via the {@link Query#createWeight(IndexSearcher, ScoreMode, float)}
    * method of the <code>query</code> object.
    */
   protected FilterWeight(Query query, Weight weight) {
@@ -56,8 +54,8 @@ public abstract class FilterWeight extends Weight {
   }
 
   @Override
-  public void extractTerms(Set<Term> terms) {
-    in.extractTerms(terms);
+  public boolean isCacheable(LeafReaderContext ctx) {
+    return in.isCacheable(ctx);
   }
 
   @Override
@@ -70,4 +68,8 @@ public abstract class FilterWeight extends Weight {
     return in.scorer(context);
   }
 
+  @Override
+  public Matches matches(LeafReaderContext context, int doc) throws IOException {
+    return in.matches(context, doc);
+  }
 }

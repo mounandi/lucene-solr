@@ -45,14 +45,15 @@ import org.slf4j.LoggerFactory;
 import static org.apache.solr.common.params.CommonParams.VERSION_FIELD;
 
 public class VersionInfo {
-
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+  private static final String SYS_PROP_BUCKET_VERSION_LOCK_TIMEOUT_MS = "bucketVersionLockTimeoutMs";
 
   private final UpdateLog ulog;
   private final VersionBucket[] buckets;
   private SchemaField versionField;
-  private SchemaField idField;
   final ReadWriteLock lock = new ReentrantReadWriteLock(true);
+
+  private int versionBucketLockTimeoutMs;
 
   /**
    * Gets and returns the {@link org.apache.solr.common.params.CommonParams#VERSION_FIELD} from the specified
@@ -93,11 +94,20 @@ public class VersionInfo {
     this.ulog = ulog;
     IndexSchema schema = ulog.uhandler.core.getLatestSchema(); 
     versionField = getAndCheckVersionField(schema);
-    idField = schema.getUniqueKeyField();
+    versionBucketLockTimeoutMs = ulog.uhandler.core.getSolrConfig().getInt("updateHandler/versionBucketLockTimeoutMs",
+        Integer.parseInt(System.getProperty(SYS_PROP_BUCKET_VERSION_LOCK_TIMEOUT_MS, "0")));
     buckets = new VersionBucket[ BitUtil.nextHighestPowerOfTwo(nBuckets) ];
     for (int i=0; i<buckets.length; i++) {
-      buckets[i] = new VersionBucket();
+      if (versionBucketLockTimeoutMs > 0) {
+        buckets[i] = new TimedVersionBucket();
+      } else {
+        buckets[i] = new VersionBucket();
+      }
     }
+  }
+  
+  public int getVersionBucketLockTimeoutMs() {
+    return versionBucketLockTimeoutMs;
   }
 
   public void reload() {
@@ -198,6 +208,7 @@ public class VersionInfo {
    * Returns the latest version from the index, searched by the given id (bytes) as seen from the realtime searcher.
    * Returns null if no document can be found in the index for the given id.
    */
+  @SuppressWarnings({"unchecked"})
   public Long getVersionFromIndex(BytesRef idBytes) {
     // TODO: we could cache much of this and invalidate during a commit.
     // TODO: most DocValues classes are threadsafe - expose which.
@@ -209,6 +220,7 @@ public class VersionInfo {
       if (lookup < 0) return null; // this means the doc doesn't exist in the index yet
 
       ValueSource vs = versionField.getType().getValueSource(versionField, null);
+      @SuppressWarnings({"rawtypes"})
       Map context = ValueSource.newContext(searcher);
       vs.createWeight(context, searcher);
       FunctionValues fv = vs.getValues(context, searcher.getTopReaderContext().leaves().get((int) (lookup >> 32)));
@@ -227,6 +239,7 @@ public class VersionInfo {
   /**
    * Returns the highest version from the index, or 0L if no versions can be found in the index.
    */
+  @SuppressWarnings({"unchecked"})
   public Long getMaxVersionFromIndex(IndexSearcher searcher) throws IOException {
 
     final String versionFieldName = versionField.getName();
@@ -244,6 +257,7 @@ public class VersionInfo {
     
     long maxVersionInIndex = 0L;
     ValueSource vs = versionField.getType().getValueSource(versionField, null);
+    @SuppressWarnings({"rawtypes"})
     Map funcContext = ValueSource.newContext(searcher);
     vs.createWeight(funcContext, searcher);
     // TODO: multi-thread this

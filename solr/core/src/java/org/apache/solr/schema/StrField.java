@@ -26,8 +26,12 @@ import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.SortedSetDocValuesField;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.queries.function.ValueSource;
+import org.apache.lucene.queries.function.valuesource.SortedSetFieldSource;
 import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.SortedSetSelector;
 import org.apache.lucene.util.BytesRef;
+import org.apache.solr.common.SolrException;
+import org.apache.solr.common.util.ByteArrayUtf8CharSequence;
 import org.apache.solr.response.TextResponseWriter;
 import org.apache.solr.search.QParser;
 import org.apache.solr.uninverting.UninvertingReader.Type;
@@ -45,7 +49,7 @@ public class StrField extends PrimitiveFieldType {
 
     if (field.hasDocValues()) {
       IndexableField docval;
-      final BytesRef bytes = new BytesRef(value.toString());
+      final BytesRef bytes = getBytesRef(value);
       if (field.multiValued()) {
         docval = new SortedSetDocValuesField(field.getName(), bytes);
       } else {
@@ -65,6 +69,19 @@ public class StrField extends PrimitiveFieldType {
     return Collections.singletonList(fval);
   }
 
+  public static BytesRef getBytesRef(Object value) {
+    if (value instanceof ByteArrayUtf8CharSequence) {
+      ByteArrayUtf8CharSequence utf8 = (ByteArrayUtf8CharSequence) value;
+      return new BytesRef(utf8.getBuf(), utf8.offset(), utf8.size());
+    } else return new BytesRef(value.toString());
+  }
+
+
+  @Override
+  public boolean isUtf8Field() {
+    return true;
+  }
+
   @Override
   public SortField getSortField(SchemaField field,boolean reverse) {
     return getStringSort(field,reverse);
@@ -81,7 +98,7 @@ public class StrField extends PrimitiveFieldType {
 
   @Override
   public void write(TextResponseWriter writer, String name, IndexableField f) throws IOException {
-    writer.writeStr(name, f.stringValue(), true);
+    writer.writeStr(name, toExternal(f), true);
   }
 
   @Override
@@ -103,6 +120,31 @@ public class StrField extends PrimitiveFieldType {
   @Override
   public Object unmarshalSortValue(Object value) {
     return unmarshalStringSortValue(value);
+  }
+
+  @Override
+  public ValueSource getSingleValueSource(MultiValueSelector choice, SchemaField field, QParser parser) {
+    // trivial base case
+    if (!field.multiValued()) {
+      // single value matches any selector
+      return getValueSource(field, parser);
+    }
+    
+    // See LUCENE-6709
+    if (! field.hasDocValues()) {
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+                              "docValues='true' is required to select '" + choice.toString() +
+                              "' value from multivalued field ("+ field.getName() +") at query time");
+    }
+    SortedSetSelector.Type selectorType = choice.getSortedSetSelectorType();
+    if (null == selectorType) {
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+                              choice.toString() + " is not a supported option for picking a single value"
+                              + " from the multivalued field: " + field.getName() +
+                              " (type: " + this.getTypeName() + ")");
+    }
+    
+    return new SortedSetFieldSource(field.getName(), selectorType);
   }
 }
 

@@ -32,6 +32,7 @@ import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
 
 public class CollectionHandlerApi extends BaseHandlerApiSupport {
+
   final CollectionsHandler handler;
   static Collection<ApiCommand> apiCommands = createCollMapping();
 
@@ -53,22 +54,6 @@ public class CollectionHandlerApi extends BaseHandlerApiSupport {
             }
           });
         }
-      }
-    }
-    result.put(Meta.GET_NODES, new ApiCommand() {
-      @Override
-      public CommandMeta meta() {
-        return Meta.GET_NODES;
-      }
-
-      @Override
-      public void invoke(SolrQueryRequest req, SolrQueryResponse rsp, BaseHandlerApiSupport apiHandler) throws Exception {
-        rsp.add("nodes", ((CollectionHandlerApi) apiHandler).handler.coreContainer.getZkController().getClusterState().getLiveNodes());
-      }
-    });
-    for (Meta meta : Meta.values()) {
-      if(result.get(meta) == null){
-        throw new RuntimeException("No implementation for "+ meta.name());
       }
     }
 

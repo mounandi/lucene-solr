@@ -20,9 +20,7 @@ package org.apache.lucene.analysis.ckb;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link SoraniNormalizationFilter}.
@@ -33,8 +31,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.SoraniNormalizationFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 4.7.0
+ * @lucene.spi {@value #NAME}
  */
-public class SoraniNormalizationFilterFactory extends TokenFilterFactory implements MultiTermAwareComponent {
+public class SoraniNormalizationFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "soraniNormalization";
 
   /** Creates a new SoraniNormalizationFilterFactory */
   public SoraniNormalizationFilterFactory(Map<String,String> args) {
@@ -44,13 +47,18 @@ public class SoraniNormalizationFilterFactory extends TokenFilterFactory impleme
     }
   }
 
+  /** Default ctor for compatibility with SPI */
+  public SoraniNormalizationFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
-  public SoraniNormalizationFilter create(TokenStream input) {
+  public TokenStream create(TokenStream input) {
     return new SoraniNormalizationFilter(input);
   }
 
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

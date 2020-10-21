@@ -18,7 +18,6 @@ package org.apache.lucene.spatial;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
@@ -31,10 +30,12 @@ import org.apache.lucene.spatial.prefix.tree.QuadPrefixTree;
 import org.apache.lucene.spatial.prefix.tree.SpatialPrefixTree;
 import org.apache.lucene.spatial.serialized.SerializedDVStrategy;
 import org.apache.lucene.spatial.vector.PointVectorStrategy;
+import org.apache.lucene.util.ArrayUtil;
 import org.junit.Test;
 import org.locationtech.spatial4j.context.SpatialContext;
 import org.locationtech.spatial4j.shape.Point;
 import org.locationtech.spatial4j.shape.Shape;
+import org.locationtech.spatial4j.shape.ShapeFactory;
 
 public class DistanceStrategyTest extends StrategyTestCase {
   @ParametersFactory(argumentFormatting = "strategy=%s")
@@ -81,20 +82,21 @@ public class DistanceStrategyTest extends StrategyTestCase {
 
   @Test
   public void testDistanceOrder() throws IOException {
-    adoc("100", ctx.makePoint(2, 1));
-    adoc("101", ctx.makePoint(-1, 4));
+    ShapeFactory shapeFactory = ctx.getShapeFactory();
+    adoc("100", shapeFactory.pointXY(2, 1));
+    adoc("101", shapeFactory.pointXY(-1, 4));
     adoc("103", (Shape)null);//test score for nothing
     commit();
     //FYI distances are in docid order
-    checkDistValueSource(ctx.makePoint(4, 3), 2.8274937f, 5.0898066f, 180f);
-    checkDistValueSource(ctx.makePoint(0, 4), 3.6043684f, 0.9975641f, 180f);
+    checkDistValueSource(shapeFactory.pointXY(4, 3), 2.8274937f, 5.0898066f, 180f);
+    checkDistValueSource(shapeFactory.pointXY(0, 4), 3.6043684f, 0.9975641f, 180f);
   }
 
   @Test
   public void testRecipScore() throws IOException {
-    Point p100 = ctx.makePoint(2.02, 0.98);
+    Point p100 = ctx.getShapeFactory().pointXY(2.02, 0.98);
     adoc("100", p100);
-    Point p101 = ctx.makePoint(-1.001, 4.001);
+    Point p101 = ctx.getShapeFactory().pointXY(-1.001, 4.001);
     adoc("101", p101);
     adoc("103", (Shape)null);//test score for nothing
     commit();
@@ -107,7 +109,7 @@ public class DistanceStrategyTest extends StrategyTestCase {
 
   void checkDistValueSource(Point pt, float... distances) throws IOException {
     float multiplier = random().nextFloat() * 100f;
-    float[] dists2 = Arrays.copyOf(distances, distances.length);
+    float[] dists2 = ArrayUtil.copyOfSubArray(distances, 0, distances.length);
     for (int i = 0; i < dists2.length; i++) {
       dists2[i] *= multiplier;
     }

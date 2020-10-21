@@ -28,8 +28,6 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
-import org.apache.lucene.search.BooleanClause;
-import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.LeafCollector;
@@ -83,7 +81,7 @@ public class DocSetUtil {
         searcher.setLiveDocs( collector.getDocSet() );
       }
       try {
-        return searcher.getLiveDocs();
+        return searcher.getLiveDocSet();
       } catch (IOException e) {
         // should be impossible... liveDocs should exist, so no IO should be necessary
         throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
@@ -106,7 +104,7 @@ public class DocSetUtil {
       try {
         // if this docset has the same cardinality as liveDocs, return liveDocs instead
         // so this set will be short lived garbage.
-        return searcher.getLiveDocs();
+        return searcher.getLiveDocSet();
       } catch (IOException e) {
         // should be impossible... liveDocs should exist, so no IO should be necessary
         throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, e);
@@ -120,11 +118,7 @@ public class DocSetUtil {
   public static DocSet createDocSet(SolrIndexSearcher searcher, Query query, DocSet filter) throws IOException {
 
     if (filter != null) {
-        Filter luceneFilter = filter.getTopFilter();
-        query = new BooleanQuery.Builder()
-            .add(query, BooleanClause.Occur.MUST)
-            .add(luceneFilter, BooleanClause.Occur.FILTER)
-            .build();
+      query = QueryUtils.combineQueryAndFilter(query, filter.getTopFilter());
     }
 
     if (query instanceof TermQuery) {
@@ -180,7 +174,7 @@ public class DocSetUtil {
 
     DocSet answer = null;
     if (maxCount == 0) {
-      answer = DocSet.EMPTY;
+      answer = DocSet.empty();
     } else if (maxCount <= smallSetSize) {
       answer = createSmallSet(leaves, postList, maxCount, firstReader);
     } else {

@@ -17,22 +17,23 @@
 package org.apache.solr.ltr.feature;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.common.params.CommonParams;
+import org.apache.solr.common.util.Utils;
 import org.apache.solr.ltr.FeatureLoggerTestUtils;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
-import org.noggit.ObjectBuilder;
 
 public class TestOriginalScoreFeature extends TestRerankBase {
 
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1"));
@@ -46,15 +47,15 @@ public class TestOriginalScoreFeature extends TestRerankBase {
     assertU(commit());
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
   @Test
   public void testOriginalScore() throws Exception {
-    loadFeature("score", OriginalScoreFeature.class.getCanonicalName(), "{}");
-    loadModel("originalScore", LinearModel.class.getCanonicalName(),
+    loadFeature("score", OriginalScoreFeature.class.getName(), "{}");
+    loadModel("originalScore", LinearModel.class.getName(),
         new String[] {"score"}, "{\"weights\":{\"score\":1.0}}");
 
     implTestOriginalScoreResponseDocsCheck("originalScore", "score", null, null);
@@ -62,12 +63,12 @@ public class TestOriginalScoreFeature extends TestRerankBase {
 
   @Test
   public void testOriginalScoreWithNonScoringFeatures() throws Exception {
-    loadFeature("origScore", OriginalScoreFeature.class.getCanonicalName(),
+    loadFeature("origScore", OriginalScoreFeature.class.getName(),
         "store2", "{}");
-    loadFeature("c2", ValueFeature.class.getCanonicalName(), "store2",
+    loadFeature("c2", ValueFeature.class.getName(), "store2",
         "{\"value\":2.0}");
 
-    loadModel("origScore", LinearModel.class.getCanonicalName(),
+    loadModel("origScore", LinearModel.class.getName(),
         new String[] {"origScore"}, "store2",
         "{\"weights\":{\"origScore\":1.0}}");
 
@@ -96,14 +97,20 @@ public class TestOriginalScoreFeature extends TestRerankBase {
     assertJQ("/query" + query.toQueryString(), "/response/docs/[3]/id=='"+doc3Id+"'");
 
     final String res = restTestHarness.query("/query" + query.toQueryString());
-    final Map<String,Object> jsonParse = (Map<String,Object>) ObjectBuilder
-        .fromJSON(res);
+    @SuppressWarnings({"unchecked"})
+    final Map<String,Object> jsonParse = (Map<String,Object>) Utils
+        .fromJSONString (res);
+    @SuppressWarnings({"unchecked"})
     final String doc0Score = ((Double) ((Map<String,Object>) ((ArrayList<Object>) ((Map<String,Object>) jsonParse
         .get("response")).get("docs")).get(0)).get("score")).toString();
+
+    @SuppressWarnings({"unchecked"})
     final String doc1Score = ((Double) ((Map<String,Object>) ((ArrayList<Object>) ((Map<String,Object>) jsonParse
         .get("response")).get("docs")).get(1)).get("score")).toString();
+    @SuppressWarnings({"unchecked"})
     final String doc2Score = ((Double) ((Map<String,Object>) ((ArrayList<Object>) ((Map<String,Object>) jsonParse
         .get("response")).get("docs")).get(2)).get("score")).toString();
+    @SuppressWarnings({"unchecked"})
     final String doc3Score = ((Double) ((Map<String,Object>) ((ArrayList<Object>) ((Map<String,Object>) jsonParse
         .get("response")).get("docs")).get(3)).get("score")).toString();
 
@@ -150,6 +157,12 @@ public class TestOriginalScoreFeature extends TestRerankBase {
       assertJQ("/query" + query.toQueryString(),
           "/debug/explain/"+docId+"=='\n"+origScoreFeatureValue+" = LinearModel(name="+modelName+",featureWeights=["+origScoreFeatureName+"=1.0]) model applied to features, sum of:\n  "+origScoreFeatureValue+" = prod of:\n    1.0 = weight on feature\n    "+origScoreFeatureValue+" = OriginalScoreFeature [query:"+query.getQuery()+"]\n'");
     }
+  }
+
+  @Test
+  public void testParamsToMap() throws Exception {
+    final LinkedHashMap<String,Object> params = new LinkedHashMap<String,Object>();
+    doTestParamsToMap(OriginalScoreFeature.class.getName(), params);
   }
 
 }

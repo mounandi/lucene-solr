@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
@@ -101,9 +102,11 @@ public class ParallelLeafReader extends LeafReader {
         throw new IllegalArgumentException("All readers must have same maxDoc: "+maxDoc+"!="+reader.maxDoc());
       }
     }
-    
+    final String softDeletesField = completeReaderSet.stream()
+        .map(r -> r.getFieldInfos().getSoftDeletesField())
+        .filter(Objects::nonNull).findAny().orElse(null);
     // TODO: make this read-only in a cleaner way?
-    FieldInfos.Builder builder = new FieldInfos.Builder();
+    FieldInfos.Builder builder = new FieldInfos.Builder(new FieldInfos.FieldNumbers(softDeletesField));
 
     Sort indexSort = null;
     int createdVersionMajor = -1;
@@ -129,7 +132,7 @@ public class ParallelLeafReader extends LeafReader {
       for (FieldInfo fieldInfo : readerFieldInfos) {
         // NOTE: first reader having a given field "wins":
         if (!fieldToReader.containsKey(fieldInfo.name)) {
-          builder.add(fieldInfo);
+          builder.add(fieldInfo, fieldInfo.getDocValuesGen());
           fieldToReader.put(fieldInfo.name, reader);
           // only add these if the reader responsible for that field name is the current:
           // TODO consider populating 1st leaf with vectors even if the field name has been seen on a previous leaf
@@ -364,6 +367,13 @@ public class ParallelLeafReader extends LeafReader {
     ensureOpen();
     LeafReader reader = fieldToReader.get(fieldName);
     return reader == null ? null : reader.getPointValues(fieldName);
+  }
+
+  @Override
+  public VectorValues getVectorValues(String fieldName) throws IOException {
+    ensureOpen();
+    LeafReader reader = fieldToReader.get(fieldName);
+    return reader == null ? null : reader.getVectorValues(fieldName);
   }
 
   @Override

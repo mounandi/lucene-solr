@@ -22,6 +22,7 @@ import java.io.IOException;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
 import org.apache.lucene.util.RamUsageEstimator;
+import org.apache.lucene.util.SuppressForbidden;
 
 /**
  * An FST {@link Outputs} implementation where each output
@@ -29,9 +30,10 @@ import org.apache.lucene.util.RamUsageEstimator;
  *
  * @lucene.experimental
  */
-
+@SuppressForbidden(reason = "Uses a Long instance as a marker")
 public final class PositiveIntOutputs extends Outputs<Long> {
   
+  @SuppressWarnings("deprecation")
   private final static Long NO_OUTPUT = new Long(0);
 
   private final static PositiveIntOutputs singleton = new PositiveIntOutputs();

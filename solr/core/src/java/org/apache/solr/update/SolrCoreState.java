@@ -18,14 +18,13 @@ package org.apache.solr.update;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
-import java.util.concurrent.Callable;
-import java.util.concurrent.Future;
 import java.util.concurrent.locks.Lock;
 
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.search.Sort;
 import org.apache.solr.cloud.ActionThrottle;
 import org.apache.solr.cloud.RecoveryStrategy;
+import org.apache.solr.common.AlreadyClosedException;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.CoreDescriptor;
 import org.apache.solr.core.DirectoryFactory;
@@ -172,7 +171,12 @@ public abstract class SolrCoreState {
 
   public abstract void setLastReplicateIndexSuccess(boolean success);
 
-  public static class CoreIsClosedException extends IllegalStateException {
+  public static class CoreIsClosedException extends AlreadyClosedException {
+    
+    public CoreIsClosedException() {
+      super();
+    }
+    
     public CoreIsClosedException(String s) {
       super(s);
     }
@@ -180,18 +184,13 @@ public abstract class SolrCoreState {
 
   public abstract Lock getRecoveryLock();
 
-  // These are needed to properly synchronize the bootstrapping when the
-  // in the target DC require a full sync.
-  public abstract boolean getCdcrBootstrapRunning();
-
-  public abstract void setCdcrBootstrapRunning(boolean cdcrRunning);
-
-  public abstract Future<Boolean> getCdcrBootstrapFuture();
-
-  public abstract void setCdcrBootstrapFuture(Future<Boolean> cdcrBootstrapFuture);
-
-  public abstract Callable getCdcrBootstrapCallable();
-
-  public abstract void setCdcrBootstrapCallable(Callable cdcrBootstrapCallable);
-
+  public Throwable getTragicException() throws IOException {
+    RefCounted<IndexWriter> ref = getIndexWriter(null);
+    if (ref == null) return null;
+    try {
+      return ref.get().getTragicException();
+    } finally {
+      ref.decref();
+    }
+  }
 }

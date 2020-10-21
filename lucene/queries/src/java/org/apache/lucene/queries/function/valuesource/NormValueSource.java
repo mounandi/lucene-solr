@@ -25,11 +25,11 @@ import org.apache.lucene.queries.function.ValueSource;
 import org.apache.lucene.queries.function.docvalues.FloatDocValues;
 import org.apache.lucene.search.CollectionStatistics;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.LeafSimScorer;
 import org.apache.lucene.search.TermStatistics;
 import org.apache.lucene.search.similarities.TFIDFSimilarity;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.search.similarities.Similarity.SimScorer;
-import org.apache.lucene.search.similarities.Similarity.SimWeight;
 
 /** 
  * Function that returns the decoded norm for every document.
@@ -55,23 +55,23 @@ public class NormValueSource extends ValueSource {
   }
 
   @Override
-  public void createWeight(Map context, IndexSearcher searcher) throws IOException {
+  public void createWeight(Map<Object, Object> context, IndexSearcher searcher) throws IOException {
     context.put("searcher",searcher);
   }
 
   @Override
-  public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
+  public FunctionValues getValues(Map<Object, Object> context, LeafReaderContext readerContext) throws IOException {
     IndexSearcher searcher = (IndexSearcher)context.get("searcher");
-    final TFIDFSimilarity similarity = IDFValueSource.asTFIDF(searcher.getSimilarity(true), field);
+    final TFIDFSimilarity similarity = IDFValueSource.asTFIDF(searcher.getSimilarity(), field);
     if (similarity == null) {
       throw new UnsupportedOperationException("requires a TFIDFSimilarity (such as ClassicSimilarity)");
     }
     // Only works if the contribution of the tf is 1 when the freq is 1 and contribution of the idf
     // is 1 when docCount == docFreq == 1
-    final SimWeight simWeight = similarity.computeWeight(1f,
+    final SimScorer simScorer = similarity.scorer(1f,
         new CollectionStatistics(field, 1, 1, 1, 1),
         new TermStatistics(new BytesRef("bogus"), 1, 1));
-    final SimScorer simScorer = similarity.simScorer(simWeight, readerContext);
+    final LeafSimScorer leafSimScorer = new LeafSimScorer(simScorer, readerContext.reader(), field, true);
     
     return new FloatDocValues(this) {
       int lastDocID = -1;
@@ -81,7 +81,7 @@ public class NormValueSource extends ValueSource {
           throw new AssertionError("docs out of order: lastDocID=" + lastDocID + " docID=" + docID);
         }
         lastDocID = docID;
-        return simScorer.score(docID, 1f);
+        return leafSimScorer.score(docID, 1f);
       }
     };
   }

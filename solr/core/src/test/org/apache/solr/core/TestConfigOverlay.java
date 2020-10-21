@@ -19,11 +19,11 @@ package org.apache.solr.core;
 import java.util.Collections;
 import java.util.Map;
 
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 
 import static org.apache.solr.core.ConfigOverlay.isEditableProp;
 
-public class TestConfigOverlay extends LuceneTestCase {
+public class TestConfigOverlay extends SolrTestCase {
 
   public void testPaths() {
     assertTrue(isEditableProp("updateHandler/autoCommit/maxDocs", true, null));
@@ -65,6 +65,7 @@ public class TestConfigOverlay extends LuceneTestCase {
   }
 
   public void testSetProperty(){
+    @SuppressWarnings({"unchecked"})
     ConfigOverlay overlay = new ConfigOverlay(Collections.EMPTY_MAP,0);
     overlay = overlay.setProperty("query.filterCache.initialSize",100);
     assertEquals(100, overlay.getXPathProperty("query/filterCache/@initialSize"));

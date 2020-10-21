@@ -126,10 +126,10 @@ public final class OrdsBlockTreeTermsReader extends FieldsProducer {
         final FieldInfo fieldInfo = state.fieldInfos.fieldInfo(field);
         assert fieldInfo != null: "field=" + field;
         assert numTerms <= Integer.MAX_VALUE;
-        final long sumTotalTermFreq = fieldInfo.getIndexOptions() == IndexOptions.DOCS ? -1 : in.readVLong();
-        final long sumDocFreq = in.readVLong();
+        final long sumTotalTermFreq = in.readVLong();
+        // when frequencies are omitted, sumDocFreq=totalTermFreq and we only write one value
+        final long sumDocFreq = fieldInfo.getIndexOptions() == IndexOptions.DOCS ? sumTotalTermFreq : in.readVLong();
         final int docCount = in.readVInt();
-        final int longsSize = in.readVInt();
         // System.out.println("  longsSize=" + longsSize);
 
         BytesRef minTerm = readBytesRef(in);
@@ -140,13 +140,13 @@ public final class OrdsBlockTreeTermsReader extends FieldsProducer {
         if (sumDocFreq < docCount) {  // #postings must be >= #docs with field
           throw new CorruptIndexException("invalid sumDocFreq: " + sumDocFreq + " docCount: " + docCount, in);
         }
-        if (sumTotalTermFreq != -1 && sumTotalTermFreq < sumDocFreq) { // #positions must be >= #postings
+        if (sumTotalTermFreq < sumDocFreq) { // #positions must be >= #postings
           throw new CorruptIndexException("invalid sumTotalTermFreq: " + sumTotalTermFreq + " sumDocFreq: " + sumDocFreq, in);
         }
         final long indexStartFP = indexIn.readVLong();
         OrdsFieldReader previous = fields.put(fieldInfo.name,       
                                               new OrdsFieldReader(this, fieldInfo, numTerms, rootCode, sumTotalTermFreq, sumDocFreq, docCount,
-                                                                  indexStartFP, longsSize, indexIn, minTerm, maxTerm));
+                                                                  indexStartFP, indexIn, minTerm, maxTerm));
         if (previous != null) {
           throw new CorruptIndexException("duplicate field: " + fieldInfo.name, in);
         }
@@ -236,8 +236,7 @@ public final class OrdsBlockTreeTermsReader extends FieldsProducer {
   
   @Override
   public Collection<Accountable> getChildResources() {
-    List<Accountable> resources = new ArrayList<>();
-    resources.addAll(Accountables.namedAccountables("field", fields));
+    List<Accountable> resources = new ArrayList<>(Accountables.namedAccountables("field", fields));
     resources.add(Accountables.namedAccountable("delegate", postingsReader));
     return Collections.unmodifiableList(resources);
   }

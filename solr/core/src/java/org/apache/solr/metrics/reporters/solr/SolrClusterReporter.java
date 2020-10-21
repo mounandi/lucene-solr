@@ -28,15 +28,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import org.apache.http.client.HttpClient;
+import org.apache.solr.cloud.LeaderElector;
 import org.apache.solr.cloud.Overseer;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZkNodeProps;
 import org.apache.solr.core.CoreContainer;
+import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrInfoBean;
 import org.apache.solr.handler.admin.MetricsCollectorHandler;
+import org.apache.solr.metrics.SolrCoreContainerReporter;
 import org.apache.solr.metrics.SolrMetricManager;
-import org.apache.solr.metrics.SolrMetricReporter;
 import org.apache.zookeeper.KeeperException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,11 +65,11 @@ import static org.apache.solr.common.params.CommonParams.ID;
  *   capture groups collected by <code>registry</code> pattern</li>
  *   <li>filter - (optional multiple str) regex expression(s) matching selected metrics to be reported.</li>
  * </ul>
- * NOTE: this reporter uses predefined "overseer" group, and it's always created even if explicit configuration
+ * NOTE: this reporter uses predefined "cluster" group, and it's always created even if explicit configuration
  * is missing. Default configuration uses report specifications from {@link #DEFAULT_REPORTS}.
  * <p>Example configuration:</p>
  * <pre>
- *       &lt;reporter name="test" group="overseer"&gt;
+ *       &lt;reporter name="test" group="cluster" class="solr.SolrClusterReporter"&gt;
  *         &lt;str name="handler"&gt;/admin/metrics/collector&lt;/str&gt;
  *         &lt;int name="period"&gt;11&lt;/int&gt;
  *         &lt;lst name="report"&gt;
@@ -89,17 +91,17 @@ import static org.apache.solr.common.params.CommonParams.ID;
  * </pre>
  *
  */
-public class SolrClusterReporter extends SolrMetricReporter {
+public class SolrClusterReporter extends SolrCoreContainerReporter {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-  public static final String CLUSTER_GROUP = SolrMetricManager.overridableRegistryName(SolrInfoBean.Group.cluster.toString());
+  public static final String CLUSTER_GROUP = SolrMetricManager.enforcePrefix(SolrInfoBean.Group.cluster.toString());
 
   public static final List<SolrReporter.Report> DEFAULT_REPORTS = new ArrayList<SolrReporter.Report>() {{
     add(new SolrReporter.Report(CLUSTER_GROUP, "jetty",
-        SolrMetricManager.overridableRegistryName(SolrInfoBean.Group.jetty.toString()),
+        SolrMetricManager.enforcePrefix(SolrInfoBean.Group.jetty.toString()),
         Collections.emptySet())); // all metrics
     add(new SolrReporter.Report(CLUSTER_GROUP, "jvm",
-        SolrMetricManager.overridableRegistryName(SolrInfoBean.Group.jvm.toString()),
+        SolrMetricManager.enforcePrefix(SolrInfoBean.Group.jvm.toString()),
         new HashSet<String>() {{
           add("memory\\.total\\..*");
           add("memory\\.heap\\..*");
@@ -109,12 +111,12 @@ public class SolrClusterReporter extends SolrMetricReporter {
           add("os\\.OpenFileDescriptorCount");
           add("threads\\.count");
         }}));
-    add(new SolrReporter.Report(CLUSTER_GROUP, "node", SolrMetricManager.overridableRegistryName(SolrInfoBean.Group.node.toString()),
+    add(new SolrReporter.Report(CLUSTER_GROUP, "node", SolrMetricManager.enforcePrefix(SolrInfoBean.Group.node.toString()),
         new HashSet<String>() {{
           add("CONTAINER\\.cores\\..*");
           add("CONTAINER\\.fs\\..*");
         }}));
-    add(new SolrReporter.Report(CLUSTER_GROUP, "leader.$1", "solr\\.collection\\.(.*)\\.leader",
+    add(new SolrReporter.Report(CLUSTER_GROUP, "leader.$1", "solr\\.core\\.(.*)\\.leader",
         new HashSet<String>(){{
           add("UPDATE\\./update/.*");
           add("QUERY\\./select.*");
@@ -142,7 +144,7 @@ public class SolrClusterReporter extends SolrMetricReporter {
     this.handler = handler;
   }
 
-  public void setReport(List<Map> reportConfig) {
+  public void setReport(@SuppressWarnings({"rawtypes"})List<Map> reportConfig) {
     if (reportConfig == null || reportConfig.isEmpty()) {
       return;
     }
@@ -154,7 +156,7 @@ public class SolrClusterReporter extends SolrMetricReporter {
     });
   }
 
-  public void setReport(Map map) {
+  public void setReport(@SuppressWarnings({"rawtypes"})Map map) {
     if (map == null || map.isEmpty()) {
       return;
     }
@@ -187,12 +189,14 @@ public class SolrClusterReporter extends SolrMetricReporter {
     }
   }
 
-  public void setCoreContainer(CoreContainer cc) {
+  @Override
+  public void init(PluginInfo pluginInfo, CoreContainer cc) {
+    super.init(pluginInfo, cc);
     if (reporter != null) {
       reporter.close();;
     }
     if (!enabled) {
-      log.info("Reporter disabled for registry " + registryName);
+      log.info("Reporter disabled for registry {}", registryName);
       return;
     }
     // start reporter only in cloud mode
@@ -201,10 +205,10 @@ public class SolrClusterReporter extends SolrMetricReporter {
       return;
     }
     if (period < 1) { // don't start it
-      log.info("Turning off node reporter, period=" + period);
+      log.info("Turning off node reporter, period={}", period);
       return;
     }
-    HttpClient httpClient = cc.getUpdateShardHandler().getHttpClient();
+    HttpClient httpClient = cc.getUpdateShardHandler().getDefaultHttpClient();
     ZkController zk = cc.getZkController();
     String reporterId = zk.getNodeName();
     reporter = SolrReporter.Builder.forReports(metricManager, reports)
@@ -267,13 +271,15 @@ public class SolrClusterReporter extends SolrMetricReporter {
       if (oid == null) {
         return lastKnownUrl;
       }
-      String[] ids = oid.split("-");
-      if (ids.length != 3) { // unknown format
-        log.warn("Unknown format of leader id, skipping: " + oid);
+      String nodeName = null;
+      try {
+        nodeName = LeaderElector.getNodeName(oid);
+      } catch (Exception e) {
+        log.warn("Unknown format of leader id, skipping: {}", oid, e);
         return lastKnownUrl;
       }
       // convert nodeName back to URL
-      String url = zk.getZkStateReader().getBaseUrlForNodeName(ids[1]);
+      String url = zk.getZkStateReader().getBaseUrlForNodeName(nodeName);
       // check that it's parseable
       try {
         new java.net.URL(url);

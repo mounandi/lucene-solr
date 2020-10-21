@@ -18,7 +18,6 @@ package org.apache.solr.common.util;
 
 import java.io.IOException;
 import java.io.StringReader;
-import java.lang.invoke.MethodHandles;
 import java.lang.ref.WeakReference;
 import java.util.Arrays;
 import java.util.Collections;
@@ -26,15 +25,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.util.RecordingJSONParser;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 
 public class TestJsonRecordReader extends SolrTestCaseJ4 {
-  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
   public void testOneLevelSplit() throws IOException {
     String json = "{\n" +
@@ -166,6 +162,7 @@ public class TestJsonRecordReader extends SolrTestCaseJ4 {
         String buf = parser.getBuf();
         parser.resetBuf();
 
+        @SuppressWarnings({"rawtypes"})
         Map m = (Map) Utils.fromJSONString(buf);
         if (count == 1) {
           assertEquals(m.get("id"), "123");
@@ -281,7 +278,7 @@ public class TestJsonRecordReader extends SolrTestCaseJ4 {
     JsonRecordReader streamer = JsonRecordReader.getInst("/|/a/b", Arrays.asList("/a/x", "/a/b/*"));
     streamer.streamRecords(new StringReader(json), (record, path) -> {
       assertEquals(record.get("x"), "y");
-      assertEquals(((Map) record.get(null)).get("c"), "d");
+      assertEquals(((Map) record.get("b")).get("c"), "d");
     });
     json = "{a:{" +
         "b:[{c:c1, e:e1},{c:c2, e :e2, d:{p:q}}]," +
@@ -289,7 +286,9 @@ public class TestJsonRecordReader extends SolrTestCaseJ4 {
         "}}";
     streamer.streamRecords(new StringReader(json), (record, path) -> {
       assertEquals(record.get("x"), "y");
-      List l = (List) record.get(null);
+      @SuppressWarnings({"rawtypes"})
+      List l = (List) record.get("b");
+      @SuppressWarnings({"rawtypes"})
       Map m = (Map) l.get(0);
       assertEquals(m.get("c"), "c1");
       assertEquals(m.get("e"), "e1");
@@ -300,7 +299,9 @@ public class TestJsonRecordReader extends SolrTestCaseJ4 {
     streamer = JsonRecordReader.getInst("/|/a/b", Arrays.asList("$FQN:/**"));
     streamer.streamRecords(new StringReader(json), (record, path) -> {
       assertEquals(record.get("a.x"), "y");
-      List l = (List) record.get(null);
+      @SuppressWarnings({"rawtypes"})
+      List l = (List) record.get("b");
+      @SuppressWarnings({"rawtypes"})
       Map m = (Map) l.get(0);
       assertEquals(m.get("c"), "c1");
       assertEquals(m.get("e"), "e1");

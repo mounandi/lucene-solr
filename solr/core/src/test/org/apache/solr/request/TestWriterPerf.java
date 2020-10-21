@@ -30,14 +30,14 @@ import org.apache.solr.client.solrj.impl.XMLResponseParser;
 import org.apache.solr.response.BinaryQueryResponseWriter;
 import org.apache.solr.response.QueryResponseWriter;
 import org.apache.solr.response.SolrQueryResponse;
-import org.apache.solr.util.AbstractSolrTestCase;
+import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.util.RTimer;
 import org.junit.BeforeClass;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-public class TestWriterPerf extends AbstractSolrTestCase {
+public class TestWriterPerf extends SolrTestCaseJ4 {
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -149,7 +149,10 @@ public class TestWriterPerf extends AbstractSolrTestCase {
 
     double decodeTime = timer.getTime();
 
-    log.info("writer "+writerName+", size="+out.size()+", encodeRate="+(encIter*1000L/encodeTime) + ", decodeRate="+(decIter*1000L/decodeTime));
+    if (log.isInfoEnabled()) {
+      log.info("writer {}, size={}, encodeRate={} decodeRate={}"
+          , writerName, out.size(), (encIter * 1000L / encodeTime), (decIter * 1000L / decodeTime));
+    }
 
     req.close();
   }

@@ -23,7 +23,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
-import com.google.common.base.Objects;
+import com.google.common.base.MoreObjects;
 import org.apache.lucene.search.Query;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.HighlightParams;
@@ -113,7 +113,7 @@ public class HighlightComponent extends SearchComponent implements PluginInfoIni
     if(rb.doHighlights){
       rb.setNeedDocList(true);
       String hlq = params.get(HighlightParams.Q);
-      String hlparser = Objects.firstNonNull(params.get(HighlightParams.QPARSER),
+      String hlparser = MoreObjects.firstNonNull(params.get(HighlightParams.QPARSER),
                                               params.get(QueryParsing.DEFTYPE, QParserPlugin.DEFAULT_QTYPE));
       if(hlq != null){
         try {
@@ -130,14 +130,9 @@ public class HighlightComponent extends SearchComponent implements PluginInfoIni
   public void inform(SolrCore core) {
     List<PluginInfo> children = info.getChildren("highlighting");
     if(children.isEmpty()) {
-      PluginInfo pluginInfo = core.getSolrConfig().getPluginInfo(SolrHighlighter.class.getName()); //TODO deprecated configuration remove later
-      if (pluginInfo != null) {
-        solrConfigHighlighter = core.createInitInstance(pluginInfo, SolrHighlighter.class, null, DefaultSolrHighlighter.class.getName());
-      } else {
-        DefaultSolrHighlighter defHighlighter = new DefaultSolrHighlighter(core);
-        defHighlighter.init(PluginInfo.EMPTY_INFO);
-        solrConfigHighlighter = defHighlighter;
-      }
+      DefaultSolrHighlighter defHighlighter = new DefaultSolrHighlighter(core);
+      defHighlighter.init(PluginInfo.EMPTY_INFO);
+      solrConfigHighlighter = defHighlighter;
     } else {
       solrConfigHighlighter = core.createInitInstance(children.get(0),SolrHighlighter.class,null, DefaultSolrHighlighter.class.getName());
     }
@@ -173,6 +168,7 @@ public class HighlightComponent extends SearchComponent implements PluginInfoIni
 
       // No highlighting if there is no query -- consider q.alt=*:*
       if( highlightQuery != null ) {
+        @SuppressWarnings({"rawtypes"})
         NamedList sumData = highlighter.doHighlighting(
                 rb.getResults().docList,
                 highlightQuery,
@@ -180,7 +176,7 @@ public class HighlightComponent extends SearchComponent implements PluginInfoIni
         
         if(sumData != null) {
           // TODO ???? add this directly to the response?
-          rb.rsp.add("highlighting", sumData);
+          rb.rsp.add(highlightingResponseField(), convertHighlights(sumData));
         }
       }
     }
@@ -238,7 +234,8 @@ public class HighlightComponent extends SearchComponent implements PluginInfoIni
   public void finishStage(ResponseBuilder rb) {
     if (rb.doHighlights && rb.stage == ResponseBuilder.STAGE_GET_FIELDS) {
 
-      NamedList.NamedListEntry[] arr = new NamedList.NamedListEntry[rb.resultIds.size()];
+      final Object[] objArr = newHighlightsArray(rb.resultIds.size());
+      final String highlightingResponseField = highlightingResponseField();
 
       // TODO: make a generic routine to do automatic merging of id keyed data
       for (ShardRequest sreq : rb.finished) {
@@ -249,13 +246,12 @@ public class HighlightComponent extends SearchComponent implements PluginInfoIni
             // this should only happen when using shards.tolerant=true
             continue;
           }
-          NamedList hl = (NamedList)srsp.getSolrResponse().getResponse().get("highlighting");
-          SolrPluginUtils.copyNamedListIntoArrayByDocPosInResponse(hl, rb.resultIds, arr);
+          Object hl = srsp.getSolrResponse().getResponse().get(highlightingResponseField);
+          addHighlights(objArr, hl, rb.resultIds);
         }
       }
 
-      // remove nulls in case not all docs were able to be retrieved
-      rb.rsp.add("highlighting", SolrPluginUtils.removeNulls(arr, new SimpleOrderedMap<>()));
+      rb.rsp.add(highlightingResponseField, getAllHighlights(objArr));
     }
   }
 
@@ -272,4 +268,37 @@ public class HighlightComponent extends SearchComponent implements PluginInfoIni
   public Category getCategory() {
     return Category.HIGHLIGHTER;
   }
+
+  ////////////////////////////////////////////
+  ///  highlighting response collation
+  ////////////////////////////////////////////
+
+  protected String highlightingResponseField() {
+    return "highlighting";
+  }
+
+  protected Object convertHighlights(@SuppressWarnings({"rawtypes"})NamedList hl) {
+    return hl;
+  }
+
+  @SuppressWarnings({"rawtypes"})
+  protected Object[] newHighlightsArray(int size) {
+    return new NamedList.NamedListEntry[size];
+  }
+
+  protected void addHighlights(Object[] objArr, Object obj, Map<Object, ShardDoc> resultIds) {
+    @SuppressWarnings({"unchecked"})
+    Map.Entry<String, Object>[] arr = (Map.Entry<String, Object>[])objArr;
+    @SuppressWarnings({"rawtypes"})
+    NamedList hl = (NamedList)obj;
+    SolrPluginUtils.copyNamedListIntoArrayByDocPosInResponse(hl, resultIds, arr);
+  }
+
+  protected Object getAllHighlights(Object[] objArr) {
+    @SuppressWarnings({"unchecked"})
+    final Map.Entry<String, Object>[] arr = (Map.Entry<String, Object>[])objArr;
+      // remove nulls in case not all docs were able to be retrieved
+      return SolrPluginUtils.removeNulls(arr, new SimpleOrderedMap<>());
+  }
+
 }

@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.lucene.analysis.TokenStream;
@@ -39,19 +40,19 @@ import org.apache.lucene.facet.FacetsConfig;
 import org.apache.lucene.facet.taxonomy.FacetLabel;
 import org.apache.lucene.facet.taxonomy.TaxonomyReader;
 import org.apache.lucene.facet.taxonomy.TaxonomyWriter;
-import org.apache.lucene.facet.taxonomy.writercache.Cl2oTaxonomyWriterCache;
+import org.apache.lucene.facet.taxonomy.writercache.UTF8TaxonomyWriterCache;
 import org.apache.lucene.facet.taxonomy.writercache.LruTaxonomyWriterCache;
 import org.apache.lucene.facet.taxonomy.writercache.TaxonomyWriterCache;
 import org.apache.lucene.index.CorruptIndexException; // javadocs
 import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.LogByteSizeMergePolicy;
+import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.ReaderManager;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.Terms;
@@ -149,7 +150,7 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
    * @param cache
    *    A {@link TaxonomyWriterCache} implementation which determines
    *    the in-memory caching policy. See for example
-   *    {@link LruTaxonomyWriterCache} and {@link Cl2oTaxonomyWriterCache}.
+   *    {@link LruTaxonomyWriterCache} and {@link UTF8TaxonomyWriterCache}.
    *    If null or missing, {@link #defaultTaxonomyWriterCache()} is used.
    * @throws CorruptIndexException
    *     if the taxonomy is corrupted.
@@ -194,7 +195,7 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
     parentStreamField = new Field(Consts.FIELD_PAYLOADS, parentStream, ft);
     fullPathField = new StringField(Consts.FULL, "", Field.Store.YES);
 
-    nextID = indexWriter.maxDoc();
+    nextID = indexWriter.getDocStats().maxDoc;
 
     if (cache == null) {
       cache = defaultTaxonomyWriterCache();
@@ -215,6 +216,11 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
       // notice a few cache misses.
       cacheIsComplete = false;
     }
+  }
+
+  /** Returns the {@link TaxonomyWriterCache} in use by this writer. */
+  public TaxonomyWriterCache getCache() {
+    return cache;
   }
 
   /**
@@ -291,12 +297,11 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
    * Defines the default {@link TaxonomyWriterCache} to use in constructors
    * which do not specify one.
    * <P>  
-   * The current default is {@link Cl2oTaxonomyWriterCache} constructed
-   * with the parameters (1024, 0.15f, 3), i.e., the entire taxonomy is
-   * cached in memory while building it.
+   * The current default is {@link UTF8TaxonomyWriterCache}, i.e.,
+   * the entire taxonomy is cached in memory while building it.
    */
   public static TaxonomyWriterCache defaultTaxonomyWriterCache() {
-    return new Cl2oTaxonomyWriterCache(1024, 0.15f, 3);
+    return new UTF8TaxonomyWriterCache();
   }
 
   /** Create this with {@code OpenMode.CREATE_OR_APPEND}. */
@@ -764,9 +769,7 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
     // Note: the following if() just enforces that a user can never ask
     // for the parent of a nonexistant category - even if the parent array
     // was allocated bigger than it really needs to be.
-    if (ordinal >= nextID) {
-      throw new ArrayIndexOutOfBoundsException("requested ordinal is bigger than the largest ordinal in the taxonomy");
-    }
+    Objects.checkIndex(ordinal, nextID);
     
     int[] parents = getTaxoArrays().parents();
     assert ordinal < parents.length : "requested ordinal (" + ordinal + "); parents.length (" + parents.length + ") !";
@@ -809,7 +812,7 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
 
   /**
    * Mapping from old ordinal to new ordinals, used when merging indexes 
-   * wit separate taxonomies.
+   * with separate taxonomies.
    * <p> 
    * addToTaxonomies() merges one or more taxonomies into the given taxonomy
    * (this). An OrdinalMap is filled for each of the added taxonomies,
@@ -965,7 +968,7 @@ public class DirectoryTaxonomyWriter implements TaxonomyWriter {
     shouldRefreshReaderManager = true;
     initReaderManager(); // ensure that it's initialized
     refreshReaderManager();
-    nextID = indexWriter.maxDoc();
+    nextID = indexWriter.getDocStats().maxDoc;
     taxoArrays = null; // must nullify so that it's re-computed next time it's needed
     
     // need to clear the cache, so that addCategory won't accidentally return

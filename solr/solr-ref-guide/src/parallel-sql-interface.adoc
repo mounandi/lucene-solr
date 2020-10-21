@@ -1,6 +1,4 @@
 = Parallel SQL Interface
-:page-shortname: parallel-sql-interface
-:page-permalink: parallel-sql-interface.html
 :page-children: solr-jdbc-dbvisualizer, solr-jdbc-squirrel-sql, solr-jdbc-apache-zeppelin, solr-jdbc-python-jython, solr-jdbc-r
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
@@ -156,6 +154,12 @@ Solr supports a broad range of SQL syntax.
 The SQL parser being used by Solr to translate the SQL statements is case insensitive. However, for ease of reading, all examples on this page use capitalized keywords.
 ====
 
+.SELECT * is not supported
+[IMPORTANT]
+====
+The SQL parser being used by Solr does not support the SELECT * syntax, you must specify each field you wish to return.
+====
+
 === Escaping Reserved Words
 
 The SQL parser will return an error if a reserved word is used in the SQL query. Reserved words can be escaped and included in the query using the back tick. For example:
@@ -282,7 +286,7 @@ The `aggregationMode` parameter is available in the both the JDBC driver and HTT
 SELECT distinct fieldA as fa, fieldB as fb FROM tableA ORDER BY fa desc, fb desc
 ----
 
-=== Statistics
+=== Statistical Functions
 
 The SQL interface supports simple statistics calculated on numeric fields. The supported functions are `count(*)`, `min`, `max`, `sum`, and `avg`.
 
@@ -322,10 +326,6 @@ The Column Identifiers can contain both fields in the Solr index and aggregate f
 * `max:(field)`: Returns the max value of a numerics over a set of buckets.
 
 The non-function fields in the field list determine the fields to calculate the aggregations over.
-
-*`GROUP BY` Clause*
-
-The `GROUP BY` clause can contain up to 4 fields in the Solr index. These fields should correspond with the non-function fields in the field list.
 
 === HAVING Clause
 
@@ -431,4 +431,4 @@ Examples of using Python and Jython for connecting to Solr with the Solr JDBC dr
 
 === R
 
-Examples of using R for connecting to Solr with the Solr JDBC driver are available in the section <<solr-jdbc-r.adoc#solr-jdbc-r,Solr JDBC - R>> .
+Examples of using R for connecting to Solr with the Solr JDBC driver are available in the section <<solr-jdbc-r.adoc#solr-jdbc-r,Solr JDBC - R>>.

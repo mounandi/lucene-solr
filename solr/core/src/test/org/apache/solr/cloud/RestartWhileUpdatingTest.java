@@ -19,20 +19,18 @@ package org.apache.solr.cloud;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.lucene.util.LuceneTestCase.Nightly;
 import org.apache.lucene.util.LuceneTestCase.Slow;
-import org.apache.solr.SolrTestCaseJ4.SuppressObjectReleaseTracker;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.common.SolrInputDocument;
-import org.apache.solr.util.TestInjection;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 @Slow
 @Nightly
-@SuppressObjectReleaseTracker(bugUrl="this is a purposely leaky test")
 public class RestartWhileUpdatingTest extends AbstractFullDistribZkTestBase {
 
   //private static final String DISTRIB_UPDATE_CHAIN = "distrib-update-chain";
@@ -64,8 +62,8 @@ public class RestartWhileUpdatingTest extends AbstractFullDistribZkTestBase {
     System.setProperty("leaderVoteWait", "300000");
     System.setProperty("solr.autoCommit.maxTime", "30000");
     System.setProperty("solr.autoSoftCommit.maxTime", "3000");
-    TestInjection.nonGracefullClose = "true:60";
-    TestInjection.failReplicaRequests = "true:03";
+    // SOLR-13212 // TestInjection.nonGracefullClose = "true:60";
+    // SOLR-13189 // TestInjection.failReplicaRequests = "true:03";
   }
   
   @AfterClass
@@ -125,7 +123,7 @@ public class RestartWhileUpdatingTest extends AbstractFullDistribZkTestBase {
     
     int restartTimes = 1;//random().nextInt(4) + 1;;
     for (int i = 0; i < restartTimes; i++) {
-      Thread.sleep(random().nextInt(300000));
+      Thread.sleep(random().nextInt(30000));
       stopAndStartAllReplicas();
       Thread.sleep(random().nextInt(30000));
     }
@@ -141,16 +139,19 @@ public class RestartWhileUpdatingTest extends AbstractFullDistribZkTestBase {
     
     Thread.sleep(1000);
   
-    waitForThingsToLevelOut(320);
+    waitForThingsToLevelOut(320, TimeUnit.SECONDS);
     
     Thread.sleep(2000);
     
-    waitForThingsToLevelOut(30);
+    waitForThingsToLevelOut(30, TimeUnit.SECONDS);
     
     Thread.sleep(5000);
     
     waitForRecoveriesToFinish(DEFAULT_COLLECTION, cloudClient.getZkStateReader(), false, true);
 
+    for (StoppableIndexingThread thread : threads) {
+      thread.join();
+    }
     
     checkShardConsistency(false, false);
   }

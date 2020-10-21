@@ -30,7 +30,7 @@ import org.junit.Before;
 //   - mix in forceMerge, addIndexes
 //   - randomoly mix in non-congruent docs
 
-@SuppressCodecs({ "SimpleText", "Memory", "Direct" })
+@SuppressCodecs({ "SimpleText", "Direct" })
 public class TestNRTThreads extends ThreadedIndexingAndSearchingTestCase {
   
   private boolean useNonNrtReaders = true;
@@ -84,7 +84,7 @@ public class TestNRTThreads extends ThreadedIndexingAndSearchingTestCase {
       if (r.numDocs() > 0) {
         fixedSearcher = new IndexSearcher(r, es);
         smokeTestSearcher(fixedSearcher);
-        runSearchThreads(System.currentTimeMillis() + 500);
+        runSearchThreads(System.currentTimeMillis() + 100);
       }
     }
     r.close();

@@ -20,7 +20,7 @@ package org.apache.lucene.analysis.ja;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link JapaneseNumberFilter}.
@@ -29,21 +29,31 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * &lt;fieldType name="text_ja" class="solr.TextField"&gt;
  *   &lt;analyzer&gt;
  *     &lt;tokenizer class="solr.JapaneseTokenizerFactory" discardPunctuation="false"/&gt;
- *     &lt;filter class="solr.JapaneseNumberFilter"/&gt;
+ *     &lt;filter class="solr.JapaneseNumberFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;
  * </pre>
  * <p>
  * It is important that punctuation is not discarded by the tokenizer so use
  * {@code discardPunctuation="false"} in your {@link JapaneseTokenizerFactory}.
+ * @since 6.0.0
+ * @lucene.spi {@value #NAME}
  */
 public class JapaneseNumberFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "japaneseNumber";
 
   public JapaneseNumberFilterFactory(Map<String, String> args) {
     super(args);
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public JapaneseNumberFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

@@ -13,8 +13,8 @@ For information on how to get started with solr ltr please see:
 # Getting Started With Solr
 
 For information on how to get started with solr please see:
- * [solr/README.txt](../../README.txt)
- * [Solr Quick Start](http://lucene.apache.org/solr/quickstart.html)
+ * [solr/README.md](../../README.md)
+ * [Solr Tutorial](https://lucene.apache.org/solr/guide/solr-tutorial.html)
 
 # How To Contribute
 

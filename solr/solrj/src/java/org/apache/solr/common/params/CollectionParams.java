@@ -42,34 +42,42 @@ public interface CollectionParams {
 
 
   enum LockLevel {
-    CLUSTER(0),
-    COLLECTION(1),
-    SHARD(2),
-    REPLICA(3),
-    NONE(10);
+    NONE(10, null),
+    REPLICA(3, null),
+    SHARD(2, REPLICA),
+    COLLECTION(1, SHARD),
+    CLUSTER(0, COLLECTION);
 
-    public final int level;
+    private final int height;
+    private final LockLevel child;
 
-    LockLevel(int i) {
-      this.level = i;
+    LockLevel(int height, LockLevel child) {
+      this.height = height;
+      this.child = child;
     }
 
     public LockLevel getChild() {
-      return getLevel(level + 1);
+      return this.child;
     }
 
-    public static LockLevel getLevel(int i) {
-      for (LockLevel v : values()) {
-        if (v.level == i) return v;
-      }
-      return null;
+    public int getHeight() {
+      return this.height;
     }
 
     public boolean isHigherOrEqual(LockLevel that) {
-      return that.level <= level;
+      return height >= that.height;
     }
   }
 
+  /**
+   * <p>(Mostly) Collection API actions that can be sent by nodes to the Overseer over the <code>/overseer/collection-queue-work</code>
+   * ZooKeeper queue.</p>
+   *
+   * <p>Some of these actions are also used over the cluster state update queue at <code>/overseer/queue</code> and have a
+   * different (though related) meaning there. These actions are:
+   * {@link #CREATE}, {@link #DELETE}, {@link #CREATESHARD}, {@link #DELETESHARD}, {@link #ADDREPLICA}, {@link #ADDREPLICAPROP},
+   * {@link #DELETEREPLICAPROP}, {@link #BALANCESHARDUNIQUE} and {@link #MODIFYCOLLECTION}.</p>
+   */
   enum CollectionAction {
     CREATE(true, LockLevel.COLLECTION),
     DELETE(true, LockLevel.COLLECTION),
@@ -77,16 +85,20 @@ public interface CollectionParams {
     SYNCSHARD(true, LockLevel.SHARD),
     CREATEALIAS(true, LockLevel.COLLECTION),
     DELETEALIAS(true, LockLevel.COLLECTION),
+    ALIASPROP(true, LockLevel.COLLECTION),
     LISTALIASES(false, LockLevel.NONE),
+    MAINTAINROUTEDALIAS(true, LockLevel.COLLECTION), // internal use only
+    DELETEROUTEDALIASCOLLECTIONS(true, LockLevel.COLLECTION),
     SPLITSHARD(true, LockLevel.SHARD),
     DELETESHARD(true, LockLevel.SHARD),
     CREATESHARD(true, LockLevel.COLLECTION),
     DELETEREPLICA(true, LockLevel.SHARD),
     FORCELEADER(true, LockLevel.SHARD),
-    MIGRATE(true, LockLevel.SHARD),
+    MIGRATE(true, LockLevel.COLLECTION),
     ADDROLE(true, LockLevel.NONE),
     REMOVEROLE(true, LockLevel.NONE),
     CLUSTERPROP(true, LockLevel.NONE),
+    COLLECTIONPROP(true, LockLevel.COLLECTION),
     REQUESTSTATUS(false, LockLevel.NONE),
     DELETESTATUS(false, LockLevel.NONE),
     ADDREPLICA(true, LockLevel.SHARD),
@@ -99,7 +111,6 @@ public interface CollectionParams {
     BALANCESHARDUNIQUE(true, LockLevel.SHARD),
     REBALANCELEADERS(true, LockLevel.COLLECTION),
     MODIFYCOLLECTION(true, LockLevel.COLLECTION),
-    MIGRATESTATEFORMAT(true, LockLevel.CLUSTER),
     BACKUP(true, LockLevel.COLLECTION),
     RESTORE(true, LockLevel.COLLECTION),
     CREATESNAPSHOT(true, LockLevel.COLLECTION),
@@ -113,7 +124,14 @@ public interface CollectionParams {
     //TODO when we have a node level lock use it here
     REPLACENODE(true, LockLevel.NONE),
     DELETENODE(true, LockLevel.NONE),
-    MOCK_REPLICA_TASK(false, LockLevel.REPLICA)
+    MOCK_REPLICA_TASK(false, LockLevel.REPLICA),
+    NONE(false, LockLevel.NONE),
+    // TODO: not implemented yet
+    MERGESHARDS(true, LockLevel.SHARD),
+    COLSTATUS(true, LockLevel.NONE),
+    // this command implements its own locking
+    REINDEXCOLLECTION(true, LockLevel.NONE),
+    RENAME(true, LockLevel.COLLECTION)
     ;
     public final boolean isWrite;
 

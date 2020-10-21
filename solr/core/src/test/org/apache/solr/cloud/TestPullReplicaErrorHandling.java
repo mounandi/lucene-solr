@@ -27,15 +27,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import org.apache.solr.SolrTestCaseJ4.SuppressObjectReleaseTracker;
+
 import org.apache.solr.SolrTestCaseJ4.SuppressSSL;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.cloud.SocketProxy;
 import org.apache.solr.client.solrj.embedded.JettySolrRunner;
 import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
-import org.apache.solr.client.solrj.response.CollectionAdminResponse;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.cloud.CollectionStatePredicate;
@@ -43,6 +43,7 @@ import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.ZkStateReader;
+import org.apache.solr.common.util.TimeSource;
 import org.apache.solr.util.TestInjection;
 import org.apache.solr.util.TimeOut;
 import org.apache.zookeeper.KeeperException;
@@ -52,25 +53,25 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @SuppressSSL(bugUrl = "https://issues.apache.org/jira/browse/SOLR-5776")
-@SuppressObjectReleaseTracker(bugUrl="Testing purposes")
 public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
   
   private final static int REPLICATION_TIMEOUT_SECS = 10;
   
-  private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
   private static Map<URI, SocketProxy> proxies;
   private static Map<URI, JettySolrRunner> jettys;
 
   private String collectionName = null;
   
   private String suggestedCollectionName() {
-    return (getTestClass().getSimpleName().replace("Test", "") + "_" + getTestName().split(" ")[0]).replaceAll("(.)(\\p{Upper})", "$1_$2").toLowerCase(Locale.ROOT);
+    return (getTestClass().getSimpleName().replace("Test", "") + "_" + getSaferTestName().split(" ")[0]).replaceAll("(.)(\\p{Upper})", "$1_$2").toLowerCase(Locale.ROOT);
   }
 
   @BeforeClass
   public static void setupCluster() throws Exception {
-    TestInjection.waitForReplicasInSync = null; // We'll be explicit about this in this test
-    configureCluster(4) 
+    System.setProperty("solr.zkclienttimeout", "20000");
+
+    configureCluster(4)
         .addConfig("conf", configset("cloud-minimal"))
         .configure();
     // Add proxies
@@ -81,33 +82,24 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
       jetty.setProxyPort(proxy.getListenPort());
       cluster.stopJettySolrRunner(jetty);//TODO: Can we avoid this restart
       cluster.startJettySolrRunner(jetty);
+      cluster.waitForAllNodes(30);
       proxy.open(jetty.getBaseUrl().toURI());
-      LOG.info("Adding proxy for URL: " + jetty.getBaseUrl() + ". Proxy: " + proxy.getUrl());
+      if (log.isInfoEnabled()) {
+        log.info("Adding proxy for URL: {}. Proxy: {}", jetty.getBaseUrl(), proxy.getUrl());
+      }
       proxies.put(proxy.getUrl(), proxy);
       jettys.put(proxy.getUrl(), jetty);
-    }
-    TimeOut t = new TimeOut(10, TimeUnit.SECONDS);
-    while (true) {
-      try {
-        CollectionAdminRequest.ClusterProp clusterPropRequest = CollectionAdminRequest.setClusterProperty(ZkStateReader.LEGACY_CLOUD, "false");
-        CollectionAdminResponse response = clusterPropRequest.process(cluster.getSolrClient());
-        assertEquals(0, response.getStatus());
-        break;
-      } catch (SolrServerException e) {
-        Thread.sleep(50);
-        if (t.hasTimedOut()) {
-          throw e;
-        }
-      }
     }
   }
   
   @AfterClass
   public static void tearDownCluster() throws Exception {
-    for (SocketProxy proxy:proxies.values()) {
-      proxy.close();
+    if (null != proxies) {
+      for (SocketProxy proxy : proxies.values()) {
+        proxy.close();
+      }
+      proxies = null;
     }
-    proxies = null;
     jettys = null;
     TestInjection.reset();
   }
@@ -123,9 +115,9 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
   @Override
   public void tearDown() throws Exception {
     if (cluster.getSolrClient().getZkStateReader().getClusterState().getCollectionOrNull(collectionName) != null) {
-      LOG.info("tearDown deleting collection");
+      log.info("tearDown deleting collection");
       CollectionAdminRequest.deleteCollection(collectionName).process(cluster.getSolrClient());
-      LOG.info("Collection deleted");
+      log.info("Collection deleted");
       waitForDeletion(collectionName);
     }
     collectionName = null;
@@ -133,11 +125,12 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
   }
   
 //  @Repeat(iterations=10)
-  public void testCantConnectToPullReplica() throws Exception {
+//commented 9-Aug-2018  @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // added 20-Jul-2018
+public void testCantConnectToPullReplica() throws Exception {
     int numShards = 2;
     CollectionAdminRequest.createCollection(collectionName, "conf", numShards, 1, 0, 1)
-      .setMaxShardsPerNode(1)
       .process(cluster.getSolrClient());
+    cluster.waitForActiveCollection(collectionName, numShards, numShards * 2);
     addDocs(10);
     DocCollection docCollection = assertNumberOfReplicas(numShards, 0, numShards, false, true);
     Slice s = docCollection.getSlices().iterator().next();
@@ -150,16 +143,17 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
           assertNumDocs(10 + i, leaderClient);
         }
       }
-      try (HttpSolrClient pullReplicaClient = getHttpSolrClient(s.getReplicas(EnumSet.of(Replica.Type.PULL)).get(0).getCoreUrl())) {
-        pullReplicaClient.query(new SolrQuery("*:*")).getResults().getNumFound();
-        fail("Shouldn't be able to query the pull replica");
-      } catch (SolrServerException e) {
-        //expected
-      }
+
+      SolrServerException e = expectThrows(SolrServerException.class, () -> {
+        try(HttpSolrClient pullReplicaClient = getHttpSolrClient(s.getReplicas(EnumSet.of(Replica.Type.PULL)).get(0).getCoreUrl())) {
+          pullReplicaClient.query(new SolrQuery("*:*")).getResults().getNumFound();
+        }
+      });
+      
       assertNumberOfReplicas(numShards, 0, numShards, true, true);// Replica should still be active, since it doesn't disconnect from ZooKeeper
       {
         long numFound = 0;
-        TimeOut t = new TimeOut(REPLICATION_TIMEOUT_SECS, TimeUnit.SECONDS);
+        TimeOut t = new TimeOut(REPLICATION_TIMEOUT_SECS, TimeUnit.SECONDS, TimeSource.NANO_TIME);
         while (numFound < 20 && !t.hasTimedOut()) {
           Thread.sleep(200);
           numFound = cluster.getSolrClient().query(collectionName, new SolrQuery("*:*")).getResults().getNumFound();
@@ -177,8 +171,8 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
   public void testCantConnectToLeader() throws Exception {
     int numShards = 1;
     CollectionAdminRequest.createCollection(collectionName, "conf", numShards, 1, 0, 1)
-      .setMaxShardsPerNode(1)
       .process(cluster.getSolrClient());
+    cluster.waitForActiveCollection(collectionName, numShards, numShards * 2);
     addDocs(10);
     DocCollection docCollection = assertNumberOfReplicas(numShards, 0, numShards, false, true);
     Slice s = docCollection.getSlices().iterator().next();
@@ -195,7 +189,7 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
       }
       assertNumDocs(10, cluster.getSolrClient());
     } finally {
-      LOG.info("Opening leader node");
+      log.info("Opening leader node");
       proxy.reopen();
     }
 //     Back to normal
@@ -212,7 +206,6 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
   public void testPullReplicaDisconnectsFromZooKeeper() throws Exception {
     int numShards = 1;
     CollectionAdminRequest.createCollection(collectionName, "conf", numShards, 1, 0, 1)
-      .setMaxShardsPerNode(1)
       .process(cluster.getSolrClient());
     addDocs(10);
     DocCollection docCollection = assertNumberOfReplicas(numShards, 0, numShards, false, true);
@@ -233,7 +226,7 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
   }
   
   private void assertNumDocs(int numDocs, SolrClient client, int timeoutSecs) throws InterruptedException, SolrServerException, IOException {
-    TimeOut t = new TimeOut(timeoutSecs, TimeUnit.SECONDS);
+    TimeOut t = new TimeOut(timeoutSecs, TimeUnit.SECONDS, TimeSource.NANO_TIME);
     long numFound = -1;
     while (!t.hasTimedOut()) {
       Thread.sleep(200);
@@ -299,9 +292,9 @@ public class TestPullReplicaErrorHandling extends SolrCloudTestCase {
   }
   
   private void waitForDeletion(String collection) throws InterruptedException, KeeperException {
-    TimeOut t = new TimeOut(10, TimeUnit.SECONDS);
+    TimeOut t = new TimeOut(10, TimeUnit.SECONDS, TimeSource.NANO_TIME);
     while (cluster.getSolrClient().getZkStateReader().getClusterState().hasCollection(collection)) {
-      LOG.info("Collection not yet deleted");
+      log.info("Collection not yet deleted");
       try {
         Thread.sleep(100);
         if (t.hasTimedOut()) {

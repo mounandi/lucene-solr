@@ -1,7 +1,5 @@
 = Installing Solr
-:page-shortname: installing-solr
-:page-permalink: installing-solr.html
-:page-toclevels: 1
+:toclevels: 1
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -25,7 +23,7 @@ Please be sure to review the <<solr-system-requirements.adoc#solr-system-require
 
 == Available Solr Packages
 
-Solr is available from the Solr website. Download the latest release https://lucene.apache.org/solr/mirrors-solr-latest-redir.html.
+Solr is available from the Solr website. Download the latest release https://lucene.apache.org/solr/downloads.html.
 
 There are three separate packages:
 
@@ -47,8 +45,9 @@ When you're ready to setup Solr for a production environment, please refer to th
 How to size your Solr installation is a complex question that relies on a number of factors, including the number and structure of documents, how many fields you intend to store, the number of users, etc.
 
 It's highly recommended that you spend a bit of time thinking about the factors that will impact hardware sizing for your Solr implementation. A very good blog post that discusses the issues to consider is https://lucidworks.com/2012/07/23/sizing-hardware-in-the-abstract-why-we-dont-have-a-definitive-answer/[Sizing Hardware in the Abstract: Why We Don't have a Definitive Answer].
-
 ====
+
+One thing to note when planning your installation is that a hard limit exists in Lucene for the number of documents in a single index: approximately 2.14 billion documents (2,147,483,647 to be exact). In practice, it is highly unlikely that such a large number of documents would fit and perform well in a single index, and you will likely need to distribute your index across a cluster before you ever approach this number. If you know you will exceed this number of documents in total before you've even started indexing, it's best to plan your installation with <<solrcloud.adoc#solrcloud,SolrCloud>> as part of your design from the start.
 
 == Package Installation
 
@@ -66,7 +65,7 @@ Once extracted, you are now ready to run Solr using the instructions provided in
 
 After installing Solr, you'll see the following directories and files within them:
 
-bin::
+bin/::
 This directory includes several important scripts that will make using Solr easier.
 
 solr and solr.cmd::: This is <<solr-control-script-reference.adoc#solr-control-script-reference,Solr's Control Script>>, also known as `bin/solr` (*nix) / `bin/solr.cmd` (Windows). This script is the preferred tool to start and stop Solr. You can also create collections or cores, configure authentication, and work with configuration files when running in SolrCloud mode.
@@ -79,22 +78,22 @@ These are property files for *nix and Windows systems, respectively. System-leve
 install_solr_services.sh:::
 This script is used on *nix systems to install Solr as a service. It is described in more detail in the section <<taking-solr-to-production.adoc#taking-solr-to-production,Taking Solr to Production>>.
 
-contrib::
+contrib/::
 Solr's `contrib` directory includes add-on plugins for specialized features of Solr.
 
-dist::
+dist/::
 The `dist` directory contains the main Solr .jar files.
 
-docs::
+docs/::
 The `docs` directory includes a link to online Javadocs for Solr.
 
-example::
+example/::
 The `example` directory includes several types of examples that demonstrate various Solr capabilities. See the section <<Solr Examples>> below for more details on what is in this directory.
 
-licenses::
+licenses/::
 The `licenses` directory includes all of the licenses for 3rd party libraries used by Solr.
 
-server::
+server/::
 This directory is where the heart of the Solr application resides. A README in this directory provides a detailed overview, but here are some highlights:
 * Solr's Admin UI (`server/solr-webapp`)
 * Jetty libraries (`server/lib`)
@@ -109,9 +108,6 @@ Here are the examples included with Solr:
 
 exampledocs::
 This is a small set of simple CSV, XML, and JSON files that can be used with `bin/post` when first getting started with Solr. For more information about using `bin/post` with these files, see <<post-tool.adoc#post-tool,Post Tool>>.
-
-example-DIH::
-This directory includes a few example DataImport Handler (DIH) configurations to help you get started with importing structured content in a database, an email server, or even an Atom feed. Each example will index a different set of data; see the README there for more details about these examples.
 
 files::
 The `files` directory provides a basic search UI for documents such as Word or PDF that you may have stored locally. See the README there for details on how to use this example.
@@ -152,10 +148,10 @@ Solr also provides a number of useful examples to help you learn about key featu
 bin/solr -e techproducts
 ----
 
-Currently, the available examples you can run are: techproducts, dih, schemaless, and cloud. See the section <<solr-control-script-reference.adoc#running-with-example-configurations,Running with Example Configurations>> for details on each example.
+Currently, the available examples you can run are: techproducts, schemaless, and cloud. See the section <<solr-control-script-reference.adoc#running-with-example-configurations,Running with Example Configurations>> for details on each example.
 
 .Getting Started with SolrCloud
-NOTE: Running the `cloud` example starts Solr in <<solrcloud.adoc#solrcloud,SolrCloud>> mode. For more information on starting Solr in cloud mode, see the section <<getting-started-with-solrcloud.adoc#getting-started-with-solrcloud,Getting Started with SolrCloud>>.
+NOTE: Running the `cloud` example starts Solr in <<solrcloud.adoc#solrcloud,SolrCloud>> mode. For more information on starting Solr in SolrCloud mode, see the section <<getting-started-with-solrcloud.adoc#getting-started-with-solrcloud,Getting Started with SolrCloud>>.
 
 === Check if Solr is Running
 
@@ -173,7 +169,7 @@ That's it! Solr is running. If you need convincing, use a Web browser to see the
 `\http://localhost:8983/solr/`
 
 .The Solr Admin interface.
-image::images/running-solr/SolrAdminDashboard.png[image,width=900,height=456]
+image::images/running-solr/SolrAdminDashboard.png[Solr's Admin UI,pdfwidth=75%]
 
 If Solr is not running, your browser will complain that it cannot connect to the server. Check your port number and try again.
 

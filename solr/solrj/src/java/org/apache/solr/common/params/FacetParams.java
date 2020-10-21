@@ -121,24 +121,6 @@ public interface FacetParams {
    */
   public static final String FACET_OVERREQUEST_COUNT = FACET_OVERREQUEST + ".count";
 
-
-  public static final String FACET_DISTRIB = FACET + ".distrib";
-  
-  /**
-   * If we are returning facet field counts, are sorting those facets by their count, and the minimum count to return is &gt; 0,
-   * then allow the use of facet.mincount = 1 in cloud mode. To enable this use facet.distrib.mco=true.
-   *
-   * i.e. If the following three conditions are met in cloud mode: facet.sort=count, facet.limit &gt; 0, facet.mincount &gt; 0.
-   * Then use facet.mincount=1.
-   *
-   * Previously and by default facet.mincount will be explicitly set to 0 when in cloud mode for this condition.
-   * In SOLR-8599 and SOLR-8988, significant performance increase has been seen when enabling this optimization.
-   *
-   * Note: enabling this flag has no effect when the conditions above are not met. For those other cases the default behavior is sufficient.
-   */
-
-  public static final String FACET_DISTRIB_MCO = FACET_DISTRIB + ".mco";
-  
   /**
    * Comma separated list of fields to pivot
    * 
@@ -174,6 +156,11 @@ public interface FacetParams {
    * Only return constraints of a facet field containing the given string.
    */
   public static final String FACET_CONTAINS = FACET + ".contains";
+
+  /**
+   * Only return constraints of a facet field containing the given string.
+   */
+  public static final String FACET_MATCHES = FACET + ".matches";
 
   /**
    * If using facet contains, ignore case when comparing values.
@@ -244,7 +231,7 @@ public interface FacetParams {
   /**
    * <p>
    * Multivalued string indicating what rules should be applied to determine 
-   * when the the ranges generated for date faceting should be inclusive or 
+   * when the ranges generated for date faceting should be inclusive or 
    * exclusive of their end points.
    * </p>
    * <p>
@@ -303,7 +290,7 @@ public interface FacetParams {
   /**
    * <p>
    * Multivalued string indicating what rules should be applied to determine 
-   * when the the ranges generated for numeric faceting should be inclusive or 
+   * when the ranges generated for numeric faceting should be inclusive or 
    * exclusive of their end points.
    * </p>
    * <p>

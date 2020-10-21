@@ -21,13 +21,18 @@ import java.io.IOException;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableMap;
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
+import org.apache.solr.client.solrj.impl.BinaryRequestWriter;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest.Create;
+import org.apache.solr.common.util.ContentStreamBase;
 import org.apache.solr.common.util.Utils;
+import org.junit.Test;
 
-public class TestV1toV2ApiMapper extends LuceneTestCase {
+public class TestV1toV2ApiMapper extends SolrTestCase {
 
-  public void testCommands() throws IOException {
+  @Test
+  // commented out on: 24-Dec-2018   @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // added 20-Sep-2018
+  public void testCreate() throws IOException {
     Create cmd = CollectionAdminRequest
         .createCollection("mycoll", "conf1", 3, 2)
         .setProperties(ImmutableMap.<String,String>builder()
@@ -35,21 +40,33 @@ public class TestV1toV2ApiMapper extends LuceneTestCase {
             .put("p2","v2")
             .build());
     V2Request v2r = V1toV2ApiMapper.convert(cmd).build();
-    Map m = (Map) Utils.fromJSON(v2r.getContentStreams().iterator().next().getStream());
+    Map<?,?> m = (Map<?,?>) Utils.fromJSON(ContentStreamBase.create(new BinaryRequestWriter(), v2r).getStream());
     assertEquals("/c", v2r.getPath());
     assertEquals("v1", Utils.getObjectByPath(m,true,"/create/properties/p1"));
     assertEquals("v2", Utils.getObjectByPath(m,true,"/create/properties/p2"));
     assertEquals("3", Utils.getObjectByPath(m,true,"/create/numShards"));
     assertEquals("2", Utils.getObjectByPath(m,true,"/create/nrtReplicas"));
+  }
 
+  @Test
+  // commented out on: 24-Dec-2018   @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // added 20-Sep-2018
+  public void testAddReplica() throws IOException {
     CollectionAdminRequest.AddReplica addReplica = CollectionAdminRequest.addReplicaToShard("mycoll", "shard1");
-    v2r = V1toV2ApiMapper.convert(addReplica).build();
-    m = (Map) Utils.fromJSON(v2r.getContentStreams().iterator().next().getStream());
+    V2Request v2r = V1toV2ApiMapper.convert(addReplica).build();
+    Map<?,?> m = (Map<?,?>) Utils.fromJSON(ContentStreamBase.create(new BinaryRequestWriter(), v2r).getStream());
     assertEquals("/c/mycoll/shards", v2r.getPath());
     assertEquals("shard1", Utils.getObjectByPath(m,true,"/add-replica/shard"));
     assertEquals("NRT", Utils.getObjectByPath(m,true,"/add-replica/type"));
+  }
 
-
-
+  @Test
+  // commented out on: 24-Dec-2018   @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // added 20-Sep-2018
+  public void testSetCollectionProperty() throws IOException {
+    CollectionAdminRequest.CollectionProp collectionProp = CollectionAdminRequest.setCollectionProperty("mycoll", "prop", "value");
+    V2Request v2r = V1toV2ApiMapper.convert(collectionProp).build();
+    Map<?,?> m = (Map<?,?>) Utils.fromJSON(ContentStreamBase.create(new BinaryRequestWriter(), v2r).getStream());
+    assertEquals("/c/mycoll", v2r.getPath());
+    assertEquals("prop", Utils.getObjectByPath(m,true,"/set-collection-property/name"));
+    assertEquals("value", Utils.getObjectByPath(m,true,"/set-collection-property/value"));
   }
 }

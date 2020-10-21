@@ -19,9 +19,9 @@ package org.apache.lucene.codecs;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.Reader;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
@@ -33,6 +33,7 @@ import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.IndexableFieldType;
 import org.apache.lucene.index.MergeState;
 import org.apache.lucene.index.StoredFieldVisitor;
+import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.BytesRef;
 
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
@@ -51,7 +52,7 @@ import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
  * 
  * @lucene.experimental
  */
-public abstract class StoredFieldsWriter implements Closeable {
+public abstract class StoredFieldsWriter implements Closeable, Accountable {
   
   /** Sole constructor. (For invocation by subclass 
    *  constructors, typically implicit.) */
@@ -180,10 +181,9 @@ public abstract class StoredFieldsWriter implements Closeable {
     }
 
     @Override
-    public void stringField(FieldInfo fieldInfo, byte[] value) throws IOException {
+    public void stringField(FieldInfo fieldInfo, String value) throws IOException {
       reset(fieldInfo);
-      // TODO: can we avoid new String here?
-      stringValue = new String(value, StandardCharsets.UTF_8);
+      stringValue = Objects.requireNonNull(value, "String value should not be null");
       write();
     }
 

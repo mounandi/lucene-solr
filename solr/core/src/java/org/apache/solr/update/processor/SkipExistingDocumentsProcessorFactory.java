@@ -85,6 +85,7 @@ import static org.apache.solr.update.processor.DistributingUpdateProcessorFactor
  *   &lt;processor class="solr.RunUpdateProcessorFactory" /&gt;
  * &lt;/updateRequestProcessorChain&gt;
  * </pre>
+ * @since 6.4.0
  */
 public class SkipExistingDocumentsProcessorFactory extends UpdateRequestProcessorFactory implements SolrCoreAware, UpdateRequestProcessorFactory.RunAlways {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -96,7 +97,7 @@ public class SkipExistingDocumentsProcessorFactory extends UpdateRequestProcesso
   private boolean skipUpdateIfMissing = true;
 
   @Override
-  public void init(NamedList args)  {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args)  {
     Object tmp = args.remove(PARAM_SKIP_INSERT_IF_EXISTS);
     if (null != tmp) {
       if (! (tmp instanceof Boolean) ) {
@@ -215,7 +216,8 @@ public class SkipExistingDocumentsProcessorFactory extends UpdateRequestProcesso
       if (phase == DistributedUpdateProcessor.DistribPhase.FROMLEADER) {
         return false;
       }
-      return distribProc.isLeader(cmd);
+      distribProc.setupRequest(cmd);
+      return distribProc.isLeader();
     }
 
     @Override

@@ -50,6 +50,9 @@ import static org.apache.solr.common.params.CommonParams.Q;
 import static org.apache.solr.common.params.CommonParams.ROWS;
 
 
+/**
+ * @since 7.0.0
+ */
 public class KnnStream extends TupleStream implements Expressible  {
 
   private static String[] mltParams = {"qf", "mintf", "mindf", "maxdf", "minwl", "maxwl", "maxqt", "maxntp", "boost"};
@@ -180,7 +183,7 @@ public class KnnStream extends TupleStream implements Expressible  {
   }
 
   public List<TupleStream> children() {
-    List<TupleStream> l =  new ArrayList();
+    List<TupleStream> l =  new ArrayList<>();
     return l;
   }
 
@@ -192,7 +195,7 @@ public class KnnStream extends TupleStream implements Expressible  {
 
     for(String key : mltParams) {
       if(params.get(key) != null) {
-        builder.append(" " + key + "=" + params.get(key));
+        builder.append(' ').append(key).append('=').append(params.get(key));
         params.remove(key);
       }
     }
@@ -222,25 +225,22 @@ public class KnnStream extends TupleStream implements Expressible  {
 
   public Tuple read() throws IOException {
     if(documentIterator.hasNext()) {
-      Map map = new HashMap();
+      Tuple tuple = new Tuple();
       SolrDocument doc = documentIterator.next();
-      for(String key  : doc.keySet()) {
-        map.put(key, doc.get(key));
+      for(Entry<String, Object> entry : doc.entrySet()) {
+        tuple.put(entry.getKey(), entry.getValue());
       }
-      return new Tuple(map);
-    } else {
-      Map fields = new HashMap();
-      fields.put("EOF", true);
-      Tuple tuple = new Tuple(fields);
       return tuple;
+    } else {
+      return Tuple.EOF();
     }
   }
 
   private ModifiableSolrParams getParams(Map<String, String> props) {
     ModifiableSolrParams params = new ModifiableSolrParams();
-    for(String key : props.keySet()) {
-      String value = props.get(key);
-      params.add(key, value);
+    for(Entry<String, String> entry : props.entrySet()) {
+      String value = entry.getValue();
+      params.add(entry.getKey(), value);
     }
     return params;
   }

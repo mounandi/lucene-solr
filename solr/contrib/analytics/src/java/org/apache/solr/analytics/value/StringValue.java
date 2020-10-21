@@ -19,6 +19,7 @@ package org.apache.solr.analytics.value;
 import java.util.function.Consumer;
 
 import org.apache.solr.analytics.facet.compare.ExpressionComparator;
+import org.apache.solr.analytics.value.constant.ConstantStringValue;
 
 /**
  * A single-valued analytics value that can be represented as a string.
@@ -31,13 +32,13 @@ public interface StringValue extends StringValueStream, AnalyticsValue {
    * Get the String representation of the current value.
    * <p>
    * NOTE: The value returned is not valid unless calling {@link #exists()} afterwards returns {@code TRUE}.
-   * 
+   *
    * @return the current value
    */
   String getString();
 
   /**
-   * An interface that represents all of the types a {@link StringValue} should be able to cast to. 
+   * An interface that represents all of the types a {@link StringValue} should be able to cast to.
    */
   public static interface CastingStringValue extends StringValue, ComparableValue {}
 
@@ -62,6 +63,13 @@ public interface StringValue extends StringValueStream, AnalyticsValue {
       if (exists()) {
         func.accept(val);
       }
+    }
+    @Override
+    public AnalyticsValue convertToConstant() {
+      if (getExpressionType().equals(ExpressionType.CONST)) {
+        return new ConstantStringValue(getString());
+      }
+      return this;
     }
     @Override
     public ExpressionComparator<String> getObjectComparator(String expression) {

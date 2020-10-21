@@ -112,7 +112,7 @@ import com.carrotsearch.randomizedtesting.SeedUtils;
  */
 
 // MockRandom's .sd file has no index header/footer:
-@SuppressCodecs({"MockRandom", "Memory", "Direct", "SimpleText"})
+@SuppressCodecs({"MockRandom", "Direct", "SimpleText"})
 @SuppressSysoutChecks(bugUrl = "Stuff gets printed, important stuff for debugging a failure")
 public class TestStressNRTReplication extends LuceneTestCase {
 
@@ -1057,9 +1057,9 @@ public class TestStressNRTReplication extends LuceneTestCase {
 
     @Override
     public void run() {
-
+      LineFileDocs docs=null;
       try {
-        LineFileDocs docs = new LineFileDocs(random());
+        docs = new LineFileDocs(random());
         int docCount = 0;
 
         // How often we do an update/delete vs add:
@@ -1175,6 +1175,8 @@ public class TestStressNRTReplication extends LuceneTestCase {
         failed.set(true);
         stop.set(true);
         throw new RuntimeException(t);
+      } finally {
+        IOUtils.closeWhileHandlingException(docs);
       }
     }
   }

@@ -25,10 +25,9 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.impl.BaseHttpSolrClient;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
-import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.client.solrj.request.UpdateRequest;
@@ -98,7 +97,7 @@ public class DistribJoinFromCollectionTest extends SolrCloudTestCase{
 
     // deploy the "from" collection to all nodes where the "to" collection exists
     CollectionAdminRequest.createCollection(fromColl, configName, 1, 4)
-        .setCreateNodeSet(StringUtils.join(nodeSet, ","))
+        .setCreateNodeSet(String.join(",", nodeSet))
         .setProperties(collectionProperties)
         .process(cluster.getSolrClient());
 
@@ -112,19 +111,19 @@ public class DistribJoinFromCollectionTest extends SolrCloudTestCase{
   @Test
   public void testScore() throws Exception {
     //without score
-    testJoins(toColl, fromColl, toDocId, false);
+    testJoins(toColl, fromColl, toDocId, true);
   }
   
   @Test
   public void testNoScore() throws Exception {
     //with score
-    testJoins(toColl, fromColl, toDocId, true);
+    testJoins(toColl, fromColl, toDocId, false);
     
   }
   
   @AfterClass
   public static void shutdown() {
-    log.info("DistribJoinFromCollectionTest logic complete ... deleting the " + toColl + " and " + fromColl + " collections");
+    log.info("DistribJoinFromCollectionTest logic complete ... deleting the {} and {} collections", toColl, fromColl);
 
     // try to clean up
     for (String c : new String[]{ toColl, fromColl }) {
@@ -133,7 +132,7 @@ public class DistribJoinFromCollectionTest extends SolrCloudTestCase{
         req.process(cluster.getSolrClient());
       } catch (Exception e) {
         // don't fail the test
-        log.warn("Could not delete collection {} after test completed due to: " + e, c);
+        log.warn("Could not delete collection {} after test completed due to:", c, e);
       }
     }
 
@@ -141,7 +140,7 @@ public class DistribJoinFromCollectionTest extends SolrCloudTestCase{
   }
 
   private void testJoins(String toColl, String fromColl, String toDocId, boolean isScoresTest)
-      throws SolrServerException, IOException {
+      throws SolrServerException, IOException, InterruptedException {
     // verify the join with fromIndex works
     final String fromQ = "match_s:c^2";
     CloudSolrClient client = cluster.getSolrClient();
@@ -164,8 +163,7 @@ public class DistribJoinFromCollectionTest extends SolrCloudTestCase{
 
     // create an alias for the fromIndex and then query through the alias
     String alias = fromColl+"Alias";
-    CollectionAdminRequest.CreateAlias request = CollectionAdminRequest.createAlias(alias,fromColl);
-    request.process(client);
+    CollectionAdminRequest.createAlias(alias, fromColl).process(client);
 
     {
       final String joinQ = "{!join " + anyScoreMode(isScoresTest)
@@ -213,7 +211,7 @@ public class DistribJoinFromCollectionTest extends SolrCloudTestCase{
     final QueryRequest qr = new QueryRequest(params("collection", toColl, "q", joinQ, "fl", "id,get_s,score"));
     try {
       cluster.getSolrClient().request(qr);
-    } catch (HttpSolrClient.RemoteSolrException ex) {
+    } catch (BaseHttpSolrClient.RemoteSolrException ex) {
       assertEquals(SolrException.ErrorCode.BAD_REQUEST.code, ex.code());
       assertTrue(ex.getMessage().contains(wrongName));
     }

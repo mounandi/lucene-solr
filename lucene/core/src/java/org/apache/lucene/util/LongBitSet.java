@@ -26,7 +26,8 @@ import java.util.Arrays;
  * 
  * @lucene.internal
  */
-public final class LongBitSet {
+public final class LongBitSet implements Accountable {
+  private static final long BASE_RAM_BYTES = RamUsageEstimator.shallowSizeOfInstance(LongBitSet.class);
 
   private final long[] bits; // Array of longs holding the bits 
   private final long numBits; // The number of bits in use
@@ -55,9 +56,15 @@ public final class LongBitSet {
       return new LongBitSet(arr, (long)arr.length << 6);
     }
   }
+
+  /** The maximum {@code numBits} supported. */
+  public static final long MAX_NUM_BITS = 64 * (long) ArrayUtil.MAX_ARRAY_LENGTH;
   
-  /** returns the number of 64 bit words it would take to hold numBits */
+  /** Returns the number of 64 bit words it would take to hold numBits */
   public static int bits2words(long numBits) {
+    if (numBits < 0 || numBits > MAX_NUM_BITS) {
+      throw new IllegalArgumentException("numBits must be 0 .. " + MAX_NUM_BITS + "; got: " + numBits);
+    }
     return (int)((numBits - 1) >> 6) + 1; // I.e.: get the word-offset of the last bit and add one (make sure to use >> so 0 returns 0!)
   }
   
@@ -421,5 +428,11 @@ public final class LongBitSet {
     // fold leftmost bits into right and add a constant to prevent
     // empty sets from returning 0, which is too common.
     return (int) ((h>>32) ^ h) + 0x98761234;
+  }
+
+  @Override
+  public long ramBytesUsed() {
+    return BASE_RAM_BYTES +
+        RamUsageEstimator.sizeOfObject(bits);
   }
 }

@@ -20,16 +20,27 @@ package org.apache.lucene.analysis.miscellaneous;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link FixBrokenOffsetsFilter}.
+ * @since 7.0.0
+ * @lucene.spi {@value #NAME}
  */
+@Deprecated
 public class FixBrokenOffsetsFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "fixBrokenOffsets";
 
   /** Sole constructor */
   public FixBrokenOffsetsFilterFactory(Map<String,String> args) {
     super(args);
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public FixBrokenOffsetsFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

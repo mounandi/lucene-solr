@@ -21,6 +21,7 @@ import java.util.function.DoubleConsumer;
 
 import org.apache.solr.analytics.facet.compare.ExpressionComparator;
 import org.apache.solr.analytics.util.function.FloatConsumer;
+import org.apache.solr.analytics.value.constant.ConstantFloatValue;
 
 /**
  * A single-valued analytics value that can be represented as a float.
@@ -33,13 +34,13 @@ public interface FloatValue extends FloatValueStream, AnalyticsValue {
    * Get the float representation of the current value.
    * <p>
    * NOTE: The value returned is not valid unless calling {@link #exists()} afterwards returns {@code TRUE}.
-   * 
+   *
    * @return the current value
    */
   float getFloat();
 
   /**
-   * An interface that represents all of the types a {@link FloatValue} should be able to cast to. 
+   * An interface that represents all of the types a {@link FloatValue} should be able to cast to.
    */
   public static interface CastingFloatValue extends FloatValue, DoubleValue, StringValue, ComparableValue {}
 
@@ -88,6 +89,13 @@ public interface FloatValue extends FloatValueStream, AnalyticsValue {
       if (exists()) {
         cons.accept(val);
       }
+    }
+    @Override
+    public AnalyticsValue convertToConstant() {
+      if (getExpressionType().equals(ExpressionType.CONST)) {
+        return new ConstantFloatValue(getFloat());
+      }
+      return this;
     }
     @Override
     public ExpressionComparator<Float> getObjectComparator(String expression) {

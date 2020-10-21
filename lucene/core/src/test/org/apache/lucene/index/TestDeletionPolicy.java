@@ -216,6 +216,8 @@ public class TestDeletionPolicy extends LuceneTestCase {
   /*
    * Test "by time expiration" deletion policy:
    */
+  // TODO: this wall-clock-dependent test doesn't seem to actually test any deletionpolicy logic?
+  @Nightly
   public void testExpirationTimeDeletionPolicy() throws IOException, InterruptedException {
 
     final double SECONDS = 2.0;
@@ -427,7 +429,7 @@ public class TestDeletionPolicy extends LuceneTestCase {
     writer = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random()))
                                     .setIndexDeletionPolicy(policy));
     addDoc(writer);
-    assertEquals(11, writer.numDocs());
+    assertEquals(11, writer.getDocStats().numDocs);
     writer.forceMerge(1);
     writer.close();
 
@@ -437,7 +439,7 @@ public class TestDeletionPolicy extends LuceneTestCase {
     writer = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random()))
                                     .setIndexDeletionPolicy(policy)
                                     .setIndexCommit(lastCommit));
-    assertEquals(10, writer.numDocs());
+    assertEquals(10, writer.getDocStats().numDocs);
 
     // Should undo our rollback:
     writer.rollback();
@@ -451,7 +453,7 @@ public class TestDeletionPolicy extends LuceneTestCase {
     writer = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random()))
                                     .setIndexDeletionPolicy(policy)
                                     .setIndexCommit(lastCommit));
-    assertEquals(10, writer.numDocs());
+    assertEquals(10, writer.getDocStats().numDocs);
     // Commits the rollback:
     writer.close();
 
@@ -480,7 +482,7 @@ public class TestDeletionPolicy extends LuceneTestCase {
     // but this time keeping only the last commit:
     writer = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random()))
                                     .setIndexCommit(lastCommit));
-    assertEquals(10, writer.numDocs());
+    assertEquals(10, writer.getDocStats().numDocs);
     
     // Reader still sees fully merged index, because writer
     // opened on the prior commit has not yet committed:

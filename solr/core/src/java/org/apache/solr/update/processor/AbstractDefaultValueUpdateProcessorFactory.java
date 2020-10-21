@@ -37,6 +37,7 @@ import org.apache.solr.update.AddUpdateCommand;
  * subclasses may choose to return from their <code>getInstance</code> 
  * implementation.
  * </p>
+ * @since 4.0.0
  */
 public abstract class AbstractDefaultValueUpdateProcessorFactory
   extends UpdateRequestProcessorFactory {
@@ -45,7 +46,7 @@ public abstract class AbstractDefaultValueUpdateProcessorFactory
 
   @SuppressWarnings("unchecked")
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
 
     Object obj = args.remove("fieldName");
     if (null == obj && null == fieldName) {

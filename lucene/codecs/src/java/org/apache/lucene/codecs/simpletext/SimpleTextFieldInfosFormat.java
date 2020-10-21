@@ -30,6 +30,7 @@ import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexFileNames;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.SegmentInfo;
+import org.apache.lucene.index.VectorValues;
 import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
@@ -64,8 +65,12 @@ public class SimpleTextFieldInfosFormat extends FieldInfosFormat {
   static final BytesRef NUM_ATTS        =  new BytesRef("  attributes ");
   static final BytesRef ATT_KEY         =  new BytesRef("    key ");
   static final BytesRef ATT_VALUE       =  new BytesRef("    value ");
-  static final BytesRef DIM_COUNT       =  new BytesRef("  dimensional count ");
+  static final BytesRef DATA_DIM_COUNT  =  new BytesRef("  data dimensional count ");
+  static final BytesRef INDEX_DIM_COUNT =  new BytesRef("  index dimensional count ");
   static final BytesRef DIM_NUM_BYTES   =  new BytesRef("  dimensional num bytes ");
+  static final BytesRef VECTOR_NUM_DIMS =  new BytesRef("  vector number of dimensions ");
+  static final BytesRef VECTOR_SCORE_FUNC = new BytesRef("  vector score function ");
+  static final BytesRef SOFT_DELETES    =  new BytesRef("  soft-deletes ");
   
   @Override
   public FieldInfos read(Directory directory, SegmentInfo segmentInfo, String segmentSuffix, IOContext iocontext) throws IOException {
@@ -133,16 +138,34 @@ public class SimpleTextFieldInfosFormat extends FieldInfosFormat {
         }
 
         SimpleTextUtil.readLine(input, scratch);
-        assert StringHelper.startsWith(scratch.get(), DIM_COUNT);
-        int dimensionalCount = Integer.parseInt(readString(DIM_COUNT.length, scratch));
+        assert StringHelper.startsWith(scratch.get(), DATA_DIM_COUNT);
+        int dimensionalCount = Integer.parseInt(readString(DATA_DIM_COUNT.length, scratch));
+
+        SimpleTextUtil.readLine(input, scratch);
+        assert StringHelper.startsWith(scratch.get(), INDEX_DIM_COUNT);
+        int indexDimensionalCount = Integer.parseInt(readString(INDEX_DIM_COUNT.length, scratch));
 
         SimpleTextUtil.readLine(input, scratch);
         assert StringHelper.startsWith(scratch.get(), DIM_NUM_BYTES);
         int dimensionalNumBytes = Integer.parseInt(readString(DIM_NUM_BYTES.length, scratch));
 
+        SimpleTextUtil.readLine(input, scratch);
+        assert StringHelper.startsWith(scratch.get(), VECTOR_NUM_DIMS);
+        int vectorNumDimensions = Integer.parseInt(readString(VECTOR_NUM_DIMS.length, scratch));
+
+        SimpleTextUtil.readLine(input, scratch);
+        assert StringHelper.startsWith(scratch.get(), VECTOR_SCORE_FUNC);
+        String scoreFunction = readString(VECTOR_SCORE_FUNC.length, scratch);
+        VectorValues.ScoreFunction vectorDistFunc = distanceFunction(scoreFunction);
+
+        SimpleTextUtil.readLine(input, scratch);
+        assert StringHelper.startsWith(scratch.get(), SOFT_DELETES);
+        boolean isSoftDeletesField = Boolean.parseBoolean(readString(SOFT_DELETES.length, scratch));
+
         infos[i] = new FieldInfo(name, fieldNumber, storeTermVector, 
                                  omitNorms, storePayloads, indexOptions, docValuesType, dvGen, Collections.unmodifiableMap(atts),
-                                 dimensionalCount, dimensionalNumBytes);
+                                 dimensionalCount, indexDimensionalCount, dimensionalNumBytes,
+                                 vectorNumDimensions, vectorDistFunc, isSoftDeletesField);
       }
 
       SimpleTextUtil.checkFooter(input);
@@ -161,6 +184,10 @@ public class SimpleTextFieldInfosFormat extends FieldInfosFormat {
 
   public DocValuesType docValuesType(String dvType) {
     return DocValuesType.valueOf(dvType);
+  }
+
+  public VectorValues.ScoreFunction distanceFunction(String scoreFunction) {
+    return VectorValues.ScoreFunction.valueOf(scoreFunction);
   }
   
   private String readString(int offset, BytesRefBuilder scratch) {
@@ -231,12 +258,28 @@ public class SimpleTextFieldInfosFormat extends FieldInfosFormat {
           }
         }
 
-        SimpleTextUtil.write(out, DIM_COUNT);
+        SimpleTextUtil.write(out, DATA_DIM_COUNT);
         SimpleTextUtil.write(out, Integer.toString(fi.getPointDimensionCount()), scratch);
+        SimpleTextUtil.writeNewline(out);
+
+        SimpleTextUtil.write(out, INDEX_DIM_COUNT);
+        SimpleTextUtil.write(out, Integer.toString(fi.getPointIndexDimensionCount()), scratch);
         SimpleTextUtil.writeNewline(out);
         
         SimpleTextUtil.write(out, DIM_NUM_BYTES);
         SimpleTextUtil.write(out, Integer.toString(fi.getPointNumBytes()), scratch);
+        SimpleTextUtil.writeNewline(out);
+
+        SimpleTextUtil.write(out, VECTOR_NUM_DIMS);
+        SimpleTextUtil.write(out, Integer.toString(fi.getVectorDimension()), scratch);
+        SimpleTextUtil.writeNewline(out);
+
+        SimpleTextUtil.write(out, VECTOR_SCORE_FUNC);
+        SimpleTextUtil.write(out, fi.getVectorScoreFunction().name(), scratch);
+        SimpleTextUtil.writeNewline(out);
+
+        SimpleTextUtil.write(out, SOFT_DELETES);
+        SimpleTextUtil.write(out, Boolean.toString(fi.isSoftDeletesField()), scratch);
         SimpleTextUtil.writeNewline(out);
       }
       SimpleTextUtil.writeChecksum(out, scratch);

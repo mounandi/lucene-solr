@@ -20,7 +20,7 @@ package org.apache.lucene.analysis.th;
 import java.util.Map;
 
 import org.apache.lucene.analysis.Tokenizer;
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.util.AttributeFactory;
 
 /** 
@@ -31,8 +31,14 @@ import org.apache.lucene.util.AttributeFactory;
  *     &lt;tokenizer class="solr.ThaiTokenizerFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 4.10.0
+ * @lucene.spi {@value #NAME}
  */
 public class ThaiTokenizerFactory extends TokenizerFactory {
+
+  /** SPI name */
+  public static final String NAME = "thai";
   
   /** Creates a new ThaiTokenizerFactory */
   public ThaiTokenizerFactory(Map<String,String> args) {
@@ -42,6 +48,11 @@ public class ThaiTokenizerFactory extends TokenizerFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public ThaiTokenizerFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public Tokenizer create(AttributeFactory factory) {
     return new ThaiTokenizer(factory);

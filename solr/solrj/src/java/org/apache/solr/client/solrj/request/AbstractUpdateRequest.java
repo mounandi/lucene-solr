@@ -116,6 +116,11 @@ public abstract class AbstractUpdateRequest extends SolrRequest<UpdateResponse> 
     return new UpdateResponse();
   }
 
+  @Override
+  public String getRequestType() {
+    return SolrRequestType.UPDATE.toString();
+  }
+
   public boolean isWaitSearcher() {
     return params != null && params.getBool(UpdateParams.WAIT_SEARCHER, false);
   }
@@ -135,8 +140,9 @@ public abstract class AbstractUpdateRequest extends SolrRequest<UpdateResponse> 
     return commitWithin;
   }
 
-  public void setCommitWithin(int commitWithin) {
+  public AbstractUpdateRequest setCommitWithin(int commitWithin) {
     this.commitWithin = commitWithin;
+    return this;
   }
 
 

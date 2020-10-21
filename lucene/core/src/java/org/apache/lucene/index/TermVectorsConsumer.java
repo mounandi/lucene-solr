@@ -21,21 +21,30 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
 
+import org.apache.lucene.codecs.Codec;
+import org.apache.lucene.codecs.NormsProducer;
 import org.apache.lucene.codecs.TermVectorsWriter;
+import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FlushInfo;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.ArrayUtil;
+import org.apache.lucene.util.ByteBlockPool;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.Counter;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.IntBlockPool;
 import org.apache.lucene.util.RamUsageEstimator;
 
 class TermVectorsConsumer extends TermsHash {
+  protected final Directory directory;
+  protected final SegmentInfo info;
+  protected final Codec codec;
   TermVectorsWriter writer;
 
   /** Scratch term used by TermVectorsConsumerPerField.finishDocument. */
   final BytesRef flushTerm = new BytesRef();
 
-  final DocumentsWriterPerThread docWriter;
 
   /** Used by TermVectorsConsumerPerField when serializing
    *  the term vectors. */
@@ -43,17 +52,22 @@ class TermVectorsConsumer extends TermsHash {
   final ByteSliceReader vectorSliceReaderOff = new ByteSliceReader();
 
   boolean hasVectors;
-  int numVectorFields;
+  private int numVectorFields;
   int lastDocID;
   private TermVectorsConsumerPerField[] perFields = new TermVectorsConsumerPerField[1];
+  // this accountable either holds the writer or one that returns null.
+  // it's cleaner than checking if the writer is null all over the place
+  Accountable accountable = Accountable.NULL_ACCOUNTABLE;
 
-  public TermVectorsConsumer(DocumentsWriterPerThread docWriter) {
-    super(docWriter, false, null);
-    this.docWriter = docWriter;
+  TermVectorsConsumer(final IntBlockPool.Allocator intBlockAllocator, final ByteBlockPool.Allocator byteBlockAllocator, Directory directory, SegmentInfo info, Codec codec) {
+    super(intBlockAllocator, byteBlockAllocator, Counter.newCounter(), null);
+    this.directory = directory;
+    this.info = info;
+    this.codec = codec;
   }
 
   @Override
-  void flush(Map<String, TermsHashPerField> fieldsToFlush, final SegmentWriteState state, Sorter.DocMap sortMap) throws IOException {
+  void flush(Map<String, TermsHashPerField> fieldsToFlush, final SegmentWriteState state, Sorter.DocMap sortMap, NormsProducer norms) throws IOException {
     if (writer != null) {
       int numDocs = state.segmentInfo.maxDoc();
       assert numDocs > 0;
@@ -64,9 +78,6 @@ class TermVectorsConsumer extends TermsHash {
         writer.finish(state.fieldInfos, numDocs);
       } finally {
         IOUtils.close(writer);
-        writer = null;
-        lastDocID = 0;
-        hasVectors = false;
       }
     }
   }
@@ -83,14 +94,15 @@ class TermVectorsConsumer extends TermsHash {
 
   void initTermVectorsWriter() throws IOException {
     if (writer == null) {
-      IOContext context = new IOContext(new FlushInfo(docWriter.getNumDocsInRAM(), docWriter.bytesUsed()));
-      writer = docWriter.codec.termVectorsFormat().vectorsWriter(docWriter.directory, docWriter.getSegmentInfo(), context);
+      IOContext context = new IOContext(new FlushInfo(lastDocID, bytesUsed.get()));
+      writer = codec.termVectorsFormat().vectorsWriter(directory, info, context);
       lastDocID = 0;
+      accountable = writer;
     }
   }
 
   @Override
-  void finishDocument() throws IOException {
+  void finishDocument(int docID) throws IOException {
 
     if (!hasVectors) {
       return;
@@ -101,7 +113,7 @@ class TermVectorsConsumer extends TermsHash {
 
     initTermVectorsWriter();
 
-    fill(docState.docID);
+    fill(docID);
 
     // Append term vectors to the real outputs:
     writer.startDocument(numVectorFields);
@@ -110,7 +122,7 @@ class TermVectorsConsumer extends TermsHash {
     }
     writer.finishDocument();
 
-    assert lastDocID == docState.docID: "lastDocID=" + lastDocID + " docState.docID=" + docState.docID;
+    assert lastDocID == docID: "lastDocID=" + lastDocID + " docID=" + docID;
 
     lastDocID++;
 
@@ -120,16 +132,10 @@ class TermVectorsConsumer extends TermsHash {
 
   @Override
   public void abort() {
-    hasVectors = false;
     try {
       super.abort();
     } finally {
-      if (writer != null) {
-        IOUtils.closeWhileHandlingException(writer);
-        writer = null;
-      }
-
-      lastDocID = 0;
+      IOUtils.closeWhileHandlingException(writer);
       reset();
     }
   }
@@ -160,4 +166,5 @@ class TermVectorsConsumer extends TermsHash {
     resetFields();
     numVectorFields = 0;
   }
+
 }

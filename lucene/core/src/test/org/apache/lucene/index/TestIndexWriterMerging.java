@@ -164,10 +164,10 @@ public class TestIndexWriterMerging extends LuceneTestCase {
 
     writer = new IndexWriter(dir, newIndexWriterConfig(new MockAnalyzer(random()))
                                     .setMergePolicy(newLogMergePolicy()));
-    assertEquals(8, writer.numDocs());
-    assertEquals(10, writer.maxDoc());
+    assertEquals(8, writer.getDocStats().numDocs);
+    assertEquals(10, writer.getDocStats().maxDoc);
     writer.forceMergeDeletes();
-    assertEquals(8, writer.numDocs());
+    assertEquals(8, writer.getDocStats().numDocs);
     writer.close();
     ir = DirectoryReader.open(dir);
     assertEquals(8, ir.maxDoc());
@@ -232,7 +232,7 @@ public class TestIndexWriterMerging extends LuceneTestCase {
         newIndexWriterConfig(new MockAnalyzer(random()))
           .setMergePolicy(newLogMergePolicy(3))
     );
-    assertEquals(49, writer.numDocs());
+    assertEquals(49, writer.getDocStats().numDocs);
     writer.forceMergeDeletes();
     writer.close();
     ir = DirectoryReader.open(dir);
@@ -310,10 +310,10 @@ public class TestIndexWriterMerging extends LuceneTestCase {
   // merging a segment with >= 20 (maxMergeDocs) docs
   private static class MyMergeScheduler extends MergeScheduler {
     @Override
-    synchronized public void merge(IndexWriter writer, MergeTrigger trigger, boolean newMergesFound) throws IOException {
+    synchronized public void merge(MergeSource mergeSource, MergeTrigger trigger) throws IOException {
 
       while(true) {
-        MergePolicy.OneMerge merge = writer.getNextMerge();
+        MergePolicy.OneMerge merge = mergeSource.getNextMerge();
         if (merge == null) {
           break;
         }
@@ -323,7 +323,7 @@ public class TestIndexWriterMerging extends LuceneTestCase {
           numDocs += maxDoc;
           assertTrue(maxDoc < 20);
         }
-        writer.merge(merge);
+        mergeSource.merge(merge);
         assertEquals(numDocs, merge.getMergeInfo().info.maxDoc());
       }
     }
@@ -383,7 +383,7 @@ public class TestIndexWriterMerging extends LuceneTestCase {
       IndexWriter writer = new IndexWriter(directory, conf);
       ((LogMergePolicy) writer.getConfig().getMergePolicy()).setMergeFactor(100);          
 
-      for(int iter=0;iter<10;iter++) {
+      for(int iter=0;iter<atLeast(3);iter++) {
         if (VERBOSE) {
           System.out.println("TEST: iter=" + iter);
         }

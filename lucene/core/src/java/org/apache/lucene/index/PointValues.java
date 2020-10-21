@@ -19,16 +19,17 @@ package org.apache.lucene.index;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.net.InetAddress;
+import java.util.Arrays;
 
 import org.apache.lucene.document.BinaryPoint;
 import org.apache.lucene.document.DoublePoint;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FloatPoint;
 import org.apache.lucene.document.IntPoint;
+import org.apache.lucene.document.LatLonPoint;
 import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.search.DocIdSetIterator;
-import org.apache.lucene.util.StringHelper;
-import org.apache.lucene.util.bkd.BKDWriter;
+import org.apache.lucene.util.bkd.BKDConfig;
 
 /** 
  * Access to indexed numeric values.
@@ -37,8 +38,9 @@ import org.apache.lucene.util.bkd.BKDWriter;
  * points are indexed with datastructures such as <a href="https://en.wikipedia.org/wiki/K-d_tree">KD-trees</a>. 
  * These structures are optimized for operations such as <i>range</i>, <i>distance</i>, <i>nearest-neighbor</i>, 
  * and <i>point-in-polygon</i> queries. 
- * <h1>Basic Point Types</h1>
- * <table summary="Basic point types in Java and Lucene">
+ * <h2>Basic Point Types</h2>
+ * <table>
+ *   <caption>Basic point types in Java and Lucene</caption>
  *   <tr><th>Java type</th><th>Lucene class</th></tr>
  *   <tr><td>{@code int}</td><td>{@link IntPoint}</td></tr>
  *   <tr><td>{@code long}</td><td>{@link LongPoint}</td></tr>
@@ -64,17 +66,17 @@ import org.apache.lucene.util.bkd.BKDWriter;
  *   Query query = IntPoint.newRangeQuery("year", 1960, 1980);
  *   TopDocs docs = searcher.search(query, ...);
  * </pre>
- * <h1>Geospatial Point Types</h1>
+ * <h2>Geospatial Point Types</h2>
  * Although basic point types such as {@link DoublePoint} support points in multi-dimensional space too, Lucene has
  * specialized classes for location data. These classes are optimized for location data: they are more space-efficient and 
  * support special operations such as <i>distance</i> and <i>polygon</i> queries. There are currently two implementations:
  * <br>
  * <ol>
- *   <li><a href="{@docRoot}/../sandbox/org/apache/lucene/document/LatLonPoint.html">LatLonPoint</a> in <i>lucene-sandbox</i>: indexes {@code (latitude,longitude)} as {@code (x,y)} in two-dimensional space.
+ *   <li>{@link LatLonPoint}: indexes {@code (latitude,longitude)} as {@code (x,y)} in two-dimensional space.
  *   <li><a href="{@docRoot}/../spatial3d/org/apache/lucene/spatial3d/Geo3DPoint.html">Geo3DPoint</a>* in <i>lucene-spatial3d</i>: indexes {@code (latitude,longitude)} as {@code (x,y,z)} in three-dimensional space.
  * </ol>
  * * does <b>not</b> support altitude, 3D here means "uses three dimensions under-the-hood"<br>
- * <h1>Advanced usage</h1>
+ * <h2>Advanced usage</h2>
  * Custom structures can be created on top of single- or multi- dimensional basic types, on top of 
  * {@link BinaryPoint} for more flexibility, or via custom {@link Field} subclasses.
  *
@@ -85,7 +87,10 @@ public abstract class PointValues {
   public static final int MAX_NUM_BYTES = 16;
 
   /** Maximum number of dimensions */
-  public static final int MAX_DIMENSIONS = BKDWriter.MAX_DIMS;
+  public static final int MAX_DIMENSIONS = BKDConfig.MAX_DIMS;
+
+  /** Maximum number of index dimensions */
+  public static final int MAX_INDEX_DIMENSIONS = BKDConfig.MAX_INDEX_DIMS;
 
   /** Return the cumulated number of points across all leaves of the given
    * {@link IndexReader}. Leaves that do not have points for the given field
@@ -135,11 +140,11 @@ public abstract class PointValues {
       if (minValue == null) {
         minValue = leafMinValue.clone();
       } else {
-        final int numDimensions = values.getNumDimensions();
+        final int numDimensions = values.getNumIndexDimensions();
         final int numBytesPerDimension = values.getBytesPerDimension();
         for (int i = 0; i < numDimensions; ++i) {
           int offset = i * numBytesPerDimension;
-          if (StringHelper.compare(numBytesPerDimension, leafMinValue, offset, minValue, offset) < 0) {
+          if (Arrays.compareUnsigned(leafMinValue, offset, offset + numBytesPerDimension, minValue, offset, offset + numBytesPerDimension) < 0) {
             System.arraycopy(leafMinValue, offset, minValue, offset, numBytesPerDimension);
           }
         }
@@ -166,11 +171,11 @@ public abstract class PointValues {
       if (maxValue == null) {
         maxValue = leafMaxValue.clone();
       } else {
-        final int numDimensions = values.getNumDimensions();
+        final int numDimensions = values.getNumIndexDimensions();
         final int numBytesPerDimension = values.getBytesPerDimension();
         for (int i = 0; i < numDimensions; ++i) {
           int offset = i * numBytesPerDimension;
-          if (StringHelper.compare(numBytesPerDimension, leafMaxValue, offset, maxValue, offset) > 0) {
+          if (Arrays.compareUnsigned(leafMaxValue, offset, offset + numBytesPerDimension, maxValue, offset, offset + numBytesPerDimension) > 0) {
             System.arraycopy(leafMaxValue, offset, maxValue, offset, numBytesPerDimension);
           }
         }
@@ -207,6 +212,16 @@ public abstract class PointValues {
      *  docID order. */
     void visit(int docID, byte[] packedValue) throws IOException;
 
+    /** Similar to {@link IntersectVisitor#visit(int, byte[])} but in this case the packedValue
+     * can have more than one docID associated to it. The provided iterator should not escape the
+     * scope of this method so that implementations of PointValues are free to reuse it,*/
+    default void visit(DocIdSetIterator iterator, byte[] packedValue) throws IOException {
+      int docID;
+      while ((docID = iterator.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+        visit(docID, packedValue);
+      }
+    }
+
     /** Called for non-leaf cells to test how the cell relates to the query, to
      *  determine how to further recurse down the tree. */
     Relation compare(byte[] minPackedValue, byte[] maxPackedValue);
@@ -222,9 +237,35 @@ public abstract class PointValues {
 
   /** Estimate the number of points that would be visited by {@link #intersect}
    * with the given {@link IntersectVisitor}. This should run many times faster
+   * than {@link #intersect(IntersectVisitor)}. */
+  public abstract long estimatePointCount(IntersectVisitor visitor);
+
+  /** Estimate the number of documents that would be matched by {@link #intersect}
+   * with the given {@link IntersectVisitor}. This should run many times faster
    * than {@link #intersect(IntersectVisitor)}.
    * @see DocIdSetIterator#cost */
-  public abstract long estimatePointCount(IntersectVisitor visitor);
+  public long estimateDocCount(IntersectVisitor visitor) {
+    long estimatedPointCount = estimatePointCount(visitor);
+    int docCount = getDocCount();
+    double size = size();
+    if (estimatedPointCount >= size) {
+      // math all docs
+      return docCount;
+    } else if (size == docCount || estimatedPointCount == 0L ) {
+      // if the point count estimate is 0 or we have only single values
+      // return this estimate
+      return  estimatedPointCount;
+    } else {
+      // in case of multi values estimate the number of docs using the solution provided in
+      // https://math.stackexchange.com/questions/1175295/urn-problem-probability-of-drawing-balls-of-k-unique-colors
+      // then approximate the solution for points per doc << size() which results in the expression
+      // D * (1 - ((N - n) / N)^(N/D))
+      // where D is the total number of docs, N the total number of points and n the estimated point count
+      long docEstimate = (long) (docCount * (1d - Math.pow((size - estimatedPointCount) / size, size / docCount)));
+      return docEstimate == 0L ? 1L : docEstimate;
+    }
+  }
+
 
   /** Returns minimum value for each dimension, packed, or null if {@link #size} is <code>0</code> */
   public abstract byte[] getMinPackedValue() throws IOException;
@@ -232,8 +273,11 @@ public abstract class PointValues {
   /** Returns maximum value for each dimension, packed, or null if {@link #size} is <code>0</code> */
   public abstract byte[] getMaxPackedValue() throws IOException;
 
-  /** Returns how many dimensions were indexed */
+  /** Returns how many dimensions are represented in the values */
   public abstract int getNumDimensions() throws IOException;
+
+  /** Returns how many dimensions are used for the index */
+  public abstract int getNumIndexDimensions() throws IOException;
 
   /** Returns the number of bytes per dimension */
   public abstract int getBytesPerDimension() throws IOException;

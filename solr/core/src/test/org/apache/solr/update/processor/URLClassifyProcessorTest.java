@@ -23,8 +23,6 @@ import java.net.URISyntaxException;
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.update.AddUpdateCommand;
-import org.apache.solr.update.processor.URLClassifyProcessor;
-import org.apache.solr.update.processor.URLClassifyProcessorFactory;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -46,6 +44,8 @@ public class URLClassifyProcessorTest extends SolrTestCaseJ4 {
     document.addField("url", "http://www.example.com");
     addCommand.solrDoc = document;
     classifyProcessor.processAdd(addCommand);
+    assertEquals("Confirm single valued field returned",1, document.getField("url_length").getValueCount());
+    assertEquals("Confirm field populated",22, document.getField("url_length").getValue());
   }
   
   @Test

@@ -18,28 +18,25 @@ package org.apache.solr.handler.component;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.lucene.search.Query;
 import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.params.CommonParams;
-import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.SimpleOrderedMap;
-import org.apache.solr.common.util.SuppressForbidden;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.search.DocList;
 import org.apache.solr.search.QueryParsing;
+import org.apache.solr.search.SolrIndexSearcher;
 import org.apache.solr.search.facet.FacetDebugInfo;
+import org.apache.solr.search.stats.StatsCache;
 import org.apache.solr.util.SolrPluginUtils;
 
 import static org.apache.solr.common.params.CommonParams.FQ;
@@ -54,11 +51,6 @@ import static org.apache.solr.common.params.CommonParams.JSON;
 public class DebugComponent extends SearchComponent
 {
   public static final String COMPONENT_NAME = "debug";
-  
-  /**
-   * A counter to ensure that no RID is equal, even if they fall in the same millisecond
-   */
-  private static final AtomicLong ridCounter = new AtomicLong();
   
   /**
    * Map containing all the possible stages as key and
@@ -76,7 +68,7 @@ public class DebugComponent extends SearchComponent
       map.put(ResponseBuilder.STAGE_DONE, "DONE");
       stages = Collections.unmodifiableMap(map);
   }
-  
+
   @Override
   public void prepare(ResponseBuilder rb) throws IOException
   {
@@ -91,15 +83,20 @@ public class DebugComponent extends SearchComponent
   public void process(ResponseBuilder rb) throws IOException
   {
     if( rb.isDebug() ) {
+      SolrQueryRequest req = rb.req;
+      StatsCache statsCache = req.getSearcher().getStatsCache();
+      req.getContext().put(SolrIndexSearcher.STATS_SOURCE, statsCache.get(req));
       DocList results = null;
       //some internal grouping requests won't have results value set
       if(rb.getResults() != null) {
         results = rb.getResults().docList;
       }
 
+      @SuppressWarnings({"rawtypes"})
       NamedList stdinfo = SolrPluginUtils.doStandardDebug( rb.req,
           rb.getQueryString(), rb.wrap(rb.getQuery()), results, rb.isDebugQuery(), rb.isDebugResults());
       
+      @SuppressWarnings({"rawtypes"})
       NamedList info = rb.getDebugInfo();
       if( info == null ) {
         rb.setDebugInfo( stdinfo );
@@ -143,25 +140,9 @@ public class DebugComponent extends SearchComponent
     }
   }
 
-
   private void doDebugTrack(ResponseBuilder rb) {
-    SolrQueryRequest req = rb.req;
-    String rid = req.getParams().get(CommonParams.REQUEST_ID);
-    if(rid == null || "".equals(rid)) {
-      rid = generateRid(rb);
-      ModifiableSolrParams params = new ModifiableSolrParams(req.getParams());
-      params.add(CommonParams.REQUEST_ID, rid);//add rid to the request so that shards see it
-      req.setParams(params);
-    }
+    final String rid = rb.req.getParams().get(CommonParams.REQUEST_ID);
     rb.addDebug(rid, "track", CommonParams.REQUEST_ID);//to see it in the response
-    rb.rsp.addToLog(CommonParams.REQUEST_ID, rid); //to see it in the logs of the landing core
-    
-  }
-
-  @SuppressForbidden(reason = "Need currentTimeMillis, only used for naming")
-  private String generateRid(ResponseBuilder rb) {
-    String hostName = rb.req.getCore().getCoreContainer().getHostName();
-    return hostName + "-" + rb.req.getCore().getName() + "-" + System.currentTimeMillis() + "-" + ridCounter.getAndIncrement();
   }
 
   @Override
@@ -171,6 +152,11 @@ public class DebugComponent extends SearchComponent
     // Turn on debug to get explain only when retrieving fields
     if ((sreq.purpose & ShardRequest.PURPOSE_GET_FIELDS) != 0) {
       sreq.purpose |= ShardRequest.PURPOSE_GET_DEBUG;
+      // always distribute the latest version of global stats
+      sreq.purpose |= ShardRequest.PURPOSE_SET_TERM_STATS;
+      StatsCache statsCache = rb.req.getSearcher().getStatsCache();
+      statsCache.sendGlobalStats(rb, sreq);
+
       if (rb.isDebugAll()) {
         sreq.params.set(CommonParams.DEBUG_QUERY, "true");
       } else {
@@ -210,14 +196,16 @@ public class DebugComponent extends SearchComponent
     }
   }
 
-  private final static Set<String> EXCLUDE_SET = Collections.unmodifiableSet(new HashSet<>(Arrays.asList("explain")));
+  private final static Set<String> EXCLUDE_SET = Set.of("explain");
 
   @Override
+  @SuppressWarnings({"unchecked"})
   public void finishStage(ResponseBuilder rb) {
     if (rb.isDebug() && rb.stage == ResponseBuilder.STAGE_GET_FIELDS) {
       NamedList<Object> info = rb.getDebugInfo();
       NamedList<Object> explain = new SimpleOrderedMap<>();
 
+      @SuppressWarnings({"rawtypes"})
       Map.Entry<String, Object>[]  arr =  new NamedList.NamedListEntry[rb.resultIds.size()];
       // Will be set to true if there is at least one response with PURPOSE_GET_DEBUG
       boolean hasGetDebugResponses = false;
@@ -229,11 +217,14 @@ public class DebugComponent extends SearchComponent
             // this should only happen when using shards.tolerant=true
             continue;
           }
+          @SuppressWarnings({"rawtypes"})
           NamedList sdebug = (NamedList)srsp.getSolrResponse().getResponse().get("debug");
+
           info = (NamedList)merge(sdebug, info, EXCLUDE_SET);
           if ((sreq.purpose & ShardRequest.PURPOSE_GET_DEBUG) != 0) {
             hasGetDebugResponses = true;
             if (rb.isDebugResults()) {
+              @SuppressWarnings({"rawtypes"})
               NamedList sexplain = (NamedList)sdebug.get("explain");
               SolrPluginUtils.copyNamedListIntoArrayByDocPosInResponse(sexplain, rb.resultIds, arr);
             }
@@ -294,6 +285,7 @@ public class DebugComponent extends SearchComponent
     return namedList;
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   protected Object merge(Object source, Object dest, Set<String> exclude) {
     if (source == null) return dest;
     if (dest == null) {

@@ -20,7 +20,7 @@ package org.apache.lucene.analysis.miscellaneous;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link LengthFilter}. 
@@ -31,8 +31,15 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.LengthFilterFactory" min="0" max="1" /&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class LengthFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "length";
+
   final int min;
   final int max;
   public static final String MIN_KEY = "min";
@@ -48,6 +55,11 @@ public class LengthFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public LengthFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public LengthFilter create(TokenStream input) {
     final LengthFilter filter = new LengthFilter(input,min,max);

@@ -21,6 +21,8 @@ import java.io.Reader;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +38,7 @@ import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.BoostQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.util.CharsRefBuilder;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.StringUtils;
 import org.apache.solr.common.params.CommonParams;
@@ -80,9 +83,15 @@ public class MoreLikeThisHandler extends RequestHandlerBase
   private static final Pattern splitList = Pattern.compile(",| ");
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-  
+
+  static final String ERR_MSG_QUERY_OR_TEXT_REQUIRED =
+      "MoreLikeThis requires either a query (?q=) or text to find similar documents.";
+
+  static final String ERR_MSG_SINGLE_STREAM_ONLY =
+      "MoreLikeThis does not support multiple ContentStreams";
+
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
     super.init(args);
   }
 
@@ -91,10 +100,7 @@ public class MoreLikeThisHandler extends RequestHandlerBase
   {
     SolrParams params = req.getParams();
 
-    long timeAllowed = (long)params.getInt( CommonParams.TIME_ALLOWED, -1 );
-    if(timeAllowed > 0) {
-      SolrQueryTimeoutImpl.set(timeAllowed);
-    }
+    SolrQueryTimeoutImpl.set(req);
       try {
 
         // Set field flags
@@ -156,7 +162,7 @@ public class MoreLikeThisHandler extends RequestHandlerBase
               }
               if (iter.hasNext()) {
                 throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
-                    "MoreLikeThis does not support multiple ContentStreams");
+                    ERR_MSG_SINGLE_STREAM_ONLY);
               }
             }
           }
@@ -191,7 +197,7 @@ public class MoreLikeThisHandler extends RequestHandlerBase
             }
           } else {
             throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
-                "MoreLikeThis requires either a query (?q=) or text to find similar documents.");
+                ERR_MSG_QUERY_OR_TEXT_REQUIRED);
           }
 
         } finally {
@@ -252,6 +258,7 @@ public class MoreLikeThisHandler extends RequestHandlerBase
         // TODO resolve duplicated code with DebugComponent.  Perhaps it should be added to doStandardDebug?
         if (dbg == true) {
           try {
+            @SuppressWarnings({"unchecked"})
             NamedList<Object> dbgInfo = SolrPluginUtils.doStandardDebug(req, q, mlt.getRawMLTQuery(), mltDocs.docList, dbgQuery, dbgResults);
             if (null != dbgInfo) {
               if (null != filters) {
@@ -270,7 +277,7 @@ public class MoreLikeThisHandler extends RequestHandlerBase
           }
         }
       } catch (ExitableDirectoryReader.ExitingReaderException ex) {
-        log.warn( "Query: " + req.getParamString() + "; " + ex.getMessage());
+        log.warn( "Query: {}; ", req.getParamString(), ex);
       } finally {
         SolrQueryTimeoutImpl.reset();
       }
@@ -389,7 +396,7 @@ public class MoreLikeThisHandler extends RequestHandlerBase
       rawMLTQuery = mlt.like(id);
       boostedMLTQuery = getBoostedQuery( rawMLTQuery );
       if( terms != null ) {
-        fillInterestingTermsFromMLTQuery( rawMLTQuery, terms );
+        fillInterestingTermsFromMLTQuery( boostedMLTQuery, terms );
       }
 
       // exclude current document from results
@@ -411,10 +418,31 @@ public class MoreLikeThisHandler extends RequestHandlerBase
 
     public DocListAndSet getMoreLikeThis( Reader reader, int start, int rows, List<Query> filters, List<InterestingTerm> terms, int flags ) throws IOException
     {
-      // analyzing with the first field: previous (stupid) behavior
-      rawMLTQuery = mlt.like(mlt.getFieldNames()[0], reader);
+      // SOLR-5351: if only check against a single field, use the reader directly. Otherwise we
+      // repeat the stream's content for multiple fields so that query terms can be pulled from any
+      // of those fields.
+      String [] fields = mlt.getFieldNames();
+      if (fields.length == 1) {
+        rawMLTQuery = mlt.like(fields[0], reader);
+      } else {
+        CharsRefBuilder buffered = new CharsRefBuilder();
+        char [] chunk = new char [1024];
+        int len;
+        while ((len = reader.read(chunk)) >= 0) {
+          buffered.append(chunk, 0, len);
+        }
+
+        Collection<Object> streamValue = Collections.singleton(buffered.get().toString());
+        Map<String, Collection<Object>> multifieldDoc = new HashMap<>(fields.length);
+        for (String field : fields) {
+          multifieldDoc.put(field, streamValue);
+        }
+
+        rawMLTQuery = mlt.like(multifieldDoc);
+      }
+
       boostedMLTQuery = getBoostedQuery( rawMLTQuery );
-      if( terms != null ) {
+      if (terms != null) {
         fillInterestingTermsFromMLTQuery( boostedMLTQuery, terms );
       }
       DocListAndSet results = new DocListAndSet();

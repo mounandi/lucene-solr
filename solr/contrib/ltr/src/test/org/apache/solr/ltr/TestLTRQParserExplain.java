@@ -18,27 +18,27 @@ package org.apache.solr.ltr;
 
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.ltr.model.LinearModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestLTRQParserExplain extends TestRerankBase {
 
-  @BeforeClass
-  public static void setup() throws Exception {
+  @Before
+  public void setup() throws Exception {
     setuptest(true);
     loadFeatures("features-store-test-model.json");
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
 
   @Test
   public void testRerankedExplain() throws Exception {
-    loadModel("linear2", LinearModel.class.getCanonicalName(), new String[] {
+    loadModel("linear2", LinearModel.class.getName(), new String[] {
         "constant1", "constant2", "pop"},
         "{\"weights\":{\"pop\":1.0,\"constant1\":1.5,\"constant2\":3.5}}");
 

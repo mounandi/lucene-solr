@@ -17,12 +17,12 @@
 package org.apache.solr.search.join;
 
 import java.io.IOException;
-import java.util.Map;
 import java.util.Objects;
 
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.search.join.JoinUtil;
 import org.apache.lucene.search.join.ScoreMode;
@@ -87,7 +87,7 @@ public class ScoreJoinQParserPlugin extends QParserPlugin {
     }
 
     @Override
-    public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+    public Weight createWeight(IndexSearcher searcher, org.apache.lucene.search.ScoreMode scoreMode, float boost) throws IOException {
       SolrRequestInfo info = SolrRequestInfo.getRequestInfo();
 
       CoreContainer container = info.getReq().getCore().getCoreContainer();
@@ -102,12 +102,12 @@ public class ScoreJoinQParserPlugin extends QParserPlugin {
       final Query joinQuery;
       try {
         joinQuery = JoinUtil.createJoinQuery(fromField, true,
-            toField, fromQuery, fromHolder.get(), scoreMode);
+            toField, fromQuery, fromHolder.get(), this.scoreMode);
       } finally {
         fromCore.close();
         fromHolder.decref();
       }
-      return joinQuery.rewrite(searcher.getIndexReader()).createWeight(searcher, needsScores, boost);
+      return joinQuery.rewrite(searcher.getIndexReader()).createWeight(searcher, scoreMode, boost);
     }
 
     @Override
@@ -157,11 +157,11 @@ public class ScoreJoinQParserPlugin extends QParserPlugin {
     }
 
     @Override
-    public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+    public Weight createWeight(IndexSearcher searcher, org.apache.lucene.search.ScoreMode scoreMode, float boost) throws IOException {
       SolrRequestInfo info = SolrRequestInfo.getRequestInfo();
       final Query jq = JoinUtil.createJoinQuery(fromField, true,
-          toField, fromQuery, info.getReq().getSearcher(), scoreMode);
-      return jq.rewrite(searcher.getIndexReader()).createWeight(searcher, needsScores, boost);
+          toField, fromQuery, info.getReq().getSearcher(), this.scoreMode);
+      return jq.rewrite(searcher.getIndexReader()).createWeight(searcher, scoreMode, boost);
     }
 
 
@@ -194,6 +194,11 @@ public class ScoreJoinQParserPlugin extends QParserPlugin {
              Objects.equals(fromQuery, other.fromQuery) &&
              Objects.equals(scoreMode, other.scoreMode) &&
              Objects.equals(toField, other.toField);
+    }
+
+    @Override
+    public void visit(QueryVisitor visitor) {
+      visitor.visitLeaf(this);
     }
   }
 
@@ -275,10 +280,9 @@ public class ScoreJoinQParserPlugin extends QParserPlugin {
   public static String getCoreName(final String fromIndex, CoreContainer container) {
     if (container.isZooKeeperAware()) {
       ZkController zkController = container.getZkController();
-      final String resolved =
-        zkController.getClusterState().hasCollection(fromIndex)
-          ? fromIndex : resolveAlias(fromIndex, zkController);
-      if (resolved == null) {
+      final String resolved = resolveAlias(fromIndex, zkController);
+      // TODO DWS: no need for this since later, clusterState.getCollection will throw a reasonable error
+      if (!zkController.getClusterState().hasCollection(resolved)) {
         throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
             "SolrCloud join: Collection '" + fromIndex + "' not found!");
       }
@@ -287,33 +291,39 @@ public class ScoreJoinQParserPlugin extends QParserPlugin {
     return fromIndex;
   }
 
+  /**
+   * A helper method for other plugins to create single-core JoinQueries
+   *
+   * @param subQuery the query to define the starting set of documents on the "left side" of the join
+   * @param fromField "left side" field name to use in the join
+   * @param toField "right side" field name to use in the join
+   * @param scoreMode the score statistic to produce while joining
+   *
+   * @see JoinQParserPlugin#createJoinQuery(Query, String, String, String)
+   */
+  public static Query createJoinQuery(Query subQuery, String fromField, String toField, ScoreMode scoreMode) {
+    return new SameCoreJoinQuery(subQuery, fromField, toField, scoreMode);
+  }
+
   private static String resolveAlias(String fromIndex, ZkController zkController) {
     final Aliases aliases = zkController.getZkStateReader().getAliases();
-    if (aliases != null) {
-      final String resolved;
-      Map<String, String> collectionAliases = aliases.getCollectionAliasMap();
-      resolved = (collectionAliases != null) ? collectionAliases.get(fromIndex) : null;
-      if (resolved != null) {
-        if (resolved.split(",").length > 1) {
-          throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
-              "SolrCloud join: Collection alias '" + fromIndex +
-                  "' maps to multiple collections (" + resolved +
-                  "), which is not currently supported for joins.");
-        }
-        return resolved;
-      }
+    try {
+      return aliases.resolveSimpleAlias(fromIndex); // if not an alias, returns input
+    } catch (IllegalArgumentException e) {
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+          "SolrCloud join: Collection alias '" + fromIndex +
+              "' maps to multiple collectiions, which is not currently supported for joins.", e);
     }
-    return null;
   }
 
   private static String findLocalReplicaForFromIndex(ZkController zkController, String fromIndex) {
     String fromReplica = null;
 
     String nodeName = zkController.getNodeName();
-    for (Slice slice : zkController.getClusterState().getCollection(fromIndex).getActiveSlices()) {
+    for (Slice slice : zkController.getClusterState().getCollection(fromIndex).getActiveSlicesArr()) {
       if (fromReplica != null)
         throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
-            "SolrCloud join: multiple shards not yet supported " + fromIndex);
+            "SolrCloud join: To join with a sharded collection, use method=crossCollection.");
 
       for (Replica replica : slice.getReplicas()) {
         if (replica.getNodeName().equals(nodeName)) {
@@ -331,8 +341,7 @@ public class ScoreJoinQParserPlugin extends QParserPlugin {
 
     if (fromReplica == null)
       throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
-          "SolrCloud join: No active replicas for "+fromIndex+
-              " found in node " + nodeName);
+          "SolrCloud join: To join with a collection that might not be co-located, use method=crossCollection.");
 
     return fromReplica;
   }

@@ -17,7 +17,11 @@ import argparse
 import re
 import subprocess
 import sys
+import os
 from enum import Enum
+import time
+import urllib.request, urllib.error, urllib.parse
+import urllib.parse
 
 class Version(object):
   def __init__(self, major, minor, bugfix, prerelease):
@@ -66,14 +70,19 @@ class Version(object):
            (self.bugfix > other.bugfix or self.bugfix == other.bugfix and
            self.prerelease >= other.prerelease)))
 
+  def gt(self, other):
+    return (self.major > other.major or
+           (self.major == other.major and self.minor > other.minor) or
+           (self.major == other.major and self.minor == other.minor and self.bugfix > other.bugfix))
+
   def is_back_compat_with(self, other):
     if not self.on_or_after(other):
       raise Exception('Back compat check disallowed for newer version: %s < %s' % (self, other))
     return other.major + 1 >= self.major
 
-def run(cmd):
+def run(cmd, cwd=None):
   try:
-    output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT)
+    output = subprocess.check_output(cmd, shell=True, stderr=subprocess.STDOUT, cwd=cwd)
   except subprocess.CalledProcessError as e:
     print(e.output.decode('utf-8'))
     raise e
@@ -99,6 +108,7 @@ def update_file(filename, line_re, edit):
     f.write(''.join(buffer))
   return True
 
+
 # branch types are "release", "stable" and "unstable"
 class BranchType(Enum):
   unstable = 1
@@ -122,9 +132,54 @@ def find_branch_type():
     return BranchType.release
   raise Exception('Cannot run %s on feature branch' % sys.argv[0].rsplit('/', 1)[-1])
 
-version_prop_re = re.compile('version\.base=(.*)')
+
+def download(name, urlString, tmpDir, quiet=False, force_clean=True):
+  if not quiet:
+      print("Downloading %s" % urlString)
+  startTime = time.time()
+  fileName = '%s/%s' % (tmpDir, name)
+  if not force_clean and os.path.exists(fileName):
+    if not quiet and fileName.find('.asc') == -1:
+      print('    already done: %.1f MB' % (os.path.getsize(fileName)/1024./1024.))
+    return
+  try:
+    attemptDownload(urlString, fileName)
+  except Exception as e:
+    print('Retrying download of url %s after exception: %s' % (urlString, e))
+    try:
+      attemptDownload(urlString, fileName)
+    except Exception as e:
+      raise RuntimeError('failed to download url "%s"' % urlString) from e
+  if not quiet and fileName.find('.asc') == -1:
+    t = time.time()-startTime
+    sizeMB = os.path.getsize(fileName)/1024./1024.
+    print('    %.1f MB in %.2f sec (%.1f MB/sec)' % (sizeMB, t, sizeMB/t))
+
+
+def attemptDownload(urlString, fileName):
+  fIn = urllib.request.urlopen(urlString)
+  fOut = open(fileName, 'wb')
+  success = False
+  try:
+    while True:
+      s = fIn.read(65536)
+      if s == b'':
+        break
+      fOut.write(s)
+    fOut.close()
+    fIn.close()
+    success = True
+  finally:
+    fIn.close()
+    fOut.close()
+    if not success:
+      os.remove(fileName)
+
+version_prop_re = re.compile(r'baseVersion\s*=\s*([\'"])(.*)\1')
 def find_current_version():
-  return version_prop_re.search(open('lucene/version.properties').read()).group(1).strip()
+  script_path = os.path.dirname(os.path.realpath(__file__))
+  top_level_dir = os.path.join(os.path.abspath("%s/" % script_path), os.path.pardir, os.path.pardir)
+  return version_prop_re.search(open('%s/build.gradle' % top_level_dir).read()).group(2).strip()
 
 if __name__ == '__main__':
   print('This is only a support module, it cannot be run')

@@ -23,7 +23,6 @@ import java.util.Map;
 import java.util.Objects;
 
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.DoubleValues;
 import org.apache.lucene.search.DoubleValuesSource;
 import org.apache.lucene.search.Explanation;
@@ -32,7 +31,7 @@ import org.apache.lucene.search.FieldComparatorSource;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LongValues;
 import org.apache.lucene.search.LongValuesSource;
-import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.Scorable;
 import org.apache.lucene.search.SimpleFieldComparator;
 import org.apache.lucene.search.SortField;
 
@@ -51,7 +50,7 @@ public abstract class ValueSource {
    * docID manner, and you must call this method again to iterate through
    * the values again.
    */
-  public abstract FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException;
+  public abstract FunctionValues getValues(Map<Object, Object> context, LeafReaderContext readerContext) throws IOException;
 
   @Override
   public abstract boolean equals(Object o);
@@ -75,26 +74,22 @@ public abstract class ValueSource {
    * weight info in the context. The context object will be passed to getValues()
    * where this info can be retrieved.
    */
-  public void createWeight(Map context, IndexSearcher searcher) throws IOException {
+  public void createWeight(Map<Object, Object> context, IndexSearcher searcher) throws IOException {
   }
 
   /**
    * Returns a new non-threadsafe context map.
    */
-  public static Map newContext(IndexSearcher searcher) {
-    Map context = new IdentityHashMap();
+  public static Map<Object, Object> newContext(IndexSearcher searcher) {
+    Map<Object, Object> context = new IdentityHashMap<>();
     context.put("searcher", searcher);
     return context;
   }
 
-  private static class FakeScorer extends Scorer {
+  private static class ScoreAndDoc extends Scorable {
 
     int current = -1;
     float score = 0;
-
-    FakeScorer() {
-      super(null);
-    }
 
     @Override
     public int docID() {
@@ -102,18 +97,8 @@ public abstract class ValueSource {
     }
 
     @Override
-    public float score() throws IOException {
+    public float score() {
       return score;
-    }
-
-    @Override
-    public int freq() throws IOException {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public DocIdSetIterator iterator() {
-      throw new UnsupportedOperationException();
     }
   }
 
@@ -134,8 +119,8 @@ public abstract class ValueSource {
 
     @Override
     public LongValues getValues(LeafReaderContext ctx, DoubleValues scores) throws IOException {
-      Map context = new IdentityHashMap<>();
-      FakeScorer scorer = new FakeScorer();
+      Map<Object, Object> context = new IdentityHashMap<>();
+      ScoreAndDoc scorer = new ScoreAndDoc();
       context.put("scorer", scorer);
       final FunctionValues fv = in.getValues(context, ctx);
       return new LongValues() {
@@ -155,6 +140,11 @@ public abstract class ValueSource {
           return fv.exists(doc);
         }
       };
+    }
+
+    @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return false;
     }
 
     @Override
@@ -180,28 +170,36 @@ public abstract class ValueSource {
       return in.toString();
     }
 
+    @Override
+    public LongValuesSource rewrite(IndexSearcher searcher) throws IOException {
+      return this;
+    }
+
   }
 
   /**
    * Expose this ValueSource as a DoubleValuesSource
    */
   public DoubleValuesSource asDoubleValuesSource() {
-    return new WrappedDoubleValuesSource(this);
+    return new WrappedDoubleValuesSource(this, null);
   }
 
-  private static class WrappedDoubleValuesSource extends DoubleValuesSource {
+  static class WrappedDoubleValuesSource extends DoubleValuesSource {
 
-    private final ValueSource in;
+    final ValueSource in;
+    final IndexSearcher searcher;
 
-    private WrappedDoubleValuesSource(ValueSource in) {
+    private WrappedDoubleValuesSource(ValueSource in, IndexSearcher searcher) {
       this.in = in;
+      this.searcher = searcher;
     }
 
     @Override
     public DoubleValues getValues(LeafReaderContext ctx, DoubleValues scores) throws IOException {
-      Map context = new HashMap<>();
-      FakeScorer scorer = new FakeScorer();
+      Map<Object, Object> context = new HashMap<>();
+      ScoreAndDoc scorer = new ScoreAndDoc();
       context.put("scorer", scorer);
+      context.put("searcher", searcher);
       FunctionValues fv = in.getValues(context, ctx);
       return new DoubleValues() {
 
@@ -218,7 +216,10 @@ public abstract class ValueSource {
           }
           else
             scorer.score = 0;
-          return fv.exists(doc);
+          // ValueSource will return values even if exists() is false, generally a default
+          // of some kind.  To preserve this behaviour with the iterator, we need to always
+          // return 'true' here.
+          return true;
         }
       };
     }
@@ -229,13 +230,24 @@ public abstract class ValueSource {
     }
 
     @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return false;
+    }
+
+    @Override
     public Explanation explain(LeafReaderContext ctx, int docId, Explanation scoreExplanation) throws IOException {
-      Map context = new HashMap<>();
-      FakeScorer scorer = new FakeScorer();
-      scorer.score = scoreExplanation.getValue();
+      Map<Object, Object> context = new HashMap<>();
+      ScoreAndDoc scorer = new ScoreAndDoc();
+      scorer.score = scoreExplanation.getValue().floatValue();
       context.put("scorer", scorer);
+      context.put("searcher", searcher);
       FunctionValues fv = in.getValues(context, ctx);
       return fv.explain(docId);
+    }
+
+    @Override
+    public DoubleValuesSource rewrite(IndexSearcher searcher) throws IOException {
+      return new WrappedDoubleValuesSource(in, searcher);
     }
 
     @Override
@@ -271,10 +283,17 @@ public abstract class ValueSource {
     }
 
     @Override
-    public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
-      Scorer scorer = (Scorer) context.get("scorer");
+    public FunctionValues getValues(Map<Object, Object> context, LeafReaderContext readerContext) throws IOException {
+      Scorable scorer = (Scorable) context.get("scorer");
       DoubleValues scores = scorer == null ? null : DoubleValuesSource.fromScorer(scorer);
-      DoubleValues inner = in.getValues(readerContext, scores);
+
+      IndexSearcher searcher = (IndexSearcher) context.get("searcher");
+      DoubleValues inner;
+      if (searcher != null)
+        inner = in.rewrite(searcher).getValues(readerContext, scores);
+      else
+        inner = in.getValues(readerContext, scores);
+
       return new FunctionValues() {
         @Override
         public String toString(int doc) throws IOException {
@@ -319,6 +338,7 @@ public abstract class ValueSource {
     public String description() {
       return in.toString();
     }
+
   }
 
   //
@@ -345,16 +365,16 @@ public abstract class ValueSource {
 
     @Override
     public SortField rewrite(IndexSearcher searcher) throws IOException {
-      Map context = newContext(searcher);
+      Map<Object, Object> context = newContext(searcher);
       createWeight(context, searcher);
       return new SortField(getField(), new ValueSourceComparatorSource(context), getReverse());
     }
   }
 
   class ValueSourceComparatorSource extends FieldComparatorSource {
-    private final Map context;
+    private final Map<Object, Object> context;
 
-    public ValueSourceComparatorSource(Map context) {
+    public ValueSourceComparatorSource(Map<Object, Object> context) {
       this.context = context;
     }
 
@@ -374,10 +394,10 @@ public abstract class ValueSource {
     private final double[] values;
     private FunctionValues docVals;
     private double bottom;
-    private final Map fcontext;
+    private final Map<Object, Object> fcontext;
     private double topValue;
 
-    ValueSourceComparator(Map fcontext, int numHits) {
+    ValueSourceComparator(Map<Object, Object> fcontext, int numHits) {
       this.fcontext = fcontext;
       values = new double[numHits];
     }
@@ -409,7 +429,7 @@ public abstract class ValueSource {
 
     @Override
     public void setTopValue(final Double value) {
-      this.topValue = value.doubleValue();
+      this.topValue = value;
     }
 
     @Override

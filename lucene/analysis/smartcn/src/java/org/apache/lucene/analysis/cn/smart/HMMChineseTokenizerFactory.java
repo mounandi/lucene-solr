@@ -19,7 +19,7 @@ package org.apache.lucene.analysis.cn.smart;
 import java.util.Map;
 
 import org.apache.lucene.analysis.Tokenizer;
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.util.AttributeFactory;
 
 /**
@@ -30,8 +30,14 @@ import org.apache.lucene.util.AttributeFactory;
  * SmartChinese stoplist with a StopFilterFactory via:
  * <code>words="org/apache/lucene/analysis/cn/smart/stopwords.txt"</code>
  * @lucene.experimental
+ *
+ * @since 4.10.0
+ * @lucene.spi {@value #NAME}
  */
 public final class HMMChineseTokenizerFactory extends TokenizerFactory {
+
+  /** SPI name */
+  public static final String NAME = "hmmChinese";
 
   /** Creates a new HMMChineseTokenizerFactory */
   public HMMChineseTokenizerFactory(Map<String,String> args) {
@@ -39,6 +45,11 @@ public final class HMMChineseTokenizerFactory extends TokenizerFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public HMMChineseTokenizerFactory() {
+    throw defaultCtorException();
   }
 
   @Override

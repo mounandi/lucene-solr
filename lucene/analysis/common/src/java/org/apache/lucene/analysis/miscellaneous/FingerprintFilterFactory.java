@@ -20,7 +20,7 @@ package org.apache.lucene.analysis.miscellaneous;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link FingerprintFilter}.
@@ -31,8 +31,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * See
  * {@link FingerprintFilter} for an explanation of its use.
  * </pre>
+ * @since 5.4.0
+ * @lucene.spi {@value #NAME}
  */
 public class FingerprintFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "fingerprint";
 
   public static final String MAX_OUTPUT_TOKEN_SIZE_KEY = "maxOutputTokenSize";
   public static final String SEPARATOR_KEY = "separator";
@@ -49,6 +54,11 @@ public class FingerprintFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public FingerprintFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

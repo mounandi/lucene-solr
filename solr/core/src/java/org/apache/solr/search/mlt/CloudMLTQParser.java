@@ -91,6 +91,7 @@ public class CloudMLTQParser extends QParser {
     String[] fieldNames;
 
     if (qf != null) {
+      @SuppressWarnings({"unchecked", "rawtypes"})
       ArrayList<String> fields = new ArrayList();
       for (String fieldName : qf) {
         if (!StringUtils.isEmpty(fieldName))  {
@@ -106,6 +107,7 @@ public class CloudMLTQParser extends QParser {
       boostFields = SolrPluginUtils.parseFieldBoosts(fields.toArray(new String[0]));
       fieldNames = boostFields.keySet().toArray(new String[0]);
     } else {
+      @SuppressWarnings({"unchecked", "rawtypes"})
       ArrayList<String> fields = new ArrayList();
       for (String field : doc.getFieldNames()) {
         // Only use fields that are stored and have an explicit analyzer.
@@ -128,6 +130,7 @@ public class CloudMLTQParser extends QParser {
     for (String field : fieldNames) {
       Collection<Object> fieldValues = doc.getFieldValues(field);
       if (fieldValues != null) {
+        @SuppressWarnings({"unchecked", "rawtypes"})
         Collection<Object> values = new ArrayList();
         for (Object val : fieldValues) {
           if (val instanceof IndexableField) {
@@ -172,8 +175,7 @@ public class CloudMLTQParser extends QParser {
 
       return realMLTQuery.build();
     } catch (IOException e) {
-      e.printStackTrace();
-      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Bad Request");
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Bad Request", e);
     }
 
   }
@@ -188,6 +190,7 @@ public class CloudMLTQParser extends QParser {
     };
 
     core.getRequestHandler("/get").handleRequest(request, rsp);
+    @SuppressWarnings({"rawtypes"})
     NamedList response = rsp.getValues();
 
     return (SolrDocument) response.get("doc");

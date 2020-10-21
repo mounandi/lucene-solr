@@ -19,14 +19,14 @@ package org.apache.solr.ltr.feature;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestUserTermScoreWithQ extends TestRerankBase {
 
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1", "description", "w1", "popularity",
@@ -48,17 +48,17 @@ public class TestUserTermScoreWithQ extends TestRerankBase {
     assertU(commit());
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
   @Test
   public void testUserTermScoreWithQ() throws Exception {
     // before();
-    loadFeature("SomeTermQ", SolrFeature.class.getCanonicalName(),
+    loadFeature("SomeTermQ", SolrFeature.class.getName(),
         "{\"q\":\"{!terms f=popularity}88888\"}");
-    loadModel("Term-modelQ", LinearModel.class.getCanonicalName(),
+    loadModel("Term-modelQ", LinearModel.class.getName(),
         new String[] {"SomeTermQ"}, "{\"weights\":{\"SomeTermQ\":1.0}}");
     final SolrQuery query = new SolrQuery();
     query.setQuery("title:w1");

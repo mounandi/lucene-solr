@@ -99,11 +99,14 @@ public class MinHashFilterTest extends BaseTokenStreamTestCase {
     }
     assertEquals(100, minSet.size());
     assertEquals(0, unadded.size());
+  }
 
+  public void testCollisions() {
     HashSet<LongPair> collisionDetection = new HashSet<LongPair>();
-    unadded = new HashSet<LongPair>();
-    minSet = new FixedSizeTreeSet<LongPair>(500);
-    for (int i = 0; i < 1000000; i++) {
+    HashSet<LongPair> unadded = new HashSet<LongPair>();
+    FixedSizeTreeSet<LongPair> minSet = new FixedSizeTreeSet<LongPair>(500);
+    int numElements = TEST_NIGHTLY ? 1000000 : 10000;
+    for (int i = 0; i < numElements; i++) {
       LongPair hash = new LongPair();
       MinHashFilter.murmurhash3_x64_128(MinHashFilter.getBytes(i), 0, 4, 0, hash);
       collisionDetection.add(hash);
@@ -122,9 +125,9 @@ public class MinHashFilterTest extends BaseTokenStreamTestCase {
         }
       }
     }
-    assertEquals(1000000, collisionDetection.size());
+    assertEquals(numElements, collisionDetection.size());
     assertEquals(500, minSet.size());
-    assertEquals(999500, unadded.size());
+    assertEquals(numElements - 500, unadded.size());
 
     LongPair last = null;
     LongPair current = null;
@@ -183,14 +186,14 @@ public class MinHashFilterTest extends BaseTokenStreamTestCase {
     TokenStream ts = createTokenStream(5, "woof woof woof woof woof", 1, 1, 100, false);
     assertTokenStreamContents(ts, hashes, new int[]{0},
         new int[]{24}, new String[]{MinHashFilter.MIN_HASH_TYPE}, new int[]{1}, new int[]{1}, 24, 0, null,
-        true);
+        true, null);
 
     ts = createTokenStream(5, "woof woof woof woof woof", 2, 1, 1, false);
     assertTokenStreamContents(ts, new String[]{new String(new char[]{0, 0, 8449, 54077, 64133, 32857, 8605, 41409}),
             new String(new char[]{0, 1, 16887, 58164, 39536, 14926, 6529, 17276})}, new int[]{0, 0},
         new int[]{24, 24}, new String[]{MinHashFilter.MIN_HASH_TYPE, MinHashFilter.MIN_HASH_TYPE}, new int[]{1, 0},
         new int[]{1, 1}, 24, 0, null,
-        true);
+        true, null);
   }
 
   @Test
@@ -203,7 +206,7 @@ public class MinHashFilterTest extends BaseTokenStreamTestCase {
         false);
     assertTokenStreamContents(ts, hashes, new int[]{0, 0},
         new int[]{49, 49}, new String[]{MinHashFilter.MIN_HASH_TYPE, MinHashFilter.MIN_HASH_TYPE}, new int[]{1, 0},
-        new int[]{1, 1}, 49, 0, null, true);
+        new int[]{1, 1}, 49, 0, null, true, null);
   }
 
   private ArrayList<String> getTokens(TokenStream ts) throws IOException {

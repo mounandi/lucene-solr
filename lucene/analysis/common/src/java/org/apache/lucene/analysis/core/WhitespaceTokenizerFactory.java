@@ -23,7 +23,7 @@ import java.util.Map;
 
 import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.util.CharTokenizer;
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.util.AttributeFactory;
 
 import static org.apache.lucene.analysis.standard.StandardTokenizer.MAX_TOKEN_LENGTH_LIMIT;
@@ -45,8 +45,15 @@ import static org.apache.lucene.analysis.standard.StandardTokenizer.MAX_TOKEN_LE
  *       It is rare to need to change this
  *      else {@link CharTokenizer}::DEFAULT_MAX_TOKEN_LEN</li>
  * </ul>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class WhitespaceTokenizerFactory extends TokenizerFactory {
+
+  /** SPI name */
+  public static final String NAME = "whitespace";
+
   public static final String RULE_JAVA = "java";
   public static final String RULE_UNICODE = "unicode";
   private static final Collection<String> RULE_NAMES = Arrays.asList(RULE_JAVA, RULE_UNICODE);
@@ -66,6 +73,11 @@ public class WhitespaceTokenizerFactory extends TokenizerFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public WhitespaceTokenizerFactory() {
+    throw defaultCtorException();
   }
 
   @Override

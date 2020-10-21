@@ -22,9 +22,9 @@ import java.util.Map;
 
 import org.apache.lucene.analysis.CharArraySet;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.ResourceLoader;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link KeepWordFilter}. 
@@ -35,8 +35,15 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.KeepWordFilterFactory" words="keepwords.txt" ignoreCase="false"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class KeepWordFilterFactory extends TokenFilterFactory implements ResourceLoaderAware {
+
+  /** SPI name */
+  public static final String NAME = "keepWord";
+
   private final boolean ignoreCase;
   private final String wordFiles;
   private CharArraySet words;
@@ -49,6 +56,11 @@ public class KeepWordFilterFactory extends TokenFilterFactory implements Resourc
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public KeepWordFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

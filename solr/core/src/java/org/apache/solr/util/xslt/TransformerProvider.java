@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.solr.common.util.TimeSource;
 import org.apache.solr.util.TimeOut;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +32,7 @@ import javax.xml.transform.TransformerConfigurationException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.stream.StreamSource;
 
-import org.apache.lucene.analysis.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoader;
 import org.apache.solr.util.SystemIdResolver;
 import org.apache.solr.common.util.XMLErrorLogger;
 import org.apache.solr.core.SolrConfig;
@@ -58,11 +59,9 @@ public class TransformerProvider {
   private TransformerProvider() {
     // tell'em: currently, we only cache the last used XSLT transform, and blindly recompile it
     // once cacheLifetimeSeconds expires
-    log.warn(
-        "The TransformerProvider's simplistic XSLT caching mechanism is not appropriate "
+    log.warn("The TransformerProvider's simplistic XSLT caching mechanism is not appropriate "
         + "for high load scenarios, unless a single XSLT transform is used"
-        + " and xsltCacheLifetimeSeconds is set to a sufficiently high value."
-    );
+        + " and xsltCacheLifetimeSeconds is set to a sufficiently high value.");
   }
   
   /** Return a new Transformer, possibly created from our cached Templates object  
@@ -74,7 +73,7 @@ public class TransformerProvider {
     if(lastTemplates!=null && filename.equals(lastFilename) &&
         cacheExpiresTimeout != null && ! cacheExpiresTimeout.hasTimedOut()) {
       if(log.isDebugEnabled()) {
-        log.debug("Using cached Templates:" + filename);
+        log.debug("Using cached Templates:{}", filename);
       }
     } else {
       lastTemplates = getTemplates(solrConfig.getResourceLoader(), filename,cacheLifetimeSeconds);
@@ -99,7 +98,7 @@ public class TransformerProvider {
     lastFilename = null;
     try {
       if(log.isDebugEnabled()) {
-        log.debug("compiling XSLT templates:" + filename);
+        log.debug("compiling XSLT templates:{}", filename);
       }
       final String fn = "xslt/" + filename;
       final TransformerFactory tFactory = TransformerFactory.newInstance();
@@ -120,7 +119,7 @@ public class TransformerProvider {
     
     lastFilename = filename;
     lastTemplates = result;
-    cacheExpiresTimeout = new TimeOut(cacheLifetimeSeconds, TimeUnit.SECONDS);
+    cacheExpiresTimeout = new TimeOut(cacheLifetimeSeconds, TimeUnit.SECONDS, TimeSource.NANO_TIME);
 
     return result;
   }

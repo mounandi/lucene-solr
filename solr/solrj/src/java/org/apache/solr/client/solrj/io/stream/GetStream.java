@@ -18,7 +18,6 @@ package org.apache.solr.client.solrj.io.stream;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +31,9 @@ import org.apache.solr.client.solrj.io.stream.expr.StreamExplanation;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpression;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 
+/**
+ * @since 6.6.0
+ */
 public class GetStream extends TupleStream implements Expressible {
 
   private static final long serialVersionUID = 1;
@@ -81,28 +83,27 @@ public class GetStream extends TupleStream implements Expressible {
   }
 
   public List<TupleStream> children() {
-    List<TupleStream> l =  new ArrayList();
+    List<TupleStream> l =  new ArrayList<>();
     return l;
   }
 
   public Tuple read() throws IOException {
-    Map map = new HashMap();
-    if(tupleIterator.hasNext()) {
+    if (tupleIterator.hasNext()) {
       Tuple t = tupleIterator.next();
-      map.putAll(t.fields);
-      return new Tuple(map);
+      return t.clone();
     } else {
-      map.put("EOF", true);
-      return new Tuple(map);
+      return Tuple.EOF();
     }
   }
 
   public void close() throws IOException {
   }
 
+  @SuppressWarnings({"unchecked"})
   public void open() throws IOException {
     Map<String, Object> lets = streamContext.getLets();
     Object o = lets.get(name);
+    @SuppressWarnings({"rawtypes"})
     List l = null;
     if(o instanceof List) {
       l = (List)o;

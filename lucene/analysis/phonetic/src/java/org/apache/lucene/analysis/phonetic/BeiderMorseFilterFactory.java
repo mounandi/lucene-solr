@@ -25,7 +25,7 @@ import org.apache.commons.codec.language.bm.NameType;
 import org.apache.commons.codec.language.bm.PhoneticEngine;
 import org.apache.commons.codec.language.bm.RuleType;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link BeiderMorseFilter}.
@@ -39,8 +39,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;/filter&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.6.0
+ * @lucene.spi {@value #NAME}
  */
 public class BeiderMorseFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "beiderMorse";
+
   private final PhoneticEngine engine;
   private final LanguageSet languageSet;
   
@@ -61,6 +67,11 @@ public class BeiderMorseFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public BeiderMorseFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

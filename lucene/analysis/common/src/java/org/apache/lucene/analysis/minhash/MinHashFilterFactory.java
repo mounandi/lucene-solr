@@ -20,12 +20,18 @@ package org.apache.lucene.analysis.minhash;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * {@link TokenFilterFactory} for {@link MinHashFilter}.
+ * @since 6.2.0
+ * @lucene.spi {@value #NAME}
  */
 public class MinHashFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "minHash";
+
   private int hashCount = MinHashFilter.DEFAULT_HASH_COUNT;
   
   private int bucketCount = MinHashFilter.DEFAULT_BUCKET_COUNT;
@@ -45,10 +51,15 @@ public class MinHashFilterFactory extends TokenFilterFactory {
     withRotation = getBoolean(args, "withRotation", bucketCount > 1);
   }
 
+  /** Default ctor for compatibility with SPI */
+  public MinHashFilterFactory() {
+    throw defaultCtorException();
+  }
+
   /*
    * (non-Javadoc)
    * 
-   * @see org.apache.lucene.analysis.util.TokenFilterFactory#create(org.apache.lucene.analysis.TokenStream)
+   * @see org.apache.lucene.analysis.TokenFilterFactory#create(org.apache.lucene.analysis.TokenStream)
    */
   @Override
   public TokenStream create(TokenStream input) {

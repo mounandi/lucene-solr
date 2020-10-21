@@ -22,19 +22,21 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+
 import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.PointValues;
 import org.apache.lucene.index.PointValues.IntersectVisitor;
 import org.apache.lucene.index.PointValues.Relation;
-import org.apache.lucene.index.PointValues;
-import org.apache.lucene.index.PrefixCodedTerms.TermIterator;
 import org.apache.lucene.index.PrefixCodedTerms;
+import org.apache.lucene.index.PrefixCodedTerms.TermIterator;
+import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.BytesRefIterator;
 import org.apache.lucene.util.DocIdSetBuilder;
-import org.apache.lucene.util.StringHelper;
+import org.apache.lucene.util.RamUsageEstimator;
 
 /**
  * Abstract query class to find all documents whose single or multi-dimensional point values, previously indexed with e.g. {@link IntPoint},
@@ -48,13 +50,16 @@ import org.apache.lucene.util.StringHelper;
  * @see PointValues
  * @lucene.experimental */
 
-public abstract class PointInSetQuery extends Query {
+public abstract class PointInSetQuery extends Query implements Accountable {
+  protected static final long BASE_RAM_BYTES = RamUsageEstimator.shallowSizeOfInstance(PointInSetQuery.class);
+
   // A little bit overkill for us, since all of our "terms" are always in the same field:
   final PrefixCodedTerms sortedPackedPoints;
   final int sortedPackedPointsHashCode;
   final String field;
   final int numDims;
   final int bytesPerDim;
+  final long ramBytesUsed; // cache
   
   /** 
    * Iterator of encoded point values.
@@ -72,8 +77,8 @@ public abstract class PointInSetQuery extends Query {
       throw new IllegalArgumentException("bytesPerDim must be > 0 and <= " + PointValues.MAX_NUM_BYTES + "; got " + bytesPerDim);
     }
     this.bytesPerDim = bytesPerDim;
-    if (numDims < 1 || numDims > PointValues.MAX_DIMENSIONS) {
-      throw new IllegalArgumentException("numDims must be > 0 and <= " + PointValues.MAX_DIMENSIONS + "; got " + numDims);
+    if (numDims < 1 || numDims > PointValues.MAX_INDEX_DIMENSIONS) {
+      throw new IllegalArgumentException("numDims must be > 0 and <= " + PointValues.MAX_INDEX_DIMENSIONS + "; got " + numDims);
     }
 
     this.numDims = numDims;
@@ -102,10 +107,21 @@ public abstract class PointInSetQuery extends Query {
     }
     sortedPackedPoints = builder.finish();
     sortedPackedPointsHashCode = sortedPackedPoints.hashCode();
+    ramBytesUsed = BASE_RAM_BYTES +
+        RamUsageEstimator.sizeOfObject(field) +
+        RamUsageEstimator.sizeOfObject(sortedPackedPoints);
+
   }
 
   @Override
-  public final Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+  public void visit(QueryVisitor visitor) {
+    if (visitor.acceptField(field)) {
+      visitor.visitLeaf(this);
+    }
+  }
+
+  @Override
+  public final Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
 
     // We don't use RandomAccessWeight here: it's no good to approximate with "match all docs".
     // This is an inverted structure and should be used in the first pass:
@@ -122,8 +138,8 @@ public abstract class PointInSetQuery extends Query {
           return null;
         }
 
-        if (values.getNumDimensions() != numDims) {
-          throw new IllegalArgumentException("field=\"" + field + "\" was indexed with numDims=" + values.getNumDimensions() + " but this query has numDims=" + numDims);
+        if (values.getNumIndexDimensions() != numDims) {
+          throw new IllegalArgumentException("field=\"" + field + "\" was indexed with numIndexDims=" + values.getNumIndexDimensions() + " but this query has numIndexDims=" + numDims);
         }
         if (values.getBytesPerDimension() != bytesPerDim) {
           throw new IllegalArgumentException("field=\"" + field + "\" was indexed with bytesPerDim=" + values.getBytesPerDimension() + " but this query has bytesPerDim=" + bytesPerDim);
@@ -148,8 +164,14 @@ public abstract class PointInSetQuery extends Query {
           }
         }
 
-        return new ConstantScoreScorer(this, score(), result.build().iterator());
+        return new ConstantScoreScorer(this, score(), scoreMode, result.build().iterator());
       }
+
+      @Override
+      public boolean isCacheable(LeafReaderContext ctx) {
+        return true;
+      }
+
     };
   }
 
@@ -184,13 +206,27 @@ public abstract class PointInSetQuery extends Query {
 
     @Override
     public void visit(int docID, byte[] packedValue) {
+     if (matches(packedValue)) {
+       visit(docID);
+     }
+    }
+
+    @Override
+    public void visit(DocIdSetIterator iterator, byte[] packedValue) throws IOException {
+      if (matches(packedValue)) {
+        int docID;
+        while ((docID = iterator.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+          visit(docID);
+        }
+      }
+    }
+
+    private boolean matches(byte[] packedValue) {
       scratch.bytes = packedValue;
       while (nextQueryPoint != null) {
         int cmp = nextQueryPoint.compareTo(scratch);
         if (cmp == 0) {
-          // Query point equals index point, so collect and return
-          adder.add(docID);
-          break;
+          return true;
         } else if (cmp < 0) {
           // Query point is before index point, so we move to next query point
           nextQueryPoint = iterator.next();
@@ -199,6 +235,7 @@ public abstract class PointInSetQuery extends Query {
           break;
         }
       }
+      return false;
     }
 
     @Override
@@ -265,7 +302,19 @@ public abstract class PointInSetQuery extends Query {
       assert packedValue.length == pointBytes.length;
       if (Arrays.equals(packedValue, pointBytes)) {
         // The point for this doc matches the point we are querying on
-        adder.add(docID);
+        visit(docID);
+      }
+    }
+
+    @Override
+    public void visit(DocIdSetIterator iterator, byte[] packedValue) throws IOException {
+      assert packedValue.length == pointBytes.length;
+      if (Arrays.equals(packedValue, pointBytes)) {
+        // The point for this set of docs matches the point we are querying on
+        int docID;
+        while ((docID = iterator.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
+          visit(docID);
+        }
       }
     }
 
@@ -277,12 +326,12 @@ public abstract class PointInSetQuery extends Query {
       for(int dim=0;dim<numDims;dim++) {
         int offset = dim*bytesPerDim;
 
-        int cmpMin = StringHelper.compare(bytesPerDim, minPackedValue, offset, pointBytes, offset);
+        int cmpMin = Arrays.compareUnsigned(minPackedValue, offset, offset + bytesPerDim, pointBytes, offset, offset + bytesPerDim);
         if (cmpMin > 0) {
           return Relation.CELL_OUTSIDE_QUERY;
         }
 
-        int cmpMax = StringHelper.compare(bytesPerDim, maxPackedValue, offset, pointBytes, offset);
+        int cmpMax = Arrays.compareUnsigned(maxPackedValue, offset, offset + bytesPerDim, pointBytes, offset, offset + bytesPerDim);
         if (cmpMax < 0) {
           return Relation.CELL_OUTSIDE_QUERY;
         }
@@ -326,7 +375,7 @@ public abstract class PointInSetQuery extends Query {
 
             upto++;
             BytesRef next = iterator.next();
-            return Arrays.copyOfRange(next.bytes, next.offset, next.length);
+            return BytesRef.deepCopyOf(next).bytes;
           }
         };
       }
@@ -409,4 +458,9 @@ public abstract class PointInSetQuery extends Query {
    * @return human readable value for debugging
    */
   protected abstract String toString(byte[] value);
+
+  @Override
+  public long ramBytesUsed() {
+    return ramBytesUsed;
+  }
 }

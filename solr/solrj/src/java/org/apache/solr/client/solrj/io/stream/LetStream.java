@@ -20,12 +20,14 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashSet;
+
 
 import org.apache.solr.client.solrj.io.Tuple;
 import org.apache.solr.client.solrj.io.comp.StreamComparator;
+import org.apache.solr.client.solrj.io.eval.MemsetEvaluator;
 import org.apache.solr.client.solrj.io.eval.StreamEvaluator;
 import org.apache.solr.client.solrj.io.stream.expr.Explanation;
 import org.apache.solr.client.solrj.io.stream.expr.Explanation.ExpressionType;
@@ -34,24 +36,54 @@ import org.apache.solr.client.solrj.io.stream.expr.StreamExplanation;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpression;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionNamedParameter;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionParameter;
+import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionValue;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 
+/**
+ * @since 6.6.0
+ */
 public class LetStream extends TupleStream implements Expressible {
 
   private static final long serialVersionUID = 1;
   private TupleStream stream;
   private StreamContext streamContext;
+  @SuppressWarnings({"rawtypes"})
   private Map letParams = new LinkedHashMap();
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public LetStream(StreamExpression expression, StreamFactory factory) throws IOException {
     List<StreamExpression> streamExpressions = factory.getExpressionOperandsRepresentingTypes(expression, Expressible.class, TupleStream.class);
 
     List<StreamExpressionNamedParameter> namedParams = factory.getNamedOperands(expression);
     //Get all the named params
+    Set<String> echo = null;
+    boolean echoAll = false;
+    String currentName = null;
     for(StreamExpressionParameter np : namedParams) {
       String name = ((StreamExpressionNamedParameter)np).getName();
+      currentName = name;
+
+      if(name.equals("echo")) {
+        echo = new HashSet();
+        String echoString = ((StreamExpressionNamedParameter) np).getParameter().toString().trim();
+        if(echoString.equalsIgnoreCase("true")) {
+          echoAll = true;
+        } else {
+          String[] echoVars = echoString.split(",");
+          for (String echoVar : echoVars) {
+            echo.add(echoVar.trim());
+          }
+        }
+
+        continue;
+      }
+
       StreamExpressionParameter param = ((StreamExpressionNamedParameter)np).getParameter();
-      if(factory.isEvaluator((StreamExpression)param)) {
+
+      if(param instanceof StreamExpressionValue) {
+        String paramValue = ((StreamExpressionValue) param).getValue();
+        letParams.put(name, factory.constructPrimitiveObject(paramValue));
+      } else if(factory.isEvaluator((StreamExpression)param)) {
         StreamEvaluator evaluator = factory.constructEvaluator((StreamExpression) param);
         letParams.put(name, evaluator);
       } else {
@@ -60,11 +92,27 @@ public class LetStream extends TupleStream implements Expressible {
       }
     }
 
-    if(streamExpressions.size() != 1){
-      throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - expecting 1 stream but found %d",expression, streamExpressions.size()));
-    }
+    if(streamExpressions.size() > 0) {
+      stream = factory.constructStream(streamExpressions.get(0));
+    } else {
+      StreamExpression tupleExpression = new StreamExpression("tuple");
+      if(!echoAll && echo == null) {
+        tupleExpression.addParameter(new StreamExpressionNamedParameter(currentName, currentName));
+      } else {
+        Set<String> names = letParams.keySet();
+        for(String name : names) {
+          if(echoAll) {
+            tupleExpression.addParameter(new StreamExpressionNamedParameter(name, name));
+          } else {
+            if(echo.contains(name)) {
+              tupleExpression.addParameter(new StreamExpressionNamedParameter(name, name));
+            }
+          }
+        }
+      }
 
-    stream = factory.constructStream(streamExpressions.get(0));
+      stream = factory.constructStream(tupleExpression);
+    }
   }
 
 
@@ -114,6 +162,7 @@ public class LetStream extends TupleStream implements Expressible {
     stream.close();
   }
 
+  @SuppressWarnings({"unchecked"})
   public void open() throws IOException {
     Map<String, Object> lets = streamContext.getLets();
     Set<Map.Entry<String, Object>> entries = letParams.entrySet();
@@ -123,7 +172,7 @@ public class LetStream extends TupleStream implements Expressible {
       String name = entry.getKey();
       Object o = entry.getValue();
       if(o instanceof TupleStream) {
-        List<Tuple> tuples = new ArrayList();
+        List<Tuple> tuples = new ArrayList<>();
         TupleStream tStream = (TupleStream)o;
         tStream.setStreamContext(streamContext);
         try {
@@ -141,14 +190,23 @@ public class LetStream extends TupleStream implements Expressible {
         } finally {
           tStream.close();
         }
-      } else {
+      } else if(o instanceof StreamEvaluator) {
         //Add the data from the StreamContext to a tuple.
-        //Let the evaluator work from this tuple.
+        //Let the evaluator works from this tuple.
         //This will allow columns to be created from tuples already in the StreamContext.
         Tuple eTuple = new Tuple(lets);
         StreamEvaluator evaluator = (StreamEvaluator)o;
+        evaluator.setStreamContext(streamContext);
         Object eo = evaluator.evaluate(eTuple);
-        lets.put(name, eo);
+        if(evaluator instanceof MemsetEvaluator) {
+          @SuppressWarnings({"rawtypes"})
+          Map mem = (Map)eo;
+          lets.putAll(mem);
+        } else {
+          lets.put(name, eo);
+        }
+      } else {
+        lets.put(name, o);
       }
     }
     stream.open();

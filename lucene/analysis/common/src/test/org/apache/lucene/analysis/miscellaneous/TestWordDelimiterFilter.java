@@ -17,27 +17,46 @@
 package org.apache.lucene.analysis.miscellaneous;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Random;
 
-import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.BaseTokenStreamTestCase;
+import org.apache.lucene.analysis.CannedTokenStream;
 import org.apache.lucene.analysis.CharArraySet;
+import org.apache.lucene.analysis.MockTokenizer;
 import org.apache.lucene.analysis.StopFilter;
+import org.apache.lucene.analysis.Token;
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.core.KeywordTokenizer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.en.EnglishAnalyzer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.util.IOUtils;
-import org.junit.Test;
-
-import static org.apache.lucene.analysis.miscellaneous.WordDelimiterFilter.*;
-import static org.apache.lucene.analysis.miscellaneous.WordDelimiterIterator.DEFAULT_WORD_DELIM_TABLE;
 
 /**
  * New WordDelimiterFilter tests... most of the tests are in ConvertedLegacyTest
  * TODO: should explicitly test things like protWords and not rely on
  * the factory tests in Solr.
  */
+@Deprecated
 public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
+
+  private static final int CATENATE_ALL = WordDelimiterFilter.CATENATE_ALL;
+  private static final int CATENATE_NUMBERS = WordDelimiterFilter.CATENATE_NUMBERS;
+  private static final int CATENATE_WORDS = WordDelimiterFilter.CATENATE_WORDS;
+  private static final int GENERATE_NUMBER_PARTS = WordDelimiterFilter.GENERATE_NUMBER_PARTS;
+  private static final int GENERATE_WORD_PARTS = WordDelimiterFilter.GENERATE_WORD_PARTS;
+  private static final int IGNORE_KEYWORDS = WordDelimiterFilter.IGNORE_KEYWORDS;
+  private static final int PRESERVE_ORIGINAL = WordDelimiterFilter.PRESERVE_ORIGINAL;
+  private static final int SPLIT_ON_CASE_CHANGE = WordDelimiterFilter.SPLIT_ON_CASE_CHANGE;
+  private static final int SPLIT_ON_NUMERICS = WordDelimiterFilter.SPLIT_ON_NUMERICS;
+  private static final int STEM_ENGLISH_POSSESSIVE = WordDelimiterFilter.STEM_ENGLISH_POSSESSIVE;
+  private static final byte[] DEFAULT_WORD_DELIM_TABLE = WordDelimiterIterator.DEFAULT_WORD_DELIM_TABLE;
+
 
   /*
   public void testPerformance() throws IOException {
@@ -57,7 +76,6 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
   }
   ***/
 
-  @Test
   public void testOffsets() throws IOException {
     int flags = GENERATE_WORD_PARTS | GENERATE_NUMBER_PARTS | CATENATE_ALL | SPLIT_ON_CASE_CHANGE | SPLIT_ON_NUMERICS | STEM_ENGLISH_POSSESSIVE;
     // test that subwords and catenated subwords have
@@ -77,7 +95,6 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
         new int[] { 6, 6, 6 });
   }
   
-  @Test
   public void testOffsetChange() throws Exception {
     int flags = GENERATE_WORD_PARTS | GENERATE_NUMBER_PARTS | CATENATE_ALL | SPLIT_ON_CASE_CHANGE | SPLIT_ON_NUMERICS | STEM_ENGLISH_POSSESSIVE;
     WordDelimiterFilter wdf = new WordDelimiterFilter(new CannedTokenStream(new Token("übelkeit)", 7, 16)), DEFAULT_WORD_DELIM_TABLE, flags, null);
@@ -88,7 +105,6 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
         new int[] { 15 });
   }
   
-  @Test
   public void testOffsetChange2() throws Exception {
     int flags = GENERATE_WORD_PARTS | GENERATE_NUMBER_PARTS | CATENATE_ALL | SPLIT_ON_CASE_CHANGE | SPLIT_ON_NUMERICS | STEM_ENGLISH_POSSESSIVE;
     WordDelimiterFilter wdf = new WordDelimiterFilter(new CannedTokenStream(new Token("(übelkeit", 7, 17)), DEFAULT_WORD_DELIM_TABLE, flags, null);
@@ -99,7 +115,6 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
         new int[] { 17 });
   }
   
-  @Test
   public void testOffsetChange3() throws Exception {
     int flags = GENERATE_WORD_PARTS | GENERATE_NUMBER_PARTS | CATENATE_ALL | SPLIT_ON_CASE_CHANGE | SPLIT_ON_NUMERICS | STEM_ENGLISH_POSSESSIVE;
     WordDelimiterFilter wdf = new WordDelimiterFilter(new CannedTokenStream(new Token("(übelkeit", 7, 16)), DEFAULT_WORD_DELIM_TABLE, flags, null);
@@ -110,7 +125,6 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
         new int[] { 16 });
   }
   
-  @Test
   public void testOffsetChange4() throws Exception {
     int flags = GENERATE_WORD_PARTS | GENERATE_NUMBER_PARTS | CATENATE_ALL | SPLIT_ON_CASE_CHANGE | SPLIT_ON_NUMERICS | STEM_ENGLISH_POSSESSIVE;
     WordDelimiterFilter wdf = new WordDelimiterFilter(new CannedTokenStream(new Token("(foo,bar)", 7, 16)), DEFAULT_WORD_DELIM_TABLE, flags, null);
@@ -129,7 +143,6 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
     assertTokenStreamContents(wdf, output);
   }
 
-  @Test
   public void testSplits() throws Exception {
     doSplit("basic-split","basic","split");
     doSplit("camelCase","camel","Case");
@@ -175,7 +188,6 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
   /*
    * Test option that allows disabling the special "'s" stemming, instead treating the single quote like other delimiters. 
    */
-  @Test
   public void testPossessives() throws Exception {
     doSplitPossessive(1, "ra's", "ra");
     doSplitPossessive(0, "ra's", "ra", "s");
@@ -204,7 +216,6 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
     }  
   }
   
-  @Test
   public void testPositionIncrements() throws Exception {
     final int flags = GENERATE_WORD_PARTS | GENERATE_NUMBER_PARTS | CATENATE_ALL | SPLIT_ON_CASE_CHANGE | SPLIT_ON_NUMERICS | STEM_ENGLISH_POSSESSIVE;
     final CharArraySet protWords = new CharArraySet(new HashSet<>(Arrays.asList("NUTCH")), false);
@@ -296,7 +307,7 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
       @Override
       public TokenStreamComponents createComponents(String field) {
         Tokenizer tokenizer = new MockTokenizer(MockTokenizer.WHITESPACE, false);
-        StopFilter filter = new StopFilter(tokenizer, StandardAnalyzer.STOP_WORDS_SET);
+        StopFilter filter = new StopFilter(tokenizer, EnglishAnalyzer.ENGLISH_STOP_WORDS_SET);
         return new TokenStreamComponents(tokenizer, new WordDelimiterFilter(filter, flags, protWords));
       }
     };
@@ -323,6 +334,38 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
     IOUtils.close(a, a2, a3);
   }
   
+  public void testKeywordFilter() throws Exception {
+    assertAnalyzesTo(keywordTestAnalyzer(GENERATE_WORD_PARTS),
+                     "abc-def klm-nop kpop",
+                     new String[] {"abc", "def", "klm", "nop", "kpop"});
+    assertAnalyzesTo(keywordTestAnalyzer(GENERATE_WORD_PARTS | IGNORE_KEYWORDS),
+                     "abc-def klm-nop kpop",
+                     new String[] {"abc", "def", "klm-nop", "kpop"},
+                     new int[]{0, 4, 8, 16},
+                     new int[]{3, 7, 15, 20},
+                     null,
+                     new int[]{1, 1, 1, 1},
+                     null,
+                     false);
+  }
+
+  private Analyzer keywordTestAnalyzer(int flags) throws Exception {
+    return new Analyzer() {
+      @Override
+      public TokenStreamComponents createComponents(String field) {
+        Tokenizer tokenizer = new MockTokenizer(MockTokenizer.WHITESPACE, false);
+        KeywordMarkerFilter kFilter = new KeywordMarkerFilter(tokenizer) {
+          private final CharTermAttribute term = addAttribute(CharTermAttribute.class);
+          @Override public boolean isKeyword() {
+            // Marks terms starting with the letter 'k' as keywords
+            return term.toString().charAt(0) == 'k';
+          }
+        };
+        return new TokenStreamComponents(tokenizer, new WordDelimiterFilter(kFilter, flags, null));
+      }
+    };
+  }
+  
   /** concat numbers + words + all */
   public void testLotsOfConcatenating() throws Exception {
     final int flags = GENERATE_WORD_PARTS | GENERATE_NUMBER_PARTS | CATENATE_WORDS | CATENATE_NUMBERS | CATENATE_ALL | SPLIT_ON_CASE_CHANGE | SPLIT_ON_NUMERICS | STEM_ENGLISH_POSSESSIVE;    
@@ -346,7 +389,7 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
         false);
     a.close();
   }
-  
+
   /** concat numbers + words + all + preserve original */
   public void testLotsOfConcatenating2() throws Exception {
     final int flags = PRESERVE_ORIGINAL | GENERATE_WORD_PARTS | GENERATE_NUMBER_PARTS | CATENATE_WORDS | CATENATE_NUMBERS | CATENATE_ALL | SPLIT_ON_CASE_CHANGE | SPLIT_ON_NUMERICS | STEM_ENGLISH_POSSESSIVE;    
@@ -373,7 +416,7 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
   
   /** blast some random strings through the analyzer */
   public void testRandomStrings() throws Exception {
-    int numIterations = atLeast(5);
+    int numIterations = atLeast(3);
     for (int i = 0; i < numIterations; i++) {
       final int flags = random().nextInt(512);
       final CharArraySet protectedWords;
@@ -392,14 +435,14 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
         }
       };
       // TODO: properly support positionLengthAttribute
-      checkRandomData(random(), a, 200*RANDOM_MULTIPLIER, 20, false, false);
+      checkRandomData(random(), a, 100*RANDOM_MULTIPLIER, 20, false, false);
       a.close();
     }
   }
   
   /** blast some enormous random strings through the analyzer */
   public void testRandomHugeStrings() throws Exception {
-    int numIterations = atLeast(5);
+    int numIterations = atLeast(1);
     for (int i = 0; i < numIterations; i++) {
       final int flags = random().nextInt(512);
       final CharArraySet protectedWords;
@@ -418,7 +461,7 @@ public class TestWordDelimiterFilter extends BaseTokenStreamTestCase {
         }
       };
       // TODO: properly support positionLengthAttribute
-      checkRandomData(random(), a, 20*RANDOM_MULTIPLIER, 8192, false, false);
+      checkRandomData(random(), a, 10*RANDOM_MULTIPLIER, 8192, false, false);
       a.close();
     }
   }

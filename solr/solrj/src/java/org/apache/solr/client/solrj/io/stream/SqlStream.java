@@ -39,6 +39,9 @@ import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
 
+/**
+ * @since 7.0.0
+ */
 public class SqlStream extends TupleStream implements Expressible {
 
   private static final long serialVersionUID = 1;
@@ -73,12 +76,7 @@ public class SqlStream extends TupleStream implements Expressible {
 
     // Collection Name
     if(null == collectionName){
-      throw new IOException(String.format(Locale.ROOT,"invalid expression %s - collectionName expected as first operand",expression));
-    }
-
-    // Validate there are no unknown parameters - zkHost and alias are namedParameter so we don't need to count it twice
-    if(expression.getParameters().size() != 1 + namedParams.size()){
-      throw new IOException(String.format(Locale.ROOT,"invalid expression %s - unknown operands found",expression));
+      collectionName = factory.getDefaultCollection();
     }
 
     // Named parameters - passed directly to solr as solrparams
@@ -126,8 +124,7 @@ public class SqlStream extends TupleStream implements Expressible {
 
     // parameters
 
-    ModifiableSolrParams mParams = new ModifiableSolrParams(SolrParams.toMultiMap(params.toNamedList()));
-    for (Entry<String, String[]> param : mParams.getMap().entrySet()) {
+    for (Entry<String, String[]> param : params) {
       String value = String.join(",", param.getValue());
 
       // SOLR-8409: This is a special case where the params contain a " character
@@ -203,6 +200,9 @@ public class SqlStream extends TupleStream implements Expressible {
       this.tupleStream = new SolrStream(url, mParams);
       if(streamContext != null) {
         tupleStream.setStreamContext(streamContext);
+        if(streamContext.isLocal()) {
+          mParams.add("distrib", "false");
+        }
       }
     } catch (Exception e) {
       throw new IOException(e);

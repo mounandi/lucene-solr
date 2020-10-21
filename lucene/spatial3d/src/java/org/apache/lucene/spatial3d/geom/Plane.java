@@ -465,12 +465,13 @@ public class Plane extends Vector {
    * Find points on the boundary of the intersection of a plane and the unit sphere,
    * given a starting point, and ending point, and a list of proportions of the arc (e.g. 0.25, 0.5, 0.75).
    * The angle between the starting point and ending point is assumed to be less than pi.
+   * @param planetModel is the planet model.
    * @param start is the start point.
    * @param end is the end point.
    * @param proportions is an array of fractional proportions measured between start and end.
    * @return an array of points corresponding to the proportions passed in.
    */
-  public GeoPoint[] interpolate(final GeoPoint start, final GeoPoint end, final double[] proportions) {
+  public GeoPoint[] interpolate(final PlanetModel planetModel, final GeoPoint start, final GeoPoint end, final double[] proportions) {
     // Steps:
     // (1) Translate (x0,y0,z0) of endpoints into origin-centered place:
     // x1 = x0 + D*A
@@ -595,7 +596,7 @@ public class Plane extends Vector {
       final double sinNewAngle = Math.sin(newAngle);
       final double cosNewAngle = Math.cos(newAngle);
       final Vector newVector = new Vector(cosNewAngle * startMagnitude, sinNewAngle * startMagnitude, 0.0);
-      returnValues[i] = reverseModify(newVector, transX, transY, transZ, sinRA, cosRA, sinHA, cosHA);
+      returnValues[i] = reverseModify(planetModel, newVector, transX, transY, transZ, sinRA, cosRA, sinHA, cosHA);
     }
 
     return returnValues;
@@ -620,6 +621,7 @@ public class Plane extends Vector {
 
   /**
    * Reverse modify a point to produce a GeoPoint in normal space.
+   * @param planetModel is the planet model.
    * @param point is the translated point.
    * @param transX is the translation x value.
    * @param transY is the translation y value.
@@ -630,10 +632,11 @@ public class Plane extends Vector {
    * @param cosHA is the cosine of the height angle.
    * @return the original point.
    */
-  protected static GeoPoint reverseModify(final Vector point, final double transX, final double transY, final double transZ,
-                                          final double sinRA, final double cosRA, final double sinHA, final double cosHA) {
+  protected static GeoPoint reverseModify(final PlanetModel planetModel,
+    final Vector point, final double transX, final double transY, final double transZ,
+    final double sinRA, final double cosRA, final double sinHA, final double cosHA) {
     final Vector result = point.rotateXZ(-sinHA, cosHA).rotateXY(-sinRA, cosRA).translate(-transX, -transY, -transZ);
-    return new GeoPoint(result.x, result.y, result.z);
+    return planetModel.createSurfacePoint(result.x, result.y, result.z);
   }
 
   /**
@@ -665,6 +668,21 @@ public class Plane extends Vector {
       return null;
     }
     return findCrossings(planetModel, q, bounds, NO_BOUNDS);
+  }
+
+  /**
+   * Checks if three points are coplanar in any of the three planes they can describe.
+   * The planes are all assumed to go through the origin.
+   *
+   * @param A The first point.
+   * @param B The second point.
+   * @param C The third point
+   * @return true if provided points are coplanar in any of the three planes they can describe.
+   */
+  public static boolean arePointsCoplanar(final GeoPoint A, final GeoPoint B, final GeoPoint C) {
+    return Vector.crossProductEvaluateIsZero(A, B, C) ||
+      Vector.crossProductEvaluateIsZero(A, C, B) ||
+      Vector.crossProductEvaluateIsZero(B, C, A);
   }
   
   /**
@@ -704,7 +722,7 @@ public class Plane extends Vector {
     // ... can be solved by Cramer's rule:
     // x = det(S0 R0 / S1 R1) / det(Q0 R0 / Q1 R1)
     // y = det(Q0 S0 / Q1 S1) / det(Q0 R0 / Q1 R1)
-    // ... where det( a b / c d ) = ad - bc, so:
+    // ... where det( a b / zScaling d ) = ad - bc, so:
     // x = (S0 * R1 - R0 * S1) / (Q0 * R1 - R0 * Q1)
     // y = (Q0 * S1 - S0 * Q1) / (Q0 * R1 - R0 * Q1)
     double x0;
@@ -748,16 +766,16 @@ public class Plane extends Vector {
 
     // Once an intersecting line is determined, the next step is to intersect that line with the ellipsoid, which
     // will yield zero, one, or two points.
-    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/c^2
-    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/c^2
-    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / c^2 + 2CC0t / c^2 + C0^2 / c^2  - 1,0 = 0.0
-    // [A^2 / a^2 + B^2 / b^2 + C^2 / c^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / c^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / c^2 - 1,0] = 0.0
+    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/zScaling^2
+    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/zScaling^2
+    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / zScaling^2 + 2CC0t / zScaling^2 + C0^2 / zScaling^2  - 1,0 = 0.0
+    // [A^2 / a^2 + B^2 / b^2 + C^2 / zScaling^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / zScaling^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / zScaling^2 - 1,0] = 0.0
     // Use the quadratic formula to determine t values and candidate point(s)
-    final double A = lineVectorX * lineVectorX * planetModel.inverseAbSquared +
-      lineVectorY * lineVectorY * planetModel.inverseAbSquared +
-      lineVectorZ * lineVectorZ * planetModel.inverseCSquared;
-    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseAbSquared + lineVectorY * y0 * planetModel.inverseAbSquared + lineVectorZ * z0 * planetModel.inverseCSquared);
-    final double C = x0 * x0 * planetModel.inverseAbSquared + y0 * y0 * planetModel.inverseAbSquared + z0 * z0 * planetModel.inverseCSquared - 1.0;
+    final double A = lineVectorX * lineVectorX * planetModel.inverseXYScalingSquared +
+      lineVectorY * lineVectorY * planetModel.inverseXYScalingSquared +
+      lineVectorZ * lineVectorZ * planetModel.inverseZScalingSquared;
+    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseXYScalingSquared + lineVectorY * y0 * planetModel.inverseXYScalingSquared + lineVectorZ * z0 * planetModel.inverseZScalingSquared);
+    final double C = x0 * x0 * planetModel.inverseXYScalingSquared + y0 * y0 * planetModel.inverseXYScalingSquared + z0 * z0 * planetModel.inverseZScalingSquared - 1.0;
 
     final double BsquaredMinus = B * B - 4.0 * A * C;
     if (Math.abs(BsquaredMinus) < MINIMUM_RESOLUTION_SQUARED) {
@@ -880,7 +898,7 @@ public class Plane extends Vector {
     // ... can be solved by Cramer's rule:
     // x = det(S0 R0 / S1 R1) / det(Q0 R0 / Q1 R1)
     // y = det(Q0 S0 / Q1 S1) / det(Q0 R0 / Q1 R1)
-    // ... where det( a b / c d ) = ad - bc, so:
+    // ... where det( a b / zScaling d ) = ad - bc, so:
     // x = (S0 * R1 - R0 * S1) / (Q0 * R1 - R0 * Q1)
     // y = (Q0 * S1 - S0 * Q1) / (Q0 * R1 - R0 * Q1)
     double x0;
@@ -921,16 +939,16 @@ public class Plane extends Vector {
 
     // Once an intersecting line is determined, the next step is to intersect that line with the ellipsoid, which
     // will yield zero, one, or two points.
-    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/c^2
-    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/c^2
-    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / c^2 + 2CC0t / c^2 + C0^2 / c^2  - 1,0 = 0.0
-    // [A^2 / a^2 + B^2 / b^2 + C^2 / c^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / c^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / c^2 - 1,0] = 0.0
+    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/zScaling^2
+    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/zScaling^2
+    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / zScaling^2 + 2CC0t / zScaling^2 + C0^2 / zScaling^2  - 1,0 = 0.0
+    // [A^2 / a^2 + B^2 / b^2 + C^2 / zScaling^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / zScaling^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / zScaling^2 - 1,0] = 0.0
     // Use the quadratic formula to determine t values and candidate point(s)
-    final double A = lineVectorX * lineVectorX * planetModel.inverseAbSquared +
-      lineVectorY * lineVectorY * planetModel.inverseAbSquared +
-      lineVectorZ * lineVectorZ * planetModel.inverseCSquared;
-    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseAbSquared + lineVectorY * y0 * planetModel.inverseAbSquared + lineVectorZ * z0 * planetModel.inverseCSquared);
-    final double C = x0 * x0 * planetModel.inverseAbSquared + y0 * y0 * planetModel.inverseAbSquared + z0 * z0 * planetModel.inverseCSquared - 1.0;
+    final double A = lineVectorX * lineVectorX * planetModel.inverseXYScalingSquared +
+      lineVectorY * lineVectorY * planetModel.inverseXYScalingSquared +
+      lineVectorZ * lineVectorZ * planetModel.inverseZScalingSquared;
+    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseXYScalingSquared + lineVectorY * y0 * planetModel.inverseXYScalingSquared + lineVectorZ * z0 * planetModel.inverseZScalingSquared);
+    final double C = x0 * x0 * planetModel.inverseXYScalingSquared + y0 * y0 * planetModel.inverseXYScalingSquared + z0 * z0 * planetModel.inverseZScalingSquared - 1.0;
 
     final double BsquaredMinus = B * B - 4.0 * A * C;
     if (Math.abs(BsquaredMinus) < MINIMUM_RESOLUTION_SQUARED) {
@@ -1030,7 +1048,7 @@ public class Plane extends Vector {
     // ... can be solved by Cramer's rule:
     // x = det(S0 R0 / S1 R1) / det(Q0 R0 / Q1 R1)
     // y = det(Q0 S0 / Q1 S1) / det(Q0 R0 / Q1 R1)
-    // ... where det( a b / c d ) = ad - bc, so:
+    // ... where det( a b / zScaling d ) = ad - bc, so:
     // x = (S0 * R1 - R0 * S1) / (Q0 * R1 - R0 * Q1)
     // y = (Q0 * S1 - S0 * Q1) / (Q0 * R1 - R0 * Q1)
     // We try to maximize the determinant in the denominator
@@ -1120,16 +1138,16 @@ public class Plane extends Vector {
     final Membership... bounds) {
     // Once an intersecting line is determined, the next step is to intersect that line with the ellipsoid, which
     // will yield zero, one, or two points.
-    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/c^2
-    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/c^2
-    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / c^2 + 2CC0t / c^2 + C0^2 / c^2  - 1,0 = 0.0
-    // [A^2 / a^2 + B^2 / b^2 + C^2 / c^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / c^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / c^2 - 1,0] = 0.0
+    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/zScaling^2
+    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/zScaling^2
+    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / zScaling^2 + 2CC0t / zScaling^2 + C0^2 / zScaling^2  - 1,0 = 0.0
+    // [A^2 / a^2 + B^2 / b^2 + C^2 / zScaling^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / zScaling^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / zScaling^2 - 1,0] = 0.0
     // Use the quadratic formula to determine t values and candidate point(s)
-    final double A = lineVectorX * lineVectorX * planetModel.inverseAbSquared +
-      lineVectorY * lineVectorY * planetModel.inverseAbSquared +
-      lineVectorZ * lineVectorZ * planetModel.inverseCSquared;
-    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseAbSquared + lineVectorY * y0 * planetModel.inverseAbSquared + lineVectorZ * z0 * planetModel.inverseCSquared);
-    final double C = x0 * x0 * planetModel.inverseAbSquared + y0 * y0 * planetModel.inverseAbSquared + z0 * z0 * planetModel.inverseCSquared - 1.0;
+    final double A = lineVectorX * lineVectorX * planetModel.inverseXYScalingSquared +
+      lineVectorY * lineVectorY * planetModel.inverseXYScalingSquared +
+      lineVectorZ * lineVectorZ * planetModel.inverseZScalingSquared;
+    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseXYScalingSquared + lineVectorY * y0 * planetModel.inverseXYScalingSquared + lineVectorZ * z0 * planetModel.inverseZScalingSquared);
+    final double C = x0 * x0 * planetModel.inverseXYScalingSquared + y0 * y0 * planetModel.inverseXYScalingSquared + z0 * z0 * planetModel.inverseZScalingSquared - 1.0;
 
     final double BsquaredMinus = B * B - 4.0 * A * C;
     if (Math.abs(BsquaredMinus) < MINIMUM_RESOLUTION_SQUARED) {
@@ -1195,7 +1213,7 @@ public class Plane extends Vector {
       throw new RuntimeException("Intersection point not on original plane; point="+point+", plane="+this);
     if (!q.evaluateIsZero(point))
       throw new RuntimeException("Intersection point not on intersected plane; point="+point+", plane="+q);
-    if (Math.abs(point.x * point.x * planetModel.inverseASquared + point.y * point.y * planetModel.inverseBSquared + point.z * point.z * planetModel.inverseCSquared - 1.0) >= MINIMUM_RESOLUTION) 
+    if (Math.abs(point.x * point.x * planetModel.inverseASquared + point.y * point.y * planetModel.inverseBSquared + point.z * point.z * planetModel.inverseZScalingSquared - 1.0) >= MINIMUM_RESOLUTION)
       throw new RuntimeException("Intersection point not on ellipsoid; point="+point);
   }
   */
@@ -1258,14 +1276,16 @@ public class Plane extends Vector {
         // Since a==b==0, any plane including the Z axis suffices.
         //System.err.println("      Perpendicular to z");
         final GeoPoint[] points = findIntersections(planetModel, normalYPlane, NO_BOUNDS, NO_BOUNDS);
-        boundsInfo.addZValue(points[0]);
+        if (points.length > 0) {
+          boundsInfo.addZValue(points[0]);
+        }
       }
     }
 
     // First, compute common subexpressions
-    final double k = 1.0 / ((x*x + y*y)*planetModel.ab*planetModel.ab + z*z*planetModel.c*planetModel.c);
-    final double abSquared = planetModel.ab * planetModel.ab;
-    final double cSquared = planetModel.c * planetModel.c;
+    final double k = 1.0 / ((x*x + y*y)*planetModel.xyScaling *planetModel.xyScaling + z*z*planetModel.zScaling *planetModel.zScaling);
+    final double abSquared = planetModel.xyScaling * planetModel.xyScaling;
+    final double cSquared = planetModel.zScaling * planetModel.zScaling;
     final double ASquared = A * A;
     final double BSquared = B * B;
     final double CSquared = C * C;
@@ -1278,11 +1298,11 @@ public class Plane extends Vector {
       //
       // For this, we need grad(F(x,y,z)) = (dF/dx, dF/dy, dF/dz).
       //
-      // Minimize and maximize f(x,y,z) = x, with respect to g(x,y,z) = Ax + By + Cz - D and h(x,y,z) = x^2/ab^2 + y^2/ab^2 + z^2/c^2 - 1
+      // Minimize and maximize f(x,y,z) = x, with respect to g(x,y,z) = Ax + By + Cz - D and h(x,y,z) = x^2/xyScaling^2 + y^2/xyScaling^2 + z^2/zScaling^2 - 1
       //
       // grad(f(x,y,z)) = (1,0,0)
       // grad(g(x,y,z)) = (A,B,C)
-      // grad(h(x,y,z)) = (2x/ab^2,2y/ab^2,2z/c^2)
+      // grad(h(x,y,z)) = (2x/xyScaling^2,2y/xyScaling^2,2z/zScaling^2)
       //
       // Equations we need to simultaneously solve:
       // 
@@ -1291,49 +1311,49 @@ public class Plane extends Vector {
       // h(x,y,z) = 0
       // 
       // Equations:
-      // 1 = l*A + m*2x/ab^2
-      // 0 = l*B + m*2y/ab^2
-      // 0 = l*C + m*2z/c^2
+      // 1 = l*A + m*2x/xyScaling^2
+      // 0 = l*B + m*2y/xyScaling^2
+      // 0 = l*C + m*2z/zScaling^2
       // Ax + By + Cz + D = 0
-      // x^2/ab^2 + y^2/ab^2 + z^2/c^2 - 1 = 0
+      // x^2/xyScaling^2 + y^2/xyScaling^2 + z^2/zScaling^2 - 1 = 0
       // 
       // Solve for x,y,z in terms of (l, m):
       // 
-      // x = ((1 - l*A) * ab^2 ) / (2 * m)
-      // y = (-l*B * ab^2) / ( 2 * m)
-      // z = (-l*C * c^2)/ (2 * m)
+      // x = ((1 - l*A) * xyScaling^2 ) / (2 * m)
+      // y = (-l*B * xyScaling^2) / ( 2 * m)
+      // z = (-l*C * zScaling^2)/ (2 * m)
       // 
       // Two equations, two unknowns:
       // 
-      // A * (((1 - l*A) * ab^2 ) / (2 * m)) + B * ((-l*B * ab^2) / ( 2 * m)) + C * ((-l*C * c^2)/ (2 * m)) + D = 0
+      // A * (((1 - l*A) * xyScaling^2 ) / (2 * m)) + B * ((-l*B * xyScaling^2) / ( 2 * m)) + C * ((-l*C * zScaling^2)/ (2 * m)) + D = 0
       // 
       // and
       // 
-      // (((1 - l*A) * ab^2 ) / (2 * m))^2/ab^2 + ((-l*B * ab^2) / ( 2 * m))^2/ab^2 + ((-l*C * c^2)/ (2 * m))^2/c^2 - 1 = 0
+      // (((1 - l*A) * xyScaling^2 ) / (2 * m))^2/xyScaling^2 + ((-l*B * xyScaling^2) / ( 2 * m))^2/xyScaling^2 + ((-l*C * zScaling^2)/ (2 * m))^2/zScaling^2 - 1 = 0
       // 
       // Simple: solve for l and m, then find x from it.
       // 
       // (a) Use first equation to find l in terms of m.
       // 
-      // A * (((1 - l*A) * ab^2 ) / (2 * m)) + B * ((-l*B * ab^2) / ( 2 * m)) + C * ((-l*C * c^2)/ (2 * m)) + D = 0
-      // A * ((1 - l*A) * ab^2 ) + B * (-l*B * ab^2) + C * (-l*C * c^2) + D * 2 * m = 0
-      // A * ab^2 - l*A^2* ab^2 - B^2 * l * ab^2 - C^2 * l * c^2 + D * 2 * m = 0
-      // - l *(A^2* ab^2 + B^2 * ab^2 + C^2 * c^2) + (A * ab^2 + D * 2 * m) = 0
-      // l = (A * ab^2 + D * 2 * m) / (A^2* ab^2 + B^2 * ab^2 + C^2 * c^2)
-      // l = A * ab^2 / (A^2* ab^2 + B^2 * ab^2 + C^2 * c^2) + m * 2 * D / (A^2* ab^2 + B^2 * ab^2 + C^2 * c^2)
+      // A * (((1 - l*A) * xyScaling^2 ) / (2 * m)) + B * ((-l*B * xyScaling^2) / ( 2 * m)) + C * ((-l*C * zScaling^2)/ (2 * m)) + D = 0
+      // A * ((1 - l*A) * xyScaling^2 ) + B * (-l*B * xyScaling^2) + C * (-l*C * zScaling^2) + D * 2 * m = 0
+      // A * xyScaling^2 - l*A^2* xyScaling^2 - B^2 * l * xyScaling^2 - C^2 * l * zScaling^2 + D * 2 * m = 0
+      // - l *(A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2) + (A * xyScaling^2 + D * 2 * m) = 0
+      // l = (A * xyScaling^2 + D * 2 * m) / (A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2)
+      // l = A * xyScaling^2 / (A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2) + m * 2 * D / (A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2)
       // 
       // For convenience:
       // 
-      // k = 1.0 / (A^2* ab^2 + B^2 * ab^2 + C^2 * c^2)
+      // k = 1.0 / (A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2)
       // 
       // Then:
       // 
-      // l = A * ab^2 * k + m * 2 * D * k
-      // l = k * (A*ab^2 + m*2*D)
+      // l = A * xyScaling^2 * k + m * 2 * D * k
+      // l = k * (A*xyScaling^2 + m*2*D)
       //
       // For further convenience:
       //
-      // q = A*ab^2*k
+      // q = A*xyScaling^2*k
       // r = 2*D*k
       //
       // l = (r*m + q)
@@ -1341,23 +1361,23 @@ public class Plane extends Vector {
       // 
       // (b) Simplify the second equation before substitution
       // 
-      // (((1 - l*A) * ab^2 ) / (2 * m))^2/ab^2 + ((-l*B * ab^2) / ( 2 * m))^2/ab^2 + ((-l*C * c^2)/ (2 * m))^2/c^2 - 1 = 0
-      // ((1 - l*A) * ab^2 )^2/ab^2 + (-l*B * ab^2)^2/ab^2 + (-l*C * c^2)^2/c^2 = 4 * m^2
-      // (1 - l*A)^2 * ab^2 + (-l*B)^2 * ab^2 + (-l*C)^2 * c^2 = 4 * m^2
-      // (1 - 2*l*A + l^2*A^2) * ab^2 + l^2*B^2 * ab^2 + l^2*C^2 * c^2 = 4 * m^2
-      // ab^2 - 2*A*ab^2*l + A^2*ab^2*l^2 + B^2*ab^2*l^2 + C^2*c^2*l^2 - 4*m^2 = 0
+      // (((1 - l*A) * xyScaling^2 ) / (2 * m))^2/xyScaling^2 + ((-l*B * xyScaling^2) / ( 2 * m))^2/xyScaling^2 + ((-l*C * zScaling^2)/ (2 * m))^2/zScaling^2 - 1 = 0
+      // ((1 - l*A) * xyScaling^2 )^2/xyScaling^2 + (-l*B * xyScaling^2)^2/xyScaling^2 + (-l*C * zScaling^2)^2/zScaling^2 = 4 * m^2
+      // (1 - l*A)^2 * xyScaling^2 + (-l*B)^2 * xyScaling^2 + (-l*C)^2 * zScaling^2 = 4 * m^2
+      // (1 - 2*l*A + l^2*A^2) * xyScaling^2 + l^2*B^2 * xyScaling^2 + l^2*C^2 * zScaling^2 = 4 * m^2
+      // xyScaling^2 - 2*A*xyScaling^2*l + A^2*xyScaling^2*l^2 + B^2*xyScaling^2*l^2 + C^2*zScaling^2*l^2 - 4*m^2 = 0
       // 
-      // (c) Substitute for l, l^2
+      // (zScaling) Substitute for l, l^2
       //
-      // ab^2 - 2*A*ab^2*(r*m + q) + A^2*ab^2*(r^2 * m^2 + 2*r*m*q + q^2) + B^2*ab^2*(r^2 * m^2 + 2*r*m*q + q^2) + C^2*c^2*(r^2 * m^2 + 2*r*m*q + q^2) - 4*m^2 = 0
-      // ab^2 - 2*A*ab^2*r*m - 2*A*ab^2*q + A^2*ab^2*r^2*m^2 + 2*A^2*ab^2*r*q*m +
-      //        A^2*ab^2*q^2 + B^2*ab^2*r^2*m^2 + 2*B^2*ab^2*r*q*m + B^2*ab^2*q^2 + C^2*c^2*r^2*m^2 + 2*C^2*c^2*r*q*m + C^2*c^2*q^2 - 4*m^2 = 0
+      // xyScaling^2 - 2*A*xyScaling^2*(r*m + q) + A^2*xyScaling^2*(r^2 * m^2 + 2*r*m*q + q^2) + B^2*xyScaling^2*(r^2 * m^2 + 2*r*m*q + q^2) + C^2*zScaling^2*(r^2 * m^2 + 2*r*m*q + q^2) - 4*m^2 = 0
+      // xyScaling^2 - 2*A*xyScaling^2*r*m - 2*A*xyScaling^2*q + A^2*xyScaling^2*r^2*m^2 + 2*A^2*xyScaling^2*r*q*m +
+      //        A^2*xyScaling^2*q^2 + B^2*xyScaling^2*r^2*m^2 + 2*B^2*xyScaling^2*r*q*m + B^2*xyScaling^2*q^2 + C^2*zScaling^2*r^2*m^2 + 2*C^2*zScaling^2*r*q*m + C^2*zScaling^2*q^2 - 4*m^2 = 0
       //
       // (d) Group
       //
-      // m^2 * [A^2*ab^2*r^2 + B^2*ab^2*r^2 + C^2*c^2*r^2 - 4] +
-      // m * [- 2*A*ab^2*r + 2*A^2*ab^2*r*q + 2*B^2*ab^2*r*q + 2*C^2*c^2*r*q] +
-      // [ab^2 - 2*A*ab^2*q + A^2*ab^2*q^2 + B^2*ab^2*q^2 + C^2*c^2*q^2]  =  0
+      // m^2 * [A^2*xyScaling^2*r^2 + B^2*xyScaling^2*r^2 + C^2*zScaling^2*r^2 - 4] +
+      // m * [- 2*A*xyScaling^2*r + 2*A^2*xyScaling^2*r*q + 2*B^2*xyScaling^2*r*q + 2*C^2*zScaling^2*r*q] +
+      // [xyScaling^2 - 2*A*xyScaling^2*q + A^2*xyScaling^2*q^2 + B^2*xyScaling^2*q^2 + C^2*zScaling^2*q^2]  =  0
       
       // Useful subexpressions for this bound
       final double q = A*abSquared*k;
@@ -1376,14 +1396,14 @@ public class Plane extends Vector {
           // Valid?
           if (Math.abs(m) >= MINIMUM_RESOLUTION) {
             final double l = r * m + q;
-            // x = ((1 - l*A) * ab^2 ) / (2 * m)
-            // y = (-l*B * ab^2) / ( 2 * m)
-            // z = (-l*C * c^2)/ (2 * m)
+            // x = ((1 - l*A) * xyScaling^2 ) / (2 * m)
+            // y = (-l*B * xyScaling^2) / ( 2 * m)
+            // z = (-l*C * zScaling^2)/ (2 * m)
             final double denom0 = 0.5 / m;
             final GeoPoint thePoint = new GeoPoint((1.0-l*A) * abSquared * denom0, -l*B * abSquared * denom0, -l*C * cSquared * denom0);
             //Math is not quite accurate enough for this
             //assert planetModel.pointOnSurface(thePoint): "Point: "+thePoint+"; Planetmodel="+planetModel+"; A="+A+" B="+B+" C="+C+" D="+D+" planetfcn="+
-            //  (thePoint.x*thePoint.x*planetModel.inverseAb*planetModel.inverseAb + thePoint.y*thePoint.y*planetModel.inverseAb*planetModel.inverseAb + thePoint.z*thePoint.z*planetModel.inverseC*planetModel.inverseC);
+            //  (thePoint.x*thePoint.x*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint.y*thePoint.y*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint.z*thePoint.z*planetModel.inverseZScaling*planetModel.inverseZScaling);
             //assert evaluateIsZero(thePoint): "Evaluation of point: "+evaluate(thePoint);
             addPoint(boundsInfo, bounds, thePoint);
           } else {
@@ -1401,18 +1421,18 @@ public class Plane extends Vector {
           if (Math.abs(m1) >= MINIMUM_RESOLUTION || Math.abs(m2) >= MINIMUM_RESOLUTION) {
             final double l1 = r * m1 + q;
             final double l2 = r * m2 + q;
-            // x = ((1 - l*A) * ab^2 ) / (2 * m)
-            // y = (-l*B * ab^2) / ( 2 * m)
-            // z = (-l*C * c^2)/ (2 * m)
+            // x = ((1 - l*A) * xyScaling^2 ) / (2 * m)
+            // y = (-l*B * xyScaling^2) / ( 2 * m)
+            // z = (-l*C * zScaling^2)/ (2 * m)
             final double denom1 = 0.5 / m1;
             final double denom2 = 0.5 / m2;
             final GeoPoint thePoint1 = new GeoPoint((1.0-l1*A) * abSquared * denom1, -l1*B * abSquared * denom1, -l1*C * cSquared * denom1);
             final GeoPoint thePoint2 = new GeoPoint((1.0-l2*A) * abSquared * denom2, -l2*B * abSquared * denom2, -l2*C * cSquared * denom2);
             //Math is not quite accurate enough for this
             //assert planetModel.pointOnSurface(thePoint1): "Point1: "+thePoint1+"; Planetmodel="+planetModel+"; A="+A+" B="+B+" C="+C+" D="+D+" planetfcn="+
-            //  (thePoint1.x*thePoint1.x*planetModel.inverseAb*planetModel.inverseAb + thePoint1.y*thePoint1.y*planetModel.inverseAb*planetModel.inverseAb + thePoint1.z*thePoint1.z*planetModel.inverseC*planetModel.inverseC);
+            //  (thePoint1.x*thePoint1.x*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint1.y*thePoint1.y*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint1.z*thePoint1.z*planetModel.inverseZScaling*planetModel.inverseZScaling);
             //assert planetModel.pointOnSurface(thePoint2): "Point1: "+thePoint2+"; Planetmodel="+planetModel+"; A="+A+" B="+B+" C="+C+" D="+D+" planetfcn="+
-            //  (thePoint2.x*thePoint2.x*planetModel.inverseAb*planetModel.inverseAb + thePoint2.y*thePoint2.y*planetModel.inverseAb*planetModel.inverseAb + thePoint2.z*thePoint2.z*planetModel.inverseC*planetModel.inverseC);
+            //  (thePoint2.x*thePoint2.x*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint2.y*thePoint2.y*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint2.z*thePoint2.z*planetModel.inverseZScaling*planetModel.inverseZScaling);
             //assert evaluateIsZero(thePoint1): "Evaluation of point1: "+evaluate(thePoint1);
             //assert evaluateIsZero(thePoint2): "Evaluation of point2: "+evaluate(thePoint2);
             addPoint(boundsInfo, bounds, thePoint1);
@@ -1425,17 +1445,17 @@ public class Plane extends Vector {
           // No solutions
         }
       } else if (Math.abs(b) > MINIMUM_RESOLUTION_SQUARED) {
-        // a = 0, so m = - c / b
+        // a = 0, so m = - zScaling / b
         final double m = -c / b;
         final double l = r * m + q;
-        // x = ((1 - l*A) * ab^2 ) / (2 * m)
-        // y = (-l*B * ab^2) / ( 2 * m)
-        // z = (-l*C * c^2)/ (2 * m)
+        // x = ((1 - l*A) * xyScaling^2 ) / (2 * m)
+        // y = (-l*B * xyScaling^2) / ( 2 * m)
+        // z = (-l*C * zScaling^2)/ (2 * m)
         final double denom0 = 0.5 / m;
         final GeoPoint thePoint = new GeoPoint((1.0-l*A) * abSquared * denom0, -l*B * abSquared * denom0, -l*C * cSquared * denom0);
         //Math is not quite accurate enough for this
         //assert planetModel.pointOnSurface(thePoint): "Point: "+thePoint+"; Planetmodel="+planetModel+"; A="+A+" B="+B+" C="+C+" D="+D+" planetfcn="+
-        //  (thePoint.x*thePoint.x*planetModel.inverseAb*planetModel.inverseAb + thePoint.y*thePoint.y*planetModel.inverseAb*planetModel.inverseAb + thePoint.z*thePoint.z*planetModel.inverseC*planetModel.inverseC);
+        //  (thePoint.x*thePoint.x*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint.y*thePoint.y*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint.z*thePoint.z*planetModel.inverseZScaling*planetModel.inverseZScaling);
         //assert evaluateIsZero(thePoint): "Evaluation of point: "+evaluate(thePoint);
         addPoint(boundsInfo, bounds, thePoint);
       } else {
@@ -1449,11 +1469,11 @@ public class Plane extends Vector {
       //
       // For this, we need grad(F(x,y,z)) = (dF/dx, dF/dy, dF/dz).
       //
-      // Minimize and maximize f(x,y,z) = y, with respect to g(x,y,z) = Ax + By + Cz - D and h(x,y,z) = x^2/ab^2 + y^2/ab^2 + z^2/c^2 - 1
+      // Minimize and maximize f(x,y,z) = y, with respect to g(x,y,z) = Ax + By + Cz - D and h(x,y,z) = x^2/xyScaling^2 + y^2/xyScaling^2 + z^2/zScaling^2 - 1
       //
       // grad(f(x,y,z)) = (0,1,0)
       // grad(g(x,y,z)) = (A,B,C)
-      // grad(h(x,y,z)) = (2x/ab^2,2y/ab^2,2z/c^2)
+      // grad(h(x,y,z)) = (2x/xyScaling^2,2y/xyScaling^2,2z/zScaling^2)
       //
       // Equations we need to simultaneously solve:
       // 
@@ -1462,49 +1482,49 @@ public class Plane extends Vector {
       // h(x,y,z) = 0
       // 
       // Equations:
-      // 0 = l*A + m*2x/ab^2
-      // 1 = l*B + m*2y/ab^2
-      // 0 = l*C + m*2z/c^2
+      // 0 = l*A + m*2x/xyScaling^2
+      // 1 = l*B + m*2y/xyScaling^2
+      // 0 = l*C + m*2z/zScaling^2
       // Ax + By + Cz + D = 0
-      // x^2/ab^2 + y^2/ab^2 + z^2/c^2 - 1 = 0
+      // x^2/xyScaling^2 + y^2/xyScaling^2 + z^2/zScaling^2 - 1 = 0
       // 
       // Solve for x,y,z in terms of (l, m):
       // 
-      // x = (-l*A * ab^2 ) / (2 * m)
-      // y = ((1 - l*B) * ab^2) / ( 2 * m)
-      // z = (-l*C * c^2)/ (2 * m)
+      // x = (-l*A * xyScaling^2 ) / (2 * m)
+      // y = ((1 - l*B) * xyScaling^2) / ( 2 * m)
+      // z = (-l*C * zScaling^2)/ (2 * m)
       // 
       // Two equations, two unknowns:
       // 
-      // A * ((-l*A * ab^2 ) / (2 * m)) + B * (((1 - l*B) * ab^2) / ( 2 * m)) + C * ((-l*C * c^2)/ (2 * m)) + D = 0
+      // A * ((-l*A * xyScaling^2 ) / (2 * m)) + B * (((1 - l*B) * xyScaling^2) / ( 2 * m)) + C * ((-l*C * zScaling^2)/ (2 * m)) + D = 0
       // 
       // and
       // 
-      // ((-l*A * ab^2 ) / (2 * m))^2/ab^2 + (((1 - l*B) * ab^2) / ( 2 * m))^2/ab^2 + ((-l*C * c^2)/ (2 * m))^2/c^2 - 1 = 0
+      // ((-l*A * xyScaling^2 ) / (2 * m))^2/xyScaling^2 + (((1 - l*B) * xyScaling^2) / ( 2 * m))^2/xyScaling^2 + ((-l*C * zScaling^2)/ (2 * m))^2/zScaling^2 - 1 = 0
       // 
       // Simple: solve for l and m, then find y from it.
       // 
       // (a) Use first equation to find l in terms of m.
       // 
-      // A * ((-l*A * ab^2 ) / (2 * m)) + B * (((1 - l*B) * ab^2) / ( 2 * m)) + C * ((-l*C * c^2)/ (2 * m)) + D = 0
-      // A * (-l*A * ab^2 ) + B * ((1-l*B) * ab^2) + C * (-l*C * c^2) + D * 2 * m = 0
-      // -A^2*l*ab^2 + B*ab^2 - l*B^2*ab^2 - C^2*l*c^2 + D*2*m = 0
-      // - l *(A^2* ab^2 + B^2 * ab^2 + C^2 * c^2) + (B * ab^2 + D * 2 * m) = 0
-      // l = (B * ab^2 + D * 2 * m) / (A^2* ab^2 + B^2 * ab^2 + C^2 * c^2)
-      // l = B * ab^2 / (A^2* ab^2 + B^2 * ab^2 + C^2 * c^2) + m * 2 * D / (A^2* ab^2 + B^2 * ab^2 + C^2 * c^2)
+      // A * ((-l*A * xyScaling^2 ) / (2 * m)) + B * (((1 - l*B) * xyScaling^2) / ( 2 * m)) + C * ((-l*C * zScaling^2)/ (2 * m)) + D = 0
+      // A * (-l*A * xyScaling^2 ) + B * ((1-l*B) * xyScaling^2) + C * (-l*C * zScaling^2) + D * 2 * m = 0
+      // -A^2*l*xyScaling^2 + B*xyScaling^2 - l*B^2*xyScaling^2 - C^2*l*zScaling^2 + D*2*m = 0
+      // - l *(A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2) + (B * xyScaling^2 + D * 2 * m) = 0
+      // l = (B * xyScaling^2 + D * 2 * m) / (A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2)
+      // l = B * xyScaling^2 / (A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2) + m * 2 * D / (A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2)
       // 
       // For convenience:
       // 
-      // k = 1.0 / (A^2* ab^2 + B^2 * ab^2 + C^2 * c^2)
+      // k = 1.0 / (A^2* xyScaling^2 + B^2 * xyScaling^2 + C^2 * zScaling^2)
       // 
       // Then:
       // 
-      // l = B * ab^2 * k + m * 2 * D * k
-      // l = k * (B*ab^2 + m*2*D)
+      // l = B * xyScaling^2 * k + m * 2 * D * k
+      // l = k * (B*xyScaling^2 + m*2*D)
       //
       // For further convenience:
       //
-      // q = B*ab^2*k
+      // q = B*xyScaling^2*k
       // r = 2*D*k
       //
       // l = (r*m + q)
@@ -1512,23 +1532,23 @@ public class Plane extends Vector {
       // 
       // (b) Simplify the second equation before substitution
       // 
-      // ((-l*A * ab^2 ) / (2 * m))^2/ab^2 + (((1 - l*B) * ab^2) / ( 2 * m))^2/ab^2 + ((-l*C * c^2)/ (2 * m))^2/c^2 - 1 = 0
-      // (-l*A * ab^2 )^2/ab^2 + ((1 - l*B) * ab^2)^2/ab^2 + (-l*C * c^2)^2/c^2 = 4 * m^2
-      // (-l*A)^2 * ab^2 + (1 - l*B)^2 * ab^2 + (-l*C)^2 * c^2 = 4 * m^2
-      // l^2*A^2 * ab^2 + (1 - 2*l*B + l^2*B^2) * ab^2 + l^2*C^2 * c^2 = 4 * m^2
-      // A^2*ab^2*l^2 + ab^2 - 2*B*ab^2*l + B^2*ab^2*l^2 + C^2*c^2*l^2 - 4*m^2 = 0
+      // ((-l*A * xyScaling^2 ) / (2 * m))^2/xyScaling^2 + (((1 - l*B) * xyScaling^2) / ( 2 * m))^2/xyScaling^2 + ((-l*C * zScaling^2)/ (2 * m))^2/zScaling^2 - 1 = 0
+      // (-l*A * xyScaling^2 )^2/xyScaling^2 + ((1 - l*B) * xyScaling^2)^2/xyScaling^2 + (-l*C * zScaling^2)^2/zScaling^2 = 4 * m^2
+      // (-l*A)^2 * xyScaling^2 + (1 - l*B)^2 * xyScaling^2 + (-l*C)^2 * zScaling^2 = 4 * m^2
+      // l^2*A^2 * xyScaling^2 + (1 - 2*l*B + l^2*B^2) * xyScaling^2 + l^2*C^2 * zScaling^2 = 4 * m^2
+      // A^2*xyScaling^2*l^2 + xyScaling^2 - 2*B*xyScaling^2*l + B^2*xyScaling^2*l^2 + C^2*zScaling^2*l^2 - 4*m^2 = 0
       // 
-      // (c) Substitute for l, l^2
+      // (zScaling) Substitute for l, l^2
       //
-      // A^2*ab^2*(r^2 * m^2 + 2*r*m*q + q^2) + ab^2 - 2*B*ab^2*(r*m + q) + B^2*ab^2*(r^2 * m^2 + 2*r*m*q + q^2) + C^2*c^2*(r^2 * m^2 + 2*r*m*q + q^2) - 4*m^2 = 0
-      // A^2*ab^2*r^2*m^2 + 2*A^2*ab^2*r*q*m + A^2*ab^2*q^2 + ab^2 - 2*B*ab^2*r*m - 2*B*ab^2*q + B^2*ab^2*r^2*m^2 +
-      //    2*B^2*ab^2*r*q*m + B^2*ab^2*q^2 + C^2*c^2*r^2*m^2 + 2*C^2*c^2*r*q*m + C^2*c^2*q^2 - 4*m^2 = 0
+      // A^2*xyScaling^2*(r^2 * m^2 + 2*r*m*q + q^2) + xyScaling^2 - 2*B*xyScaling^2*(r*m + q) + B^2*xyScaling^2*(r^2 * m^2 + 2*r*m*q + q^2) + C^2*zScaling^2*(r^2 * m^2 + 2*r*m*q + q^2) - 4*m^2 = 0
+      // A^2*xyScaling^2*r^2*m^2 + 2*A^2*xyScaling^2*r*q*m + A^2*xyScaling^2*q^2 + xyScaling^2 - 2*B*xyScaling^2*r*m - 2*B*xyScaling^2*q + B^2*xyScaling^2*r^2*m^2 +
+      //    2*B^2*xyScaling^2*r*q*m + B^2*xyScaling^2*q^2 + C^2*zScaling^2*r^2*m^2 + 2*C^2*zScaling^2*r*q*m + C^2*zScaling^2*q^2 - 4*m^2 = 0
       //
       // (d) Group
       //
-      // m^2 * [A^2*ab^2*r^2 + B^2*ab^2*r^2 + C^2*c^2*r^2 - 4] +
-      // m * [2*A^2*ab^2*r*q - 2*B*ab^2*r + 2*B^2*ab^2*r*q + 2*C^2*c^2*r*q] +
-      // [A^2*ab^2*q^2 + ab^2 - 2*B*ab^2*q + B^2*ab^2*q^2 + C^2*c^2*q^2]  =  0
+      // m^2 * [A^2*xyScaling^2*r^2 + B^2*xyScaling^2*r^2 + C^2*zScaling^2*r^2 - 4] +
+      // m * [2*A^2*xyScaling^2*r*q - 2*B*xyScaling^2*r + 2*B^2*xyScaling^2*r*q + 2*C^2*zScaling^2*r*q] +
+      // [A^2*xyScaling^2*q^2 + xyScaling^2 - 2*B*xyScaling^2*q + B^2*xyScaling^2*q^2 + C^2*zScaling^2*q^2]  =  0
 
       //System.err.println("    computing Y bound");
       
@@ -1549,14 +1569,14 @@ public class Plane extends Vector {
           // Valid?
           if (Math.abs(m) >= MINIMUM_RESOLUTION) {
             final double l = r * m + q;
-            // x = (-l*A * ab^2 ) / (2 * m)
-            // y = ((1.0-l*B) * ab^2) / ( 2 * m)
-            // z = (-l*C * c^2)/ (2 * m)
+            // x = (-l*A * xyScaling^2 ) / (2 * m)
+            // y = ((1.0-l*B) * xyScaling^2) / ( 2 * m)
+            // z = (-l*C * zScaling^2)/ (2 * m)
             final double denom0 = 0.5 / m;
             final GeoPoint thePoint = new GeoPoint(-l*A * abSquared * denom0, (1.0-l*B) * abSquared * denom0, -l*C * cSquared * denom0);
             //Math is not quite accurate enough for this
             //assert planetModel.pointOnSurface(thePoint): "Point: "+thePoint+"; Planetmodel="+planetModel+"; A="+A+" B="+B+" C="+C+" D="+D+" planetfcn="+
-            //  (thePoint1.x*thePoint.x*planetModel.inverseAb*planetModel.inverseAb + thePoint.y*thePoint.y*planetModel.inverseAb*planetModel.inverseAb + thePoint.z*thePoint.z*planetModel.inverseC*planetModel.inverseC);
+            //  (thePoint1.x*thePoint.x*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint.y*thePoint.y*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint.z*thePoint.z*planetModel.inverseZScaling*planetModel.inverseZScaling);
             //assert evaluateIsZero(thePoint): "Evaluation of point: "+evaluate(thePoint);
             addPoint(boundsInfo, bounds, thePoint);
           } else {
@@ -1574,18 +1594,18 @@ public class Plane extends Vector {
           if (Math.abs(m1) >= MINIMUM_RESOLUTION || Math.abs(m2) >= MINIMUM_RESOLUTION) {
             final double l1 = r * m1 + q;
             final double l2 = r * m2 + q;
-            // x = (-l*A * ab^2 ) / (2 * m)
-            // y = ((1.0-l*B) * ab^2) / ( 2 * m)
-            // z = (-l*C * c^2)/ (2 * m)
+            // x = (-l*A * xyScaling^2 ) / (2 * m)
+            // y = ((1.0-l*B) * xyScaling^2) / ( 2 * m)
+            // z = (-l*C * zScaling^2)/ (2 * m)
             final double denom1 = 0.5 / m1;
             final double denom2 = 0.5 / m2;
             final GeoPoint thePoint1 = new GeoPoint(-l1*A * abSquared * denom1, (1.0-l1*B) * abSquared * denom1, -l1*C * cSquared * denom1);
             final GeoPoint thePoint2 = new GeoPoint(-l2*A * abSquared * denom2, (1.0-l2*B) * abSquared * denom2, -l2*C * cSquared * denom2);
             //Math is not quite accurate enough for this
             //assert planetModel.pointOnSurface(thePoint1): "Point1: "+thePoint1+"; Planetmodel="+planetModel+"; A="+A+" B="+B+" C="+C+" D="+D+" planetfcn="+
-            //  (thePoint1.x*thePoint1.x*planetModel.inverseAb*planetModel.inverseAb + thePoint1.y*thePoint1.y*planetModel.inverseAb*planetModel.inverseAb + thePoint1.z*thePoint1.z*planetModel.inverseC*planetModel.inverseC);
+            //  (thePoint1.x*thePoint1.x*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint1.y*thePoint1.y*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint1.z*thePoint1.z*planetModel.inverseZScaling*planetModel.inverseZScaling);
             //assert planetModel.pointOnSurface(thePoint2): "Point2: "+thePoint2+"; Planetmodel="+planetModel+"; A="+A+" B="+B+" C="+C+" D="+D+" planetfcn="+
-            //  (thePoint2.x*thePoint2.x*planetModel.inverseAb*planetModel.inverseAb + thePoint2.y*thePoint2.y*planetModel.inverseAb*planetModel.inverseAb + thePoint2.z*thePoint2.z*planetModel.inverseC*planetModel.inverseC);
+            //  (thePoint2.x*thePoint2.x*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint2.y*thePoint2.y*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint2.z*thePoint2.z*planetModel.inverseZScaling*planetModel.inverseZScaling);
             //assert evaluateIsZero(thePoint1): "Evaluation of point1: "+evaluate(thePoint1);
             //assert evaluateIsZero(thePoint2): "Evaluation of point2: "+evaluate(thePoint2);
             addPoint(boundsInfo, bounds, thePoint1);
@@ -1598,17 +1618,17 @@ public class Plane extends Vector {
           // No solutions
         }
       } else if (Math.abs(b) > MINIMUM_RESOLUTION_SQUARED) {
-        // a = 0, so m = - c / b
+        // a = 0, so m = - zScaling / b
         final double m = -c / b;
         final double l = r * m + q;
-        // x = ( -l*A * ab^2 ) / (2 * m)
-        // y = ((1-l*B) * ab^2) / ( 2 * m)
-        // z = (-l*C * c^2)/ (2 * m)
+        // x = ( -l*A * xyScaling^2 ) / (2 * m)
+        // y = ((1-l*B) * xyScaling^2) / ( 2 * m)
+        // z = (-l*C * zScaling^2)/ (2 * m)
         final double denom0 = 0.5 / m;
         final GeoPoint thePoint = new GeoPoint(-l*A * abSquared * denom0, (1.0-l*B) * abSquared * denom0, -l*C * cSquared * denom0);
         //Math is not quite accurate enough for this
         //assert planetModel.pointOnSurface(thePoint): "Point: "+thePoint+"; Planetmodel="+planetModel+"; A="+A+" B="+B+" C="+C+" D="+D+" planetfcn="+
-        //  (thePoint.x*thePoint.x*planetModel.inverseAb*planetModel.inverseAb + thePoint.y*thePoint.y*planetModel.inverseAb*planetModel.inverseAb + thePoint.z*thePoint.z*planetModel.inverseC*planetModel.inverseC);
+        //  (thePoint.x*thePoint.x*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint.y*thePoint.y*planetModel.inverseXYScaling*planetModel.inverseXYScaling + thePoint.z*thePoint.z*planetModel.inverseZScaling*planetModel.inverseZScaling);
         //assert evaluateIsZero(thePoint): "Evaluation of point: "+evaluate(thePoint);
         addPoint(boundsInfo, bounds, thePoint);
       } else {
@@ -1714,9 +1734,9 @@ public class Plane extends Vector {
             // Group:
             // y^2 * [B^2/a^2 + A^2/b^2] + y [2BD/a^2] + [D^2/a^2-A^2] = 0
 
-            a = B * B * planetModel.inverseAbSquared + A * A * planetModel.inverseAbSquared;
-            b = 2.0 * B * D * planetModel.inverseAbSquared;
-            c = D * D * planetModel.inverseAbSquared - A * A;
+            a = B * B * planetModel.inverseXYScalingSquared + A * A * planetModel.inverseXYScalingSquared;
+            b = 2.0 * B * D * planetModel.inverseXYScalingSquared;
+            c = D * D * planetModel.inverseXYScalingSquared - A * A;
 
             double sqrtClause = b * b - 4.0 * a * c;
 
@@ -1747,9 +1767,9 @@ public class Plane extends Vector {
             // Use equation suitable for B != 0
             // Since I != 0, we rewrite:
             // y = (-Ax - D)/B
-            a = B * B * planetModel.inverseAbSquared + A * A * planetModel.inverseAbSquared;
-            b = 2.0 * A * D * planetModel.inverseAbSquared;
-            c = D * D * planetModel.inverseAbSquared - B * B;
+            a = B * B * planetModel.inverseXYScalingSquared + A * A * planetModel.inverseXYScalingSquared;
+            b = 2.0 * A * D * planetModel.inverseXYScalingSquared;
+            c = D * D * planetModel.inverseXYScalingSquared - B * B;
 
             double sqrtClause = b * b - 4.0 * a * c;
 
@@ -1787,21 +1807,21 @@ public class Plane extends Vector {
         // From plane:
         // z = (-Ax - By - D) / C
         // From ellipsoid:
-        // x^2/a^2 + y^2/b^2 + [(-Ax - By - D) / C]^2/c^2 = 1
+        // x^2/a^2 + y^2/b^2 + [(-Ax - By - D) / C]^2/zScaling^2 = 1
         // Simplify/expand:
-        // C^2*x^2/a^2 + C^2*y^2/b^2 + (-Ax - By - D)^2/c^2 = C^2
+        // C^2*x^2/a^2 + C^2*y^2/b^2 + (-Ax - By - D)^2/zScaling^2 = C^2
         //
-        // x^2 * C^2/a^2 + y^2 * C^2/b^2 + x^2 * A^2/c^2 + ABxy/c^2 + ADx/c^2 + ABxy/c^2 + y^2 * B^2/c^2 + BDy/c^2 + ADx/c^2 + BDy/c^2 + D^2/c^2 = C^2
+        // x^2 * C^2/a^2 + y^2 * C^2/b^2 + x^2 * A^2/zScaling^2 + ABxy/zScaling^2 + ADx/zScaling^2 + ABxy/zScaling^2 + y^2 * B^2/zScaling^2 + BDy/zScaling^2 + ADx/zScaling^2 + BDy/zScaling^2 + D^2/zScaling^2 = C^2
         // Group:
-        // [A^2/c^2 + C^2/a^2] x^2 + [B^2/c^2 + C^2/b^2] y^2 + [2AB/c^2]xy + [2AD/c^2]x + [2BD/c^2]y + [D^2/c^2-C^2] = 0
+        // [A^2/zScaling^2 + C^2/a^2] x^2 + [B^2/zScaling^2 + C^2/b^2] y^2 + [2AB/zScaling^2]xy + [2AD/zScaling^2]x + [2BD/zScaling^2]y + [D^2/zScaling^2-C^2] = 0
         // For convenience, introduce post-projection coefficient variables to make life easier.
         // E x^2 + F y^2 + G xy + H x + I y + J = 0
-        double E = A * A * planetModel.inverseCSquared + C * C * planetModel.inverseAbSquared;
-        double F = B * B * planetModel.inverseCSquared + C * C * planetModel.inverseAbSquared;
-        double G = 2.0 * A * B * planetModel.inverseCSquared;
-        double H = 2.0 * A * D * planetModel.inverseCSquared;
-        double I = 2.0 * B * D * planetModel.inverseCSquared;
-        double J = D * D * planetModel.inverseCSquared - C * C;
+        double E = A * A * planetModel.inverseZScalingSquared + C * C * planetModel.inverseXYScalingSquared;
+        double F = B * B * planetModel.inverseZScalingSquared + C * C * planetModel.inverseXYScalingSquared;
+        double G = 2.0 * A * B * planetModel.inverseZScalingSquared;
+        double H = 2.0 * A * D * planetModel.inverseZScalingSquared;
+        double I = 2.0 * B * D * planetModel.inverseZScalingSquared;
+        double J = D * D * planetModel.inverseZScalingSquared - C * C;
 
         //System.err.println("E = " + E + " F = " + F + " G = " + G + " H = "+ H + " I = " + I + " J = " + J);
 
@@ -1855,7 +1875,7 @@ public class Plane extends Vector {
             b = 4.0 * E * I * J - 2.0 * G * H * J;
             c = 4.0 * E * J * J - J * H * H;
 
-            //System.out.println("a="+a+" b="+b+" c="+c);
+            //System.out.println("a="+a+" b="+b+" zScaling="+zScaling);
             double sqrtClause = b * b - 4.0 * a * c;
             //System.out.println("sqrtClause="+sqrtClause);
 
@@ -1907,7 +1927,7 @@ public class Plane extends Vector {
             b = 4.0 * F * H * J - 2.0 * G * I * J;
             c = 4.0 * F * J * J - J * I * I;
 
-            //System.out.println("a="+a+" b="+b+" c="+c);
+            //System.out.println("a="+a+" b="+b+" zScaling="+zScaling);
             double sqrtClause = b * b - 4.0 * a * c;
             //System.out.println("sqrtClause="+sqrtClause);
             if (Math.abs(sqrtClause) < MINIMUM_RESOLUTION_CUBED) {
@@ -2024,7 +2044,7 @@ public class Plane extends Vector {
     // ... can be solved by Cramer's rule:
     // x = det(S0 R0 / S1 R1) / det(Q0 R0 / Q1 R1)
     // y = det(Q0 S0 / Q1 S1) / det(Q0 R0 / Q1 R1)
-    // ... where det( a b / c d ) = ad - bc, so:
+    // ... where det( a b / zScaling d ) = ad - bc, so:
     // x = (S0 * R1 - R0 * S1) / (Q0 * R1 - R0 * Q1)
     // y = (Q0 * S1 - S0 * Q1) / (Q0 * R1 - R0 * Q1)
     double x0;
@@ -2068,16 +2088,16 @@ public class Plane extends Vector {
 
     // Once an intersecting line is determined, the next step is to intersect that line with the ellipsoid, which
     // will yield zero, one, or two points.
-    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/c^2
-    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/c^2
-    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / c^2 + 2CC0t / c^2 + C0^2 / c^2  - 1,0 = 0.0
-    // [A^2 / a^2 + B^2 / b^2 + C^2 / c^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / c^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / c^2 - 1,0] = 0.0
+    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/zScaling^2
+    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/zScaling^2
+    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / zScaling^2 + 2CC0t / zScaling^2 + C0^2 / zScaling^2  - 1,0 = 0.0
+    // [A^2 / a^2 + B^2 / b^2 + C^2 / zScaling^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / zScaling^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / zScaling^2 - 1,0] = 0.0
     // Use the quadratic formula to determine t values and candidate point(s)
-    final double A = lineVectorX * lineVectorX * planetModel.inverseAbSquared +
-      lineVectorY * lineVectorY * planetModel.inverseAbSquared +
-      lineVectorZ * lineVectorZ * planetModel.inverseCSquared;
-    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseAbSquared + lineVectorY * y0 * planetModel.inverseAbSquared + lineVectorZ * z0 * planetModel.inverseCSquared);
-    final double C = x0 * x0 * planetModel.inverseAbSquared + y0 * y0 * planetModel.inverseAbSquared + z0 * z0 * planetModel.inverseCSquared - 1.0;
+    final double A = lineVectorX * lineVectorX * planetModel.inverseXYScalingSquared +
+      lineVectorY * lineVectorY * planetModel.inverseXYScalingSquared +
+      lineVectorZ * lineVectorZ * planetModel.inverseZScalingSquared;
+    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseXYScalingSquared + lineVectorY * y0 * planetModel.inverseXYScalingSquared + lineVectorZ * z0 * planetModel.inverseZScalingSquared);
+    final double C = x0 * x0 * planetModel.inverseXYScalingSquared + y0 * y0 * planetModel.inverseXYScalingSquared + z0 * z0 * planetModel.inverseZScalingSquared - 1.0;
 
     final double BsquaredMinus = B * B - 4.0 * A * C;
     if (Math.abs(BsquaredMinus) < MINIMUM_RESOLUTION_SQUARED) {
@@ -2150,20 +2170,242 @@ public class Plane extends Vector {
   }
 
   /**
+   * Determine whether the plane crosses another plane within the
+   * bounds provided.  Crossing is defined as intersecting with the geo surface at two points.
+   *
+   * @param planetModel is the planet model to use in determining intersection.
+   * @param q                 is the other plane.
+   * @param notablePoints     are points to look at to disambiguate cases when the two planes are identical.
+   * @param moreNotablePoints are additional points to look at to disambiguate cases when the two planes are identical.
+   * @param bounds            is one part of the bounds.
+   * @param moreBounds        are more bounds.
+   * @return true if there's a crossing.
+   */
+  public boolean crosses(final PlanetModel planetModel, final Plane q, final GeoPoint[] notablePoints, final GeoPoint[] moreNotablePoints, final Membership[] bounds, final Membership... moreBounds) {
+    //System.err.println("Does plane "+this+" cross plane "+q);
+    // If the two planes are identical, then the math will find no points of intersection.
+    // So a special case of this is to check for plane equality.  But that is not enough, because
+    // what we really need at that point is to determine whether overlap occurs between the two parts of the intersection
+    // of plane and circle.  That is, are there *any* points on the plane that are within the bounds described?
+    if (isNumericallyIdentical(q)) {
+      //System.err.println(" Identical plane");
+      // The only way to efficiently figure this out will be to have a list of trial points available to evaluate.
+      // We look for any point that fulfills all the bounds.
+      for (GeoPoint p : notablePoints) {
+        if (meetsAllBounds(p, bounds, moreBounds)) {
+          //System.err.println("  found a notable point in bounds, so intersects");
+          return true;
+        }
+      }
+      for (GeoPoint p : moreNotablePoints) {
+        if (meetsAllBounds(p, bounds, moreBounds)) {
+          //System.err.println("  found a notable point in bounds, so intersects");
+          return true;
+        }
+      }
+      //System.err.println("  no notable points inside found; no intersection");
+      return false;
+    }
+    
+    // Save on allocations; do inline instead of calling findIntersections
+    //System.err.println("Looking for intersection between plane "+this+" and plane "+q+" within bounds");
+    // Unnormalized, unchecked...
+    final double lineVectorX = y * q.z - z * q.y;
+    final double lineVectorY = z * q.x - x * q.z;
+    final double lineVectorZ = x * q.y - y * q.x;
+
+    if (Math.abs(lineVectorX) < MINIMUM_RESOLUTION && Math.abs(lineVectorY) < MINIMUM_RESOLUTION && Math.abs(lineVectorZ) < MINIMUM_RESOLUTION) {
+      // Degenerate case: parallel planes
+      //System.err.println(" planes are parallel - no intersection");
+      return false;
+    }
+
+    // The line will have the equation: A t + A0 = x, B t + B0 = y, C t + C0 = z.
+    // We have A, B, and C.  In order to come up with A0, B0, and C0, we need to find a point that is on both planes.
+    // To do this, we find the largest vector value (either x, y, or z), and look for a point that solves both plane equations
+    // simultaneous.  For example, let's say that the vector is (0.5,0.5,1), and the two plane equations are:
+    // 0.7 x + 0.3 y + 0.1 z + 0.0 = 0
+    // and
+    // 0.9 x - 0.1 y + 0.2 z + 4.0 = 0
+    // Then we'd pick z = 0, so the equations to solve for x and y would be:
+    // 0.7 x + 0.3y = 0.0
+    // 0.9 x - 0.1y = -4.0
+    // ... which can readily be solved using standard linear algebra.  Generally:
+    // Q0 x + R0 y = S0
+    // Q1 x + R1 y = S1
+    // ... can be solved by Cramer's rule:
+    // x = det(S0 R0 / S1 R1) / det(Q0 R0 / Q1 R1)
+    // y = det(Q0 S0 / Q1 S1) / det(Q0 R0 / Q1 R1)
+    // ... where det( a b / zScaling d ) = ad - bc, so:
+    // x = (S0 * R1 - R0 * S1) / (Q0 * R1 - R0 * Q1)
+    // y = (Q0 * S1 - S0 * Q1) / (Q0 * R1 - R0 * Q1)
+    double x0;
+    double y0;
+    double z0;
+    // We try to maximize the determinant in the denominator
+    final double denomYZ = this.y * q.z - this.z * q.y;
+    final double denomXZ = this.x * q.z - this.z * q.x;
+    final double denomXY = this.x * q.y - this.y * q.x;
+    if (Math.abs(denomYZ) >= Math.abs(denomXZ) && Math.abs(denomYZ) >= Math.abs(denomXY)) {
+      // X is the biggest, so our point will have x0 = 0.0
+      if (Math.abs(denomYZ) < MINIMUM_RESOLUTION_SQUARED) {
+        //System.err.println(" Denominator is zero: no intersection");
+        return false;
+      }
+      final double denom = 1.0 / denomYZ;
+      x0 = 0.0;
+      y0 = (-this.D * q.z - this.z * -q.D) * denom;
+      z0 = (this.y * -q.D + this.D * q.y) * denom;
+    } else if (Math.abs(denomXZ) >= Math.abs(denomXY) && Math.abs(denomXZ) >= Math.abs(denomYZ)) {
+      // Y is the biggest, so y0 = 0.0
+      if (Math.abs(denomXZ) < MINIMUM_RESOLUTION_SQUARED) {
+        //System.err.println(" Denominator is zero: no intersection");
+        return false;
+      }
+      final double denom = 1.0 / denomXZ;
+      x0 = (-this.D * q.z - this.z * -q.D) * denom;
+      y0 = 0.0;
+      z0 = (this.x * -q.D + this.D * q.x) * denom;
+    } else {
+      // Z is the biggest, so Z0 = 0.0
+      if (Math.abs(denomXY) < MINIMUM_RESOLUTION_SQUARED) {
+        //System.err.println(" Denominator is zero: no intersection");
+        return false;
+      }
+      final double denom = 1.0 / denomXY;
+      x0 = (-this.D * q.y - this.y * -q.D) * denom;
+      y0 = (this.x * -q.D + this.D * q.x) * denom;
+      z0 = 0.0;
+    }
+
+    // Once an intersecting line is determined, the next step is to intersect that line with the ellipsoid, which
+    // will yield zero, one, or two points.
+    // The ellipsoid equation: 1,0 = x^2/a^2 + y^2/b^2 + z^2/zScaling^2
+    // 1.0 = (At+A0)^2/a^2 + (Bt+B0)^2/b^2 + (Ct+C0)^2/zScaling^2
+    // A^2 t^2 / a^2 + 2AA0t / a^2 + A0^2 / a^2 + B^2 t^2 / b^2 + 2BB0t / b^2 + B0^2 / b^2 + C^2 t^2 / zScaling^2 + 2CC0t / zScaling^2 + C0^2 / zScaling^2  - 1,0 = 0.0
+    // [A^2 / a^2 + B^2 / b^2 + C^2 / zScaling^2] t^2 + [2AA0 / a^2 + 2BB0 / b^2 + 2CC0 / zScaling^2] t + [A0^2 / a^2 + B0^2 / b^2 + C0^2 / zScaling^2 - 1,0] = 0.0
+    // Use the quadratic formula to determine t values and candidate point(s)
+    final double A = lineVectorX * lineVectorX * planetModel.inverseXYScalingSquared +
+      lineVectorY * lineVectorY * planetModel.inverseXYScalingSquared +
+      lineVectorZ * lineVectorZ * planetModel.inverseZScalingSquared;
+    final double B = 2.0 * (lineVectorX * x0 * planetModel.inverseXYScalingSquared + lineVectorY * y0 * planetModel.inverseXYScalingSquared + lineVectorZ * z0 * planetModel.inverseZScalingSquared);
+    final double C = x0 * x0 * planetModel.inverseXYScalingSquared + y0 * y0 * planetModel.inverseXYScalingSquared + z0 * z0 * planetModel.inverseZScalingSquared - 1.0;
+
+    final double BsquaredMinus = B * B - 4.0 * A * C;
+    if (Math.abs(BsquaredMinus) < MINIMUM_RESOLUTION_SQUARED) {
+      //System.err.println(" One point of intersection");
+      // We're not interested in situations where there is only one solution; these are intersections but not crossings
+      return false;
+    } else if (BsquaredMinus > 0.0) {
+      //System.err.println(" Two points of intersection");
+      final double inverse2A = 1.0 / (2.0 * A);
+      // Two solutions
+      final double sqrtTerm = Math.sqrt(BsquaredMinus);
+      final double t1 = (-B + sqrtTerm) * inverse2A;
+      final double t2 = (-B - sqrtTerm) * inverse2A;
+      // Up to two points being returned.  Do what we can to save on object creation though.
+      final double point1X = lineVectorX * t1 + x0;
+      final double point1Y = lineVectorY * t1 + y0;
+      final double point1Z = lineVectorZ * t1 + z0;
+      boolean point1Valid = true;
+      for (final Membership bound : bounds) {
+        if (!bound.isWithin(point1X, point1Y, point1Z)) {
+          point1Valid = false;
+          break;
+        }
+      }
+      if (point1Valid) {
+        for (final Membership bound : moreBounds) {
+          if (!bound.isWithin(point1X, point1Y, point1Z)) {
+            point1Valid = false;
+            break;
+          }
+        }
+      }
+      if (point1Valid) {
+        return true;
+      }
+      final double point2X = lineVectorX * t2 + x0;
+      final double point2Y = lineVectorY * t2 + y0;
+      final double point2Z = lineVectorZ * t2 + z0;
+      for (final Membership bound : bounds) {
+        if (!bound.isWithin(point2X, point2Y, point2Z)) {
+          return false;
+        }
+      }
+      for (final Membership bound : moreBounds) {
+        if (!bound.isWithin(point2X, point2Y, point2Z)) {
+          return false;
+        }
+      }
+      return true;
+    } else {
+      //System.err.println(" no solutions - no intersection");
+      return false;
+    }
+  }
+
+  /**
+   * Returns true if this plane and the other plane are functionally identical within the margin of error.
+   * Functionally identical means that the planes are so close to parallel that many aspects of planar math,
+   * like intersections, no longer have answers to within the required precision.
+   * @param p is the plane to compare against.
+   * @return true if the planes are functionally identical.
+   */
+  public boolean isFunctionallyIdentical(final Plane p) {
+    // We can get the correlation by just doing a parallel plane check.  That's basically finding
+    // out if the magnitude of the cross-product is "zero".
+    final double cross1 = this.y * p.z - this.z * p.y;
+    final double cross2 = this.z * p.x - this.x * p.z;
+    final double cross3 = this.x * p.y - this.y * p.x;
+    //System.out.println("cross product magnitude = "+(cross1 * cross1 + cross2 * cross2 + cross3 * cross3));
+    // Should be MINIMUM_RESOLUTION_SQUARED, but that gives us planes that are *almost* parallel, and those are problematic too,
+    // so we have a tighter constraint on parallelism in this method.
+    if (cross1 * cross1 + cross2 * cross2 + cross3 * cross3 >= 5 * MINIMUM_RESOLUTION) {
+      return false;
+    }
+    
+    // Now, see whether the parallel planes are in fact on top of one another.
+    // The math:
+    // We need a single point that fulfills:
+    // Ax + By + Cz + D = 0
+    // Pick:
+    // x0 = -(A * D) / (A^2 + B^2 + C^2)
+    // y0 = -(B * D) / (A^2 + B^2 + C^2)
+    // z0 = -(C * D) / (A^2 + B^2 + C^2)
+    // Check:
+    // A (x0) + B (y0) + C (z0) + D =? 0
+    // A (-(A * D) / (A^2 + B^2 + C^2)) + B (-(B * D) / (A^2 + B^2 + C^2)) + C (-(C * D) / (A^2 + B^2 + C^2)) + D ?= 0
+    // -D [ A^2 / (A^2 + B^2 + C^2) + B^2 / (A^2 + B^2 + C^2) + C^2 / (A^2 + B^2 + C^2)] + D ?= 0
+    // Yes.
+    final double denom = 1.0 / (p.x * p.x + p.y * p.y + p.z * p.z);
+    return evaluateIsZero(-p.x * p.D * denom, -p.y * p.D * denom, -p.z * p.D * denom);
+  }
+  
+  /**
    * Returns true if this plane and the other plane are identical within the margin of error.
    * @param p is the plane to compare against.
    * @return true if the planes are numerically identical.
    */
   public boolean isNumericallyIdentical(final Plane p) {
-    // We can get the correlation by just doing a parallel plane check.  If that passes, then compute a point on the plane
-    // (using D) and see if it also on the other plane.
+    // We can get the correlation by just doing a parallel plane check.  That's basically finding
+    // out if the magnitude of the cross-product is "zero".
+    final double cross1 = this.y * p.z - this.z * p.y;
+    final double cross2 = this.z * p.x - this.x * p.z;
+    final double cross3 = this.x * p.y - this.y * p.x;
+    //System.out.println("cross product magnitude = "+(cross1 * cross1 + cross2 * cross2 + cross3 * cross3));
+    if (cross1 * cross1 + cross2 * cross2 + cross3 * cross3 >= MINIMUM_RESOLUTION_SQUARED) {
+      return false;
+    }
+    /* Old method
     if (Math.abs(this.y * p.z - this.z * p.y) >= MINIMUM_RESOLUTION)
       return false;
     if (Math.abs(this.z * p.x - this.x * p.z) >= MINIMUM_RESOLUTION)
       return false;
     if (Math.abs(this.x * p.y - this.y * p.x) >= MINIMUM_RESOLUTION)
       return false;
-
+    */
+    
     // Now, see whether the parallel planes are in fact on top of one another.
     // The math:
     // We need a single point that fulfills:
@@ -2197,7 +2439,9 @@ public class Plane extends Vector {
     if (!evaluateIsZero(startPoint)) {
       throw new IllegalArgumentException("Start point is not on plane");
     }
-    assert Math.abs(x*x + y*y + z*z - 1.0) < MINIMUM_RESOLUTION_SQUARED : "Plane needs to be normalized";
+    
+    // The following assertion fails at times even for planes that were *explicitly* normalized, so I've disabled the check.
+    //assert Math.abs(x*x + y*y + z*z - 1.0) < MINIMUM_RESOLUTION_SQUARED : "Plane needs to be normalized";
     
     // The first step is to rotate coordinates for the point so that the plane lies on the x-y plane.
     // To acheive this, there will need to be three rotations:

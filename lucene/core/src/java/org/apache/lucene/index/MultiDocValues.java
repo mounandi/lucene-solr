@@ -56,7 +56,7 @@ public class MultiDocValues {
     } else if (size == 1) {
       return leaves.get(0).reader().getNormValues(field);
     }
-    FieldInfo fi = MultiFields.getMergedFieldInfos(r).fieldInfo(field);
+    FieldInfo fi = FieldInfos.getMergedFieldInfos(r).fieldInfo(field); //TODO avoid merging
     if (fi == null || fi.hasNorms() == false) {
       return null;
     }
@@ -434,7 +434,7 @@ public class MultiDocValues {
       LeafReaderContext context = leaves.get(i);
       SortedNumericDocValues v = context.reader().getSortedNumericDocValues(field);
       if (v == null) {
-        v = DocValues.emptySortedNumeric(context.reader().maxDoc());
+        v = DocValues.emptySortedNumeric();
       } else {
         anyReal = true;
       }

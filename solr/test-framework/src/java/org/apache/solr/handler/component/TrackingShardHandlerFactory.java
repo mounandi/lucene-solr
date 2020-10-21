@@ -84,7 +84,7 @@ public class TrackingShardHandlerFactory extends HttpShardHandlerFactory {
   public ShardHandler getShardHandler() {
     final ShardHandlerFactory factory = this;
     final ShardHandler wrapped = super.getShardHandler();
-    return new ShardHandler() {
+    return new HttpShardHandler(this) {
       @Override
       public void prepDistributed(ResponseBuilder rb) {
         wrapped.prepDistributed(rb);
@@ -152,10 +152,14 @@ public class TrackingShardHandlerFactory extends HttpShardHandlerFactory {
   public static void setTrackingQueue(List<JettySolrRunner> runners, Queue<ShardRequestAndParams> queue) {
     for (JettySolrRunner runner : runners) {
       CoreContainer container = runner.getCoreContainer();
-      ShardHandlerFactory factory = container.getShardHandlerFactory();
-      assert factory instanceof TrackingShardHandlerFactory : "not a TrackingShardHandlerFactory: " + factory.getClass();
-      TrackingShardHandlerFactory trackingShardHandlerFactory = (TrackingShardHandlerFactory) factory;
-      trackingShardHandlerFactory.setTrackingQueue(queue);
+      if (container != null) {
+        ShardHandlerFactory factory = container.getShardHandlerFactory();
+        assert factory instanceof TrackingShardHandlerFactory : "not a TrackingShardHandlerFactory: "
+            + factory.getClass();
+        @SuppressWarnings("resource")
+        TrackingShardHandlerFactory trackingShardHandlerFactory = (TrackingShardHandlerFactory) factory;
+        trackingShardHandlerFactory.setTrackingQueue(queue);
+      }
     }
   }
 

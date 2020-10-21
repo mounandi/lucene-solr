@@ -23,9 +23,8 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.file.NoSuchFileException;
-import java.util.Arrays;
 import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -55,7 +54,7 @@ public abstract class DirectoryFactory implements NamedListInitializedPlugin,
 
   protected static final String INDEX_W_TIMESTAMP_REGEX = "index\\.[0-9]{17}"; // see SnapShooter.DATE_FMT
 
-  // May be set by sub classes as data root, in which case getDataHome will use it as base
+  // May be set by sub classes as data root, in which case getDataHome will use it as base.  Absolute.
   protected Path dataHomePath;
 
   // hint about what the directory contains - default is index directory
@@ -109,9 +108,14 @@ public abstract class DirectoryFactory implements NamedListInitializedPlugin,
   protected abstract LockFactory createLockFactory(String rawLockType) throws IOException;
   
   /**
-   * Returns true if a Directory exists for a given path.
+   * Returns true if a Directory exists for a given path in the underlying (stable) storage <em>and</em> 
+   * contains at least one file.  
+   * Note that the existence of a {@link Directory} <em>Object</em> as returned by a previous call to the 
+   * {@link #get} method (on the specified <code>path</code>) is not enough to cause this method to return 
+   * true.  Some prior user of that Directory must have written &amp; synced at least one file to that 
+   * Directory (and at least one file must still exist)
+   *
    * @throws IOException If there is a low-level I/O error.
-   * 
    */
   public abstract boolean exists(String path) throws IOException;
   
@@ -326,16 +330,16 @@ public abstract class DirectoryFactory implements NamedListInitializedPlugin,
    * @return a String with absolute path to data direcotry
    */
   public String getDataHome(CoreDescriptor cd) throws IOException {
-    String dataDir;
+    Path dataDir;
     if (dataHomePath != null) {
-      String instanceDirLastPath = cd.getInstanceDir().getName(cd.getInstanceDir().getNameCount()-1).toString();
-      dataDir = Paths.get(coreContainer.getSolrHome()).resolve(dataHomePath)
-          .resolve(instanceDirLastPath).resolve(cd.getDataDir()).toAbsolutePath().toString();
+      Path instanceDirLastPath = cd.getInstanceDir().getName(cd.getInstanceDir().getNameCount()-1);
+      dataDir = dataHomePath.resolve(instanceDirLastPath).resolve(cd.getDataDir());
     } else {
       // by default, we go off the instance directory
-      dataDir = cd.getInstanceDir().resolve(cd.getDataDir()).toAbsolutePath().toString();
+      dataDir = cd.getInstanceDir().resolve(cd.getDataDir());
     }
-    return dataDir;
+    assert dataDir.isAbsolute();
+    return dataDir.toString();
   }
 
   public void cleanupOldIndexDirectories(final String dataDirPath, final String currentIndexDirPath, boolean afterCoreReload) {
@@ -378,7 +382,7 @@ public abstract class DirectoryFactory implements NamedListInitializedPlugin,
           log.warn("Delete old index directory {} failed.", dirToRmPath);
         }
       } catch (IOException ioExc) {
-        log.error("Failed to delete old directory {} due to: {}", dir.getAbsolutePath(), ioExc.toString());
+        log.error("Failed to delete old directory {} due to: ", dir.getAbsolutePath(), ioExc);
       }
     }
   }
@@ -393,7 +397,7 @@ public abstract class DirectoryFactory implements NamedListInitializedPlugin,
   public void initCoreContainer(CoreContainer cc) {
     this.coreContainer = cc;
     if (cc != null && cc.getConfig() != null) {
-      this.dataHomePath = cc.getConfig().getSolrDataHome();
+      this.dataHomePath = cc.getConfig().getSolrDataHome(); // absolute
     }
   }
   

@@ -31,7 +31,6 @@ import org.apache.solr.common.util.Utils;
 import org.apache.solr.handler.component.ShardHandler;
 import org.apache.solr.handler.component.ShardHandlerFactory;
 import org.apache.solr.handler.component.ShardRequest;
-import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,17 +49,22 @@ public class OverseerNodePrioritizer {
   private final String adminPath;
   private final ShardHandlerFactory shardHandlerFactory;
 
-  public OverseerNodePrioritizer(ZkStateReader zkStateReader, String adminPath, ShardHandlerFactory shardHandlerFactory) {
+  private ZkDistributedQueue stateUpdateQueue;
+
+  public OverseerNodePrioritizer(ZkStateReader zkStateReader, ZkDistributedQueue stateUpdateQueue, String adminPath, ShardHandlerFactory shardHandlerFactory) {
     this.zkStateReader = zkStateReader;
     this.adminPath = adminPath;
     this.shardHandlerFactory = shardHandlerFactory;
+    this.stateUpdateQueue = stateUpdateQueue;
   }
 
-  public synchronized void prioritizeOverseerNodes(String overseerId) throws KeeperException, InterruptedException {
+  public synchronized void prioritizeOverseerNodes(String overseerId) throws Exception {
     SolrZkClient zk = zkStateReader.getZkClient();
     if(!zk.exists(ZkStateReader.ROLES,true))return;
+    @SuppressWarnings({"rawtypes"})
     Map m = (Map) Utils.fromJSON(zk.getData(ZkStateReader.ROLES, null, new Stat(), true));
 
+    @SuppressWarnings({"rawtypes"})
     List overseerDesignates = (List) m.get("overseer");
     if(overseerDesignates==null || overseerDesignates.isEmpty()) return;
     String ldr = OverseerTaskProcessor.getLeaderNode(zk);
@@ -85,11 +89,13 @@ public class OverseerNodePrioritizer {
     if(!designateNodeId.equals( electionNodes.get(1))) { //checking if it is already at no:1
       log.info("asking node {} to come join election at head", designateNodeId);
       invokeOverseerOp(designateNodeId, "rejoinAtHead"); //ask designate to come first
-      log.info("asking the old first in line {} to rejoin election  ",electionNodes.get(1) );
+      if (log.isInfoEnabled()) {
+        log.info("asking the old first in line {} to rejoin election  ", electionNodes.get(1));
+      }
       invokeOverseerOp(electionNodes.get(1), "rejoin");//ask second inline to go behind
     }
     //now ask the current leader to QUIT , so that the designate can takeover
-    Overseer.getStateUpdateQueue(zkStateReader.getZkClient()).offer(
+    stateUpdateQueue.offer(
         Utils.toJSON(new ZkNodeProps(Overseer.QUEUE_OPERATION, OverseerAction.QUIT.toLower(),
             ID, OverseerTaskProcessor.getLeaderId(zkStateReader.getZkClient()))));
 

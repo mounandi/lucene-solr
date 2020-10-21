@@ -24,7 +24,15 @@ import java.util.GregorianCalendar;
 import java.util.Locale;
 import java.util.TimeZone;
 
-import org.apache.lucene.analysis.*;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.LowerCaseFilter;
+import org.apache.lucene.analysis.MockAnalyzer;
+import org.apache.lucene.analysis.MockSynonymFilter;
+import org.apache.lucene.analysis.MockTokenFilter;
+import org.apache.lucene.analysis.MockTokenizer;
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.document.DateTools;
@@ -34,17 +42,27 @@ import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.Term;
-//import org.apache.lucene.queryparser.classic.CharStream;
-//import org.apache.lucene.queryparser.classic.ParseException;
-//import org.apache.lucene.queryparser.classic.QueryParser;
-//import org.apache.lucene.queryparser.classic.QueryParserBase;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.queryparser.classic.QueryParserBase;
-//import org.apache.lucene.queryparser.classic.QueryParserTokenManager;
 import org.apache.lucene.queryparser.classic.TestQueryParser;
 import org.apache.lucene.queryparser.flexible.standard.CommonQueryParserConfiguration;
-import org.apache.lucene.search.*;
+import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanClause.Occur;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.BoostQuery;
+import org.apache.lucene.search.FuzzyQuery;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.MatchNoDocsQuery;
+import org.apache.lucene.search.MultiTermQuery;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.PrefixQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.RegexpQuery;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TermRangeQuery;
+import org.apache.lucene.search.WildcardQuery;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.automaton.Automata;
@@ -138,7 +156,7 @@ public abstract class QueryParserTestBase extends LuceneTestCase {
   @Override
   public void setUp() throws Exception {
     super.setUp();
-    originalMaxClauses = BooleanQuery.getMaxClauseCount();
+    originalMaxClauses = IndexSearcher.getMaxClauseCount();
   }
 
   public abstract CommonQueryParserConfiguration getParserConfig(Analyzer a) throws Exception;
@@ -441,7 +459,6 @@ public abstract class QueryParserTestBase extends LuceneTestCase {
     assertQueryEquals("term~1", null, "term~1");
     assertQueryEquals("term~0.7", null, "term~1");
     assertQueryEquals("term~^3", null, "(term~2)^3.0");
-    assertQueryEquals("term^3~", null, "(term~2)^3.0");
     assertQueryEquals("term*germ", null, "term*germ");
     assertQueryEquals("term*germ^3", null, "(term*germ)^3.0");
 
@@ -484,23 +501,16 @@ public abstract class QueryParserTestBase extends LuceneTestCase {
 //  Range queries:
     assertWildcardQueryEquals("[A TO C]", "[a TO c]");
     // Test suffix queries: first disallow
-    try {
+    Exception ex = expectThrows(Exception.class, () -> {
       assertWildcardQueryEquals("*Term", "*term", false);
-    } catch(Exception pe) {
-      // expected exception
-      if(!isQueryParserException(pe)){
-        fail();
-      }
-    }
-    try {
+    });
+    assertTrue(isQueryParserException(ex));
+
+    ex = expectThrows(Exception.class, () -> {
       assertWildcardQueryEquals("?Term", "?term");
-      fail();
-    } catch(Exception pe) {
-      // expected exception
-      if(!isQueryParserException(pe)){
-        fail();
-      }
-    }
+    });
+    assertTrue(isQueryParserException(ex));
+
     // Test suffix queries: then allow
     assertWildcardQueryEquals("*Term", "*term", true);
     assertWildcardQueryEquals("?Term", "?term", true);
@@ -960,7 +970,7 @@ public abstract class QueryParserTestBase extends LuceneTestCase {
   }
 
   public void testBooleanQuery() throws Exception {
-    BooleanQuery.setMaxClauseCount(2);
+    IndexSearcher.setMaxClauseCount(2);
     Analyzer purWhitespaceAnalyzer = new MockAnalyzer(random(), MockTokenizer.WHITESPACE, false);
     assertParseException("one two three", purWhitespaceAnalyzer);
   }
@@ -1121,7 +1131,7 @@ public abstract class QueryParserTestBase extends LuceneTestCase {
 
   @Override
   public void tearDown() throws Exception {
-    BooleanQuery.setMaxClauseCount(originalMaxClauses);
+    IndexSearcher.setMaxClauseCount(originalMaxClauses);
     super.tearDown();
   }
 
@@ -1140,7 +1150,7 @@ public abstract class QueryParserTestBase extends LuceneTestCase {
     IndexSearcher s = newSearcher(r);
     
     Query q = getQuery("\"wizard of ozzy\"",a);
-    assertEquals(1, s.search(q, 1).totalHits);
+    assertEquals(1, s.search(q, 1).totalHits.value);
     r.close();
     dir.close();
   }

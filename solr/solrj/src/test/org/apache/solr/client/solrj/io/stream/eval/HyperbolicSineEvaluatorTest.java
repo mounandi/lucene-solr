@@ -20,7 +20,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.client.solrj.io.Tuple;
 import org.apache.solr.client.solrj.io.eval.HyperbolicSineEvaluator;
 import org.apache.solr.client.solrj.io.eval.StreamEvaluator;
@@ -29,7 +29,7 @@ import org.junit.Test;
 
 import junit.framework.Assert;
 
-public class HyperbolicSineEvaluatorTest extends LuceneTestCase {
+public class HyperbolicSineEvaluatorTest extends SolrTestCase {
 
   StreamFactory factory;
   Map<String, Object> values;
@@ -75,8 +75,8 @@ public class HyperbolicSineEvaluatorTest extends LuceneTestCase {
   public void twoFields() throws Exception{
     factory.constructEvaluator("sinh(a,b)");
   }
-  
-  @Test
+
+  @Test//(expected = NumberFormatException.class)
   public void noValue() throws Exception{
     StreamEvaluator evaluator = factory.constructEvaluator("sinh(a)");
     
@@ -84,7 +84,8 @@ public class HyperbolicSineEvaluatorTest extends LuceneTestCase {
     Object result = evaluator.evaluate(new Tuple(values));
     assertNull(result);
   }
-  @Test
+
+  @Test//(expected = NumberFormatException.class)
   public void nullValue() throws Exception{
     test(null);
   }

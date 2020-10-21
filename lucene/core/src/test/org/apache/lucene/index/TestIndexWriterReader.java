@@ -32,12 +32,11 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TermQuery;
-import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.AlreadyClosedException;
+import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.MockDirectoryWrapper.FakeIOException;
 import org.apache.lucene.store.MockDirectoryWrapper;
-import org.apache.lucene.store.RAMDirectory;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.InfoStream;
@@ -50,7 +49,7 @@ import org.junit.Test;
 @SuppressCodecs("SimpleText") // too slow here
 public class TestIndexWriterReader extends LuceneTestCase {
   
-  private final int numThreads = TEST_NIGHTLY ? 5 : 3;
+  private final int numThreads = TEST_NIGHTLY ? 5 : 2;
   
   public static int count(Term t, IndexReader r) throws IOException {
     int count = 0;
@@ -60,7 +59,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
         0);
 
     if (td != null) {
-      final Bits liveDocs = MultiFields.getLiveDocs(r);
+      final Bits liveDocs = MultiBits.getLiveDocs(r);
       while (td.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
         td.docID();
         if (liveDocs == null || liveDocs.get(td.docID())) {
@@ -242,7 +241,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     boolean doFullMerge = false;
 
     Directory dir1 = getAssertNoDeletesDirectory(newDirectory());
-    IndexWriterConfig iwc = newIndexWriterConfig(new MockAnalyzer(random()));
+    IndexWriterConfig iwc = newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0);
     if (iwc.getMaxBufferedDocs() < 20) {
       iwc.setMaxBufferedDocs(20);
     }
@@ -295,11 +294,11 @@ public class TestIndexWriterReader extends LuceneTestCase {
     boolean doFullMerge = false;
 
     Directory dir1 = getAssertNoDeletesDirectory(newDirectory());
-    IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())));
+    IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0));
 
     // create a 2nd index
     Directory dir2 = newDirectory();
-    IndexWriter writer2 = new IndexWriter(dir2, newIndexWriterConfig(new MockAnalyzer(random())));
+    IndexWriter writer2 = new IndexWriter(dir2, newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0));
     createIndexNoClose(!doFullMerge, "index2", writer2);
     writer2.close();
 
@@ -325,7 +324,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     boolean doFullMerge = true;
 
     Directory dir1 = getAssertNoDeletesDirectory(newDirectory());
-    IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())));
+    IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0));
     // create the index
     createIndexNoClose(!doFullMerge, "index1", writer);
     writer.flush(false, true);
@@ -362,7 +361,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     writer.close();
         
     // reopen the writer to verify the delete made it to the directory
-    writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())));
+    writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0));
     IndexReader w2r1 = writer.getReader();
     assertEquals(0, count(new Term("id", id10), w2r1));
     w2r1.close();
@@ -372,13 +371,14 @@ public class TestIndexWriterReader extends LuceneTestCase {
 
   @Slow
   public void testAddIndexesAndDoDeletesThreads() throws Throwable {
-    final int numIter = 2;
-    int numDirs = 3;
+    final int numIter = TEST_NIGHTLY ? 2 : 1;
+    int numDirs = TEST_NIGHTLY ? 3 : 2;
     
     Directory mainDir = getAssertNoDeletesDirectory(newDirectory());
 
     IndexWriter mainWriter = new IndexWriter(mainDir, newIndexWriterConfig(new MockAnalyzer(random()))
-                                                        .setMergePolicy(newLogMergePolicy()));
+                                                        .setMergePolicy(newLogMergePolicy())
+                                                        .setMaxFullFlushMergeWaitMillis(0));
     TestUtil.reduceOpenFiles(mainWriter);
 
     AddDirectoriesThreads addDirThreads = new AddDirectoriesThreads(numIter, mainWriter);
@@ -386,8 +386,8 @@ public class TestIndexWriterReader extends LuceneTestCase {
     addDirThreads.joinThreads();
     
     //assertEquals(100 + numDirs * (3 * numIter / 4) * addDirThreads.numThreads
-    //    * addDirThreads.NUM_INIT_DOCS, addDirThreads.mainWriter.numDocs());
-    assertEquals(addDirThreads.count.intValue(), addDirThreads.mainWriter.numDocs());
+    //    * addDirThreads.NUM_INIT_DOCS, addDirThreads.mainwriter.getDocStats().numDocs);
+    assertEquals(addDirThreads.count.intValue(), addDirThreads.mainWriter.getDocStats().numDocs);
 
     addDirThreads.close(true);
     
@@ -422,6 +422,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
       this.mainWriter = mainWriter;
       addDir = newDirectory();
       IndexWriter writer = new IndexWriter(addDir, newIndexWriterConfig(new MockAnalyzer(random()))
+                                                     .setMaxFullFlushMergeWaitMillis(0)
                                                      .setMaxBufferedDocs(2));
       TestUtil.reduceOpenFiles(writer);
       for (int i = 0; i < NUM_INIT_DOCS; i++) {
@@ -534,7 +535,8 @@ public class TestIndexWriterReader extends LuceneTestCase {
    */
   public void doTestIndexWriterReopenSegment(boolean doFullMerge) throws Exception {
     Directory dir1 = getAssertNoDeletesDirectory(newDirectory());
-    IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())));
+    IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random()))
+        .setMaxFullFlushMergeWaitMillis(0));
     IndexReader r1 = writer.getReader();
     assertEquals(0, r1.maxDoc());
     createIndexNoClose(false, "index1", writer);
@@ -570,7 +572,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     writer.close();
 
     // test whether the changes made it to the directory
-    writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())));
+    writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0));
     IndexReader w2r1 = writer.getReader();
     // insure the deletes were actually flushed to the directory
     assertEquals(200, w2r1.maxDoc());
@@ -612,24 +614,16 @@ public class TestIndexWriterReader extends LuceneTestCase {
     }
   }
 
-  private static class MyWarmer extends IndexWriter.IndexReaderWarmer {
-    int warmCount;
-    @Override
-    public void warm(LeafReader reader) throws IOException {
-      warmCount++;
-    }
-  }
-
   public void testMergeWarmer() throws Exception {
-
     Directory dir1 = getAssertNoDeletesDirectory(newDirectory());
     // Enroll warmer
-    MyWarmer warmer = new MyWarmer();
+    AtomicInteger warmCount = new AtomicInteger();
     IndexWriter writer = new IndexWriter(
         dir1,
         newIndexWriterConfig(new MockAnalyzer(random()))
           .setMaxBufferedDocs(2)
-          .setMergedSegmentWarmer(warmer)
+          .setMaxFullFlushMergeWaitMillis(0)
+          .setMergedSegmentWarmer((leafReader) -> warmCount.incrementAndGet())
           .setMergeScheduler(new ConcurrentMergeScheduler())
           .setMergePolicy(newLogMergePolicy())
     );
@@ -648,12 +642,12 @@ public class TestIndexWriterReader extends LuceneTestCase {
     }
     ((ConcurrentMergeScheduler) writer.getConfig().getMergeScheduler()).sync();
 
-    assertTrue(warmer.warmCount > 0);
-    final int count = warmer.warmCount;
+    assertTrue(warmCount.get() > 0);
+    final int count = warmCount.get();
 
     writer.addDocument(DocHelper.createDocument(17, "test", 4));
     writer.forceMerge(1);
-    assertTrue(warmer.warmCount > count);
+    assertTrue(warmCount.get() > count);
     
     writer.close();
     r1.close();
@@ -663,7 +657,8 @@ public class TestIndexWriterReader extends LuceneTestCase {
   public void testAfterCommit() throws Exception {
     Directory dir1 = getAssertNoDeletesDirectory(newDirectory());
     IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random()))
-                                                 .setMergeScheduler(new ConcurrentMergeScheduler()));
+                                                 .setMergeScheduler(new ConcurrentMergeScheduler())
+                                                 .setMaxFullFlushMergeWaitMillis(0));
     writer.commit();
 
     // create the index
@@ -695,7 +690,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
   // Make sure reader remains usable even if IndexWriter closes
   public void testAfterClose() throws Exception {
     Directory dir1 = getAssertNoDeletesDirectory(newDirectory());
-    IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())));
+    IndexWriter writer = new IndexWriter(dir1, newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0));
 
     // create the index
     createIndexNoClose(false, "test", writer);
@@ -709,7 +704,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     assertEquals(100, r.numDocs());
     Query q = new TermQuery(new Term("indexname", "test"));
     IndexSearcher searcher = newSearcher(r);
-    assertEquals(100, searcher.search(q, 10).totalHits);
+    assertEquals(100, searcher.count(q));
 
     expectThrows(AlreadyClosedException.class, () -> {
       DirectoryReader.openIfChanged(r);
@@ -725,7 +720,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     Directory dir1 = getAssertNoDeletesDirectory(newDirectory());
     final IndexWriter writer = new IndexWriter(
         dir1,
-        newIndexWriterConfig(new MockAnalyzer(random()))
+        newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0)
           .setMergePolicy(newLogMergePolicy(2))
     );
 
@@ -777,7 +772,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
         r = r2;
         Query q = new TermQuery(new Term("indexname", "test"));
         IndexSearcher searcher = newSearcher(r);
-        final long count = searcher.search(q, 10).totalHits;
+        final long count = searcher.count(q);
         assertTrue(count >= lastCount);
         lastCount = count;
       }
@@ -794,7 +789,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     }
     Query q = new TermQuery(new Term("indexname", "test"));
     IndexSearcher searcher = newSearcher(r);
-    final long count = searcher.search(q, 10).totalHits;
+    final long count = searcher.count(q);
     assertTrue(count >= lastCount);
 
     assertEquals(0, excs.size());
@@ -819,11 +814,16 @@ public class TestIndexWriterReader extends LuceneTestCase {
   // Stress test reopen during add/delete
   public void testDuringAddDelete() throws Exception {
     Directory dir1 = newDirectory();
+    IndexWriterConfig iwc = newIndexWriterConfig(new MockAnalyzer(random()))
+        .setMergePolicy(newLogMergePolicy(2));
+    if (TEST_NIGHTLY) {
+      // if we have a ton of iterations we need to make sure we don't do unnecessary
+      // extra flushing otherwise we will timeout on nightly
+      iwc.setRAMBufferSizeMB(IndexWriterConfig.DEFAULT_RAM_BUFFER_SIZE_MB);
+      iwc.setMaxBufferedDocs(IndexWriterConfig.DISABLE_AUTO_FLUSH);
+    }
     final IndexWriter writer = new IndexWriter(
-        dir1,
-        newIndexWriterConfig(new MockAnalyzer(random()))
-          .setMergePolicy(newLogMergePolicy(2))
-    );
+        dir1,iwc);
 
     // create the index
     createIndexNoClose(false, "test", writer);
@@ -832,7 +832,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     DirectoryReader r = writer.getReader();
 
     final int iters = TEST_NIGHTLY ? 1000 : 10;
-    final List<Throwable> excs = Collections.synchronizedList(new ArrayList<Throwable>());
+    final List<Throwable> excs = Collections.synchronizedList(new ArrayList<>());
 
     final Thread[] threads = new Thread[numThreads];
     final AtomicInteger remainingThreads = new AtomicInteger(numThreads);
@@ -874,7 +874,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
         r = r2;
         Query q = new TermQuery(new Term("indexname", "test"));
         IndexSearcher searcher = newSearcher(r);
-        sum += searcher.search(q, 10).totalHits;
+        sum += searcher.count(q);
       }
     }
 
@@ -889,7 +889,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     }
     Query q = new TermQuery(new Term("indexname", "test"));
     IndexSearcher searcher = newSearcher(r);
-    sum += searcher.search(q, 10).totalHits;
+    sum += searcher.count(q);
     assertTrue("no documents found at all", sum > 0);
 
     assertEquals(0, excs.size());
@@ -969,24 +969,21 @@ public class TestIndexWriterReader extends LuceneTestCase {
     final AtomicBoolean didWarm = new AtomicBoolean();
     IndexWriter w = new IndexWriter(
         dir,
-        newIndexWriterConfig(new MockAnalyzer(random())).
-            setMaxBufferedDocs(2).
-            setReaderPooling(true).
-            setMergedSegmentWarmer(new IndexWriter.IndexReaderWarmer() {
-              @Override
-              public void warm(LeafReader r) throws IOException {
-                IndexSearcher s = newSearcher(r);
-                TopDocs hits = s.search(new TermQuery(new Term("foo", "bar")), 10);
-                assertEquals(20, hits.totalHits);
-                didWarm.set(true);
-              }
-            }).
-            setMergePolicy(newLogMergePolicy(10))
+        newIndexWriterConfig(new MockAnalyzer(random()))
+           .setMaxBufferedDocs(2)
+           .setReaderPooling(true)
+           .setMergedSegmentWarmer((r) -> {
+              IndexSearcher s = newSearcher(r);
+              int count = s.count(new TermQuery(new Term("foo", "bar")));
+              assertEquals(20, count);
+              didWarm.set(true);
+           })
+           .setMergePolicy(newLogMergePolicy(10))
     );
 
     Document doc = new Document();
     doc.add(newStringField("foo", "bar", Field.Store.NO));
-    for(int i=0;i<20;i++) {
+    for (int i = 0; i < 20; i++) {
       w.addDocument(doc);
     }
     w.waitForMerges();
@@ -1039,7 +1036,7 @@ public class TestIndexWriterReader extends LuceneTestCase {
     Directory d = getAssertNoDeletesDirectory(newDirectory());
     IndexWriter w = new IndexWriter(
         d,
-        newIndexWriterConfig(new MockAnalyzer(random())));
+        newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0));
 
     DirectoryReader r = w.getReader(); // start pooling readers
 
@@ -1080,23 +1077,20 @@ public class TestIndexWriterReader extends LuceneTestCase {
     dir.failOn(new MockDirectoryWrapper.Failure() {
       @Override
       public void eval(MockDirectoryWrapper dir) throws IOException {
-        StackTraceElement[] trace = new Exception().getStackTrace();
         if (shouldFail.get()) {
-          for (int i = 0; i < trace.length; i++) {
-            if ("getReadOnlyClone".equals(trace[i].getMethodName())) {
-              if (VERBOSE) {
-                System.out.println("TEST: now fail; exc:");
-                new Throwable().printStackTrace(System.out);
-              }
-              shouldFail.set(false);
-              throw new FakeIOException();
+          if (callStackContainsAnyOf("getReadOnlyClone")) {
+            if (VERBOSE) {
+              System.out.println("TEST: now fail; exc:");
+              new Throwable().printStackTrace(System.out);
             }
+            shouldFail.set(false);
+            throw new FakeIOException();
           }
         }
       }
     });
     
-    IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random()));
+    IndexWriterConfig conf = newIndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0);
     conf.setMergePolicy(NoMergePolicy.INSTANCE); // prevent merges from getting in the way
     IndexWriter writer = new IndexWriter(dir, conf);
     
@@ -1124,10 +1118,10 @@ public class TestIndexWriterReader extends LuceneTestCase {
   /** Make sure if all we do is open NRT reader against
    *  writer, we don't see merge starvation. */
   public void testTooManySegments() throws Exception {
-    Directory dir = getAssertNoDeletesDirectory(new RAMDirectory());
+    Directory dir = getAssertNoDeletesDirectory(new ByteBuffersDirectory());
     // Don't use newIndexWriterConfig, because we need a
     // "sane" mergePolicy:
-    IndexWriterConfig iwc = new IndexWriterConfig(new MockAnalyzer(random()));
+    IndexWriterConfig iwc = new IndexWriterConfig(new MockAnalyzer(random())).setMaxFullFlushMergeWaitMillis(0);
     IndexWriter w = new IndexWriter(dir, iwc);
     // Create 500 segments:
     for(int i=0;i<500;i++) {

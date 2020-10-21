@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.bg;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.bg.BulgarianStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link BulgarianStemFilter}.
@@ -33,9 +32,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.BulgarianStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
 public class BulgarianStemFilterFactory extends TokenFilterFactory {
-  
+
+  /** SPI name */
+  public static final String NAME = "bulgarianStem";
+
   /** Creates a new BulgarianStemFilterFactory */
   public BulgarianStemFilterFactory(Map<String,String> args) {
     super(args);
@@ -44,6 +48,11 @@ public class BulgarianStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public BulgarianStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new BulgarianStemFilter(input);

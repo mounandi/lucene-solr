@@ -41,12 +41,13 @@ import static org.apache.solr.update.processor.FieldValueMutatingUpdateProcessor
  *     &lt;str name="fieldRegex"&gt;.*_literal&lt;/str&gt;
  *   &lt;/lst&gt;
  * &lt;/processor&gt;</pre>
+ * @since 4.0.0
  */
 public final class TrimFieldUpdateProcessorFactory extends FieldMutatingUpdateProcessorFactory {
 
   @SuppressWarnings("unchecked")
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
     // no trim specific init args
     super.init(args);
   }

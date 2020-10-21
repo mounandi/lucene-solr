@@ -23,7 +23,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Optional;
 import java.util.Properties;
 
 import org.apache.http.auth.AuthScope;
@@ -31,10 +30,13 @@ import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.impl.auth.BasicScheme;
 import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.apache.solr.client.solrj.impl.SolrHttpClientBuilder.CredentialsProviderProvider;
 import org.apache.solr.common.params.MapSolrParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.StrUtils;
+import org.eclipse.jetty.client.HttpAuthenticationStore;
+import org.eclipse.jetty.client.ProxyAuthenticationProtocolHandler;
+import org.apache.solr.client.solrj.util.SolrBasicAuthentication;
+import org.eclipse.jetty.client.WWWAuthenticationProtocolHandler;
 
 /**
  * HttpClientConfigurer implementation providing support for preemptive Http Basic authentication
@@ -104,26 +106,36 @@ public class PreemptiveBasicAuthClientBuilderFactory implements HttpClientBuilde
   }
 
   @Override
-  public SolrHttpClientBuilder getHttpClientBuilder(Optional<SolrHttpClientBuilder> builder) {
-    return builder.isPresent() ?
-        initHttpClientBuilder(builder.get())
-        : initHttpClientBuilder(SolrHttpClientBuilder.create());
-  }
-
-  private SolrHttpClientBuilder initHttpClientBuilder(SolrHttpClientBuilder builder) {
+  public void setup(Http2SolrClient client) {
     final String basicAuthUser = defaultParams.get(HttpClientUtil.PROP_BASIC_AUTH_USER);
     final String basicAuthPass = defaultParams.get(HttpClientUtil.PROP_BASIC_AUTH_PASS);
     if(basicAuthUser == null || basicAuthPass == null) {
       throw new IllegalArgumentException("username & password must be specified with " + getClass().getName());
     }
 
-    builder.setDefaultCredentialsProvider(new CredentialsProviderProvider() {
-      @Override
-      public CredentialsProvider getCredentialsProvider() {
-        CredentialsProvider credsProvider = new BasicCredentialsProvider();
-        credsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(basicAuthUser, basicAuthPass));
-        return credsProvider;
-      }
+    HttpAuthenticationStore authenticationStore = new HttpAuthenticationStore();
+    authenticationStore.addAuthentication(new SolrBasicAuthentication(basicAuthUser, basicAuthPass));
+    client.getHttpClient().setAuthenticationStore(authenticationStore);
+    client.getProtocolHandlers().put(new WWWAuthenticationProtocolHandler(client.getHttpClient()));
+    client.getProtocolHandlers().put(new ProxyAuthenticationProtocolHandler(client.getHttpClient()));
+  }
+
+  @Override
+  public SolrHttpClientBuilder getHttpClientBuilder(SolrHttpClientBuilder builder) {
+    final String basicAuthUser = defaultParams.get(HttpClientUtil.PROP_BASIC_AUTH_USER);
+    final String basicAuthPass = defaultParams.get(HttpClientUtil.PROP_BASIC_AUTH_PASS);
+    if(basicAuthUser == null || basicAuthPass == null) {
+      throw new IllegalArgumentException("username & password must be specified with " + getClass().getName());
+    }
+
+    return initHttpClientBuilder(builder == null ? SolrHttpClientBuilder.create() : builder, basicAuthUser, basicAuthPass);
+  }
+
+  private SolrHttpClientBuilder initHttpClientBuilder(SolrHttpClientBuilder builder, String basicAuthUser, String basicAuthPass) {
+    builder.setDefaultCredentialsProvider(() -> {
+      CredentialsProvider credsProvider = new BasicCredentialsProvider();
+      credsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(basicAuthUser, basicAuthPass));
+      return credsProvider;
     });
 
     HttpClientUtil.addRequestInterceptor(requestInterceptor);

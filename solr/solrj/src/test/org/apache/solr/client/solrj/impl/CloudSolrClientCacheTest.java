@@ -17,13 +17,12 @@
 
 package org.apache.solr.client.solrj.impl;
 
-
-import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -32,16 +31,25 @@ import java.util.function.Function;
 import com.google.common.collect.ImmutableSet;
 import org.apache.http.NoHttpResponseException;
 import org.apache.solr.SolrTestCaseJ4;
+import org.apache.solr.client.solrj.cloud.DelegatingClusterStateProvider;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.util.NamedList;
+import org.junit.BeforeClass;
+
 import static org.mockito.Mockito.*;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 public class CloudSolrClientCacheTest extends SolrTestCaseJ4 {
+  
+  @BeforeClass
+  public static void beforeClass() {
+    assumeWorkingMockito();
+  }
 
+  @SuppressWarnings({"unchecked"})
   public void testCaching() throws Exception {
     String collName = "gettingstarted";
     Set<String> livenodes = new HashSet<>();
@@ -67,20 +75,19 @@ public class CloudSolrClientCacheTest extends SolrTestCaseJ4 {
         return colls.get(c);
       }
     }
+    @SuppressWarnings({"rawtypes"})
     Map<String, Function> responses = new HashMap<>();
+    @SuppressWarnings({"rawtypes"})
     NamedList okResponse = new NamedList();
     okResponse.add("responseHeader", new NamedList<>(Collections.singletonMap("status", 0)));
 
     LBHttpSolrClient mockLbclient = getMockLbHttpSolrClient(responses);
     AtomicInteger lbhttpRequestCount = new AtomicInteger();
-    try (CloudSolrClient cloudClient = new CloudSolrClient.Builder()
+    try (CloudSolrClient cloudClient = new CloudSolrClientBuilder(getStateProvider(livenodes, refs))
         .withLBHttpSolrClient(mockLbclient)
-        .withClusterStateProvider(getStateProvider(livenodes, refs))
-
         .build()) {
       livenodes.addAll(ImmutableSet.of("192.168.1.108:7574_solr", "192.168.1.108:8983_solr"));
-      ClusterState cs = ClusterState.load(1, coll1State.getBytes(UTF_8),
-          Collections.emptySet(), "/collections/gettingstarted/state.json");
+      ClusterState cs = ClusterState.createFromJson(1, coll1State.getBytes(UTF_8), Collections.emptySet());
       refs.put(collName, new Ref(collName));
       colls.put(collName, cs.getCollectionOrNull(collName));
       responses.put("request", o -> {
@@ -100,11 +107,14 @@ public class CloudSolrClientCacheTest extends SolrTestCaseJ4 {
   }
 
 
-  private LBHttpSolrClient getMockLbHttpSolrClient(Map<String, Function> responses) throws Exception {
+  @SuppressWarnings({"unchecked"})
+  private LBHttpSolrClient getMockLbHttpSolrClient(
+          @SuppressWarnings({"rawtypes"})Map<String, Function> responses) throws Exception {
     LBHttpSolrClient mockLbclient = mock(LBHttpSolrClient.class);
 
-    when(mockLbclient.request(any(LBHttpSolrClient.Req.class))).then(invocationOnMock -> {
+    when(mockLbclient.request(any(LBSolrClient.Req.class))).then(invocationOnMock -> {
       LBHttpSolrClient.Req req = invocationOnMock.getArgument(0);
+      @SuppressWarnings({"rawtypes"})
       Function f = responses.get("request");
       if (f == null) return null;
       Object res = f.apply(null);
@@ -119,42 +129,24 @@ public class CloudSolrClientCacheTest extends SolrTestCaseJ4 {
 
   private ClusterStateProvider getStateProvider(Set<String> livenodes,
                                                                 Map<String, ClusterState.CollectionRef> colls) {
-    return new ClusterStateProvider() {
+    return new DelegatingClusterStateProvider(null) {
       @Override
       public ClusterState.CollectionRef getState(String collection) {
         return colls.get(collection);
       }
 
       @Override
-      public Set<String> liveNodes() {
+      public Set<String> getLiveNodes() {
         return livenodes;
       }
 
       @Override
-      public String getAlias(String collection) {
-        return collection;
+      public List<String> resolveAlias(String collection) {
+        return Collections.singletonList(collection);
       }
 
       @Override
-      public String getCollectionName(String name) {
-        return name;
-      }
-
-      @Override
-      public void connect() { }
-
-      @Override
-      public void close() throws IOException {
-
-      }
-
-      @Override
-      public Object getClusterProperty(String propertyName) {
-        return null;
-      }
-
-      @Override
-      public Object getClusterProperty(String propertyName, String def) {
+      public <T> T getClusterProperty(String propertyName, T def) {
         return def;
       }
     };
@@ -165,8 +157,6 @@ public class CloudSolrClientCacheTest extends SolrTestCaseJ4 {
   private String coll1State = "{'gettingstarted':{\n" +
       "    'replicationFactor':'2',\n" +
       "    'router':{'name':'compositeId'},\n" +
-      "    'maxShardsPerNode':'2',\n" +
-      "    'autoAddReplicas':'false',\n" +
       "    'shards':{\n" +
       "      'shard1':{\n" +
       "        'range':'80000000-ffffffff',\n" +

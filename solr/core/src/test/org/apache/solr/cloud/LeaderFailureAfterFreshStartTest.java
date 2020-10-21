@@ -26,10 +26,11 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.lang.RandomStringUtils;
+import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.lucene.util.LuceneTestCase.Slow;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.request.UpdateRequest;
@@ -41,13 +42,13 @@ import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.solr.common.util.TimeSource;
 import org.apache.solr.util.TimeOut;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.util.Collections.singletonList;
-import static java.util.concurrent.TimeUnit.SECONDS;
 
 /**
  * 
@@ -118,7 +119,7 @@ public class LeaderFailureAfterFreshStartTest extends AbstractFullDistribZkTestB
       forceNodeFailures(singletonList(freshNode));
 
       del("*:*");
-      waitForThingsToLevelOut(30);
+      waitForThingsToLevelOut(30, TimeUnit.SECONDS);
 
       checkShardConsistency(false, true);
 
@@ -128,7 +129,7 @@ public class LeaderFailureAfterFreshStartTest extends AbstractFullDistribZkTestB
             "document number " + docId++);
       }
       commit();
-      waitForThingsToLevelOut(30);
+      waitForThingsToLevelOut(30, TimeUnit.SECONDS);
 
       checkShardConsistency(false, true);
       
@@ -153,7 +154,7 @@ public class LeaderFailureAfterFreshStartTest extends AbstractFullDistribZkTestB
       // shutdown the original leader
       log.info("Now shutting down initial leader");
       forceNodeFailures(singletonList(initialLeaderJetty));
-      waitForNewLeader(cloudClient, "shard1", (Replica)initialLeaderJetty.client.info  , new TimeOut(15, SECONDS));
+      waitForNewLeader(cloudClient, "shard1", (Replica)initialLeaderJetty.client.info  , new TimeOut(15, TimeUnit.SECONDS, TimeSource.NANO_TIME));
       waitTillNodesActive();
       log.info("Updating mappings from zk");
       updateMappingsFromZk(jettys, clients, true);
@@ -167,7 +168,7 @@ public class LeaderFailureAfterFreshStartTest extends AbstractFullDistribZkTestB
   
   private void restartNodes(List<CloudJettyRunner> nodesToRestart) throws Exception {
     for (CloudJettyRunner node : nodesToRestart) {
-      chaosMonkey.start(node.jetty);
+      node.jetty.start();
       nodesDown.remove(node);
     }
     waitTillNodesActive();
@@ -177,7 +178,7 @@ public class LeaderFailureAfterFreshStartTest extends AbstractFullDistribZkTestB
 
   private void forceNodeFailures(List<CloudJettyRunner> replicasToShutDown) throws Exception {
     for (CloudJettyRunner replicaToShutDown : replicasToShutDown) {
-      chaosMonkey.killJetty(replicaToShutDown);
+      replicaToShutDown.jetty.stop();
     }
 
     int totalDown = 0;

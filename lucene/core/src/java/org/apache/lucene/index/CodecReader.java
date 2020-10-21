@@ -22,9 +22,11 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.FieldsProducer;
+import org.apache.lucene.codecs.VectorReader;
 import org.apache.lucene.codecs.NormsProducer;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.codecs.StoredFieldsReader;
@@ -76,6 +78,12 @@ public abstract class CodecReader extends LeafReader implements Accountable {
    * @lucene.internal
    */
   public abstract PointsReader getPointsReader();
+
+  /**
+   * Expert: retrieve underlying VectorReader
+   * @lucene.internal
+   */
+  public abstract VectorReader getVectorReader();
   
   @Override
   public final void document(int docID, StoredFieldVisitor visitor) throws IOException {
@@ -94,9 +102,7 @@ public abstract class CodecReader extends LeafReader implements Accountable {
   }
   
   private void checkBounds(int docID) {
-    if (docID < 0 || docID >= maxDoc()) {       
-      throw new IndexOutOfBoundsException("docID must be >= 0 and < maxDoc=" + maxDoc() + " (got docID=" + docID + ")");
-    }
+    Objects.checkIndex(docID, maxDoc());
   }
 
   @Override
@@ -201,6 +207,18 @@ public abstract class CodecReader extends LeafReader implements Accountable {
     }
 
     return getPointsReader().getValues(field);
+  }
+
+  @Override
+  public final VectorValues getVectorValues(String field) throws IOException {
+    ensureOpen();
+    FieldInfo fi = getFieldInfos().fieldInfo(field);
+    if (fi == null || fi.getVectorDimension() == 0) {
+      // Field does not exist or does not index vectors
+      return null;
+    }
+
+    return getVectorReader().getVectorValues(field);
   }
 
   @Override

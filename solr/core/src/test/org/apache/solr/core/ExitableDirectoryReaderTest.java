@@ -20,10 +20,12 @@ import java.util.Map;
 
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.metrics.MetricsMap;
+import org.apache.solr.metrics.SolrMetricManager;
 import org.apache.solr.response.SolrQueryResponse;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.noggit.ObjectBuilder;
+
+import static org.apache.solr.common.util.Utils.fromJSONString;
 
 /**
  * Test that checks that long running queries are exited by Solr using the
@@ -88,19 +90,22 @@ public class ExitableDirectoryReaderTest extends SolrTestCaseJ4 {
   public void testCacheAssumptions() throws Exception {
     String fq= "name:d*";
     SolrCore core = h.getCore();
-    MetricsMap filterCacheStats = (MetricsMap)core.getCoreMetricManager().getRegistry().getMetrics().get("CACHE.searcher.filterCache");
+    MetricsMap filterCacheStats = (MetricsMap)((SolrMetricManager.GaugeWrapper)core.getCoreMetricManager().getRegistry().getMetrics().get("CACHE.searcher.filterCache")).getGauge();
     long fqInserts = (long) filterCacheStats.getValue().get("inserts");
 
-    MetricsMap queryCacheStats = (MetricsMap)core.getCoreMetricManager().getRegistry().getMetrics().get("CACHE.searcher.queryResultCache");
+    MetricsMap queryCacheStats = (MetricsMap)((SolrMetricManager.GaugeWrapper)core.getCoreMetricManager().getRegistry().getMetrics().get("CACHE.searcher.queryResultCache")).getGauge();
     long qrInserts = (long) queryCacheStats.getValue().get("inserts");
 
     // This gets 0 docs back. Use 10000 instead of 1 for timeAllowed and it gets 100 back and the for loop below
     // succeeds.
     String response = JQ(req("q", "*:*", "fq", fq, "indent", "true", "timeAllowed", "1", "sleep", sleep));
-    Map res = (Map) ObjectBuilder.fromJSON(response);
+    @SuppressWarnings({"rawtypes"})
+    Map res = (Map) fromJSONString(response);
+    @SuppressWarnings({"rawtypes"})
     Map body = (Map) (res.get("response"));
     assertTrue("Should have fewer docs than " + NUM_DOCS, (long) (body.get("numFound")) < NUM_DOCS);
 
+    @SuppressWarnings({"rawtypes"})
     Map header = (Map) (res.get("responseHeader"));
     assertTrue("Should have partial results", (Boolean) (header.get(SolrQueryResponse.RESPONSE_HEADER_PARTIAL_RESULTS_KEY)));
 
@@ -116,7 +121,7 @@ public class ExitableDirectoryReaderTest extends SolrTestCaseJ4 {
     assertEquals("Hits should still be 0", (long) filterCacheStats.getValue().get("hits"), 0L);
     assertEquals("Inserts should be bumped", (long) filterCacheStats.getValue().get("inserts"), fqInserts + 1);
 
-    res = (Map) ObjectBuilder.fromJSON(response);
+    res = (Map) fromJSONString(response);
     body = (Map) (res.get("response"));
 
     assertEquals("Should have exactly " + NUM_DOCS, (long) (body.get("numFound")), NUM_DOCS);
@@ -130,7 +135,7 @@ public class ExitableDirectoryReaderTest extends SolrTestCaseJ4 {
   public void testQueryResults() throws Exception {
     String q = "name:e*";
     SolrCore core = h.getCore();
-    MetricsMap queryCacheStats = (MetricsMap)core.getCoreMetricManager().getRegistry().getMetrics().get("CACHE.searcher.queryResultCache");
+    MetricsMap queryCacheStats = (MetricsMap)((SolrMetricManager.GaugeWrapper)core.getCoreMetricManager().getRegistry().getMetrics().get("CACHE.searcher.queryResultCache")).getGauge();
     Map<String,Object> nl = queryCacheStats.getValue();
     long inserts = (long) nl.get("inserts");
 
@@ -140,8 +145,11 @@ public class ExitableDirectoryReaderTest extends SolrTestCaseJ4 {
     nl = queryCacheStats.getValue();
     assertEquals("Should NOT have inserted partial results!", inserts, (long) nl.get("inserts"));
 
-    Map res = (Map) ObjectBuilder.fromJSON(response);
+    @SuppressWarnings({"rawtypes"})
+    Map res = (Map) fromJSONString(response);
+    @SuppressWarnings({"rawtypes"})
     Map body = (Map) (res.get("response"));
+    @SuppressWarnings({"rawtypes"})
     Map header = (Map) (res.get("responseHeader"));
 
     assertTrue("Should have fewer docs than " + NUM_DOCS, (long) (body.get("numFound")) < NUM_DOCS);
@@ -154,7 +162,7 @@ public class ExitableDirectoryReaderTest extends SolrTestCaseJ4 {
     assertEquals("Hits should still be 0", (long) nl.get("hits"), (long) nl2.get("hits"));
     assertTrue("Inserts should be bumped", inserts < (long) nl2.get("inserts"));
 
-    res = (Map) ObjectBuilder.fromJSON(response);
+    res = (Map) fromJSONString(response);
     body = (Map) (res.get("response"));
     header = (Map) (res.get("responseHeader"));
 

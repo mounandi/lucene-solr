@@ -20,10 +20,7 @@ package org.apache.lucene.analysis.cjk;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.cjk.CJKWidthFilter;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link CJKWidthFilter}.
@@ -36,8 +33,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.CJKBigramFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.6.0
+ * @lucene.spi {@value #NAME}
  */
-public class CJKWidthFilterFactory extends TokenFilterFactory implements MultiTermAwareComponent {
+public class CJKWidthFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "cjkWidth";
   
   /** Creates a new CJKWidthFilterFactory */
   public CJKWidthFilterFactory(Map<String,String> args) {
@@ -47,13 +49,18 @@ public class CJKWidthFilterFactory extends TokenFilterFactory implements MultiTe
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public CJKWidthFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new CJKWidthFilter(input);
   }
-  
+
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

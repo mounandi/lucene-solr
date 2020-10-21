@@ -19,15 +19,21 @@ package org.apache.lucene.index;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.IntConsumer;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.MockAnalyzer;
@@ -43,19 +49,24 @@ import org.apache.lucene.codecs.StoredFieldsWriter;
 import org.apache.lucene.codecs.TermVectorsReader;
 import org.apache.lucene.codecs.TermVectorsWriter;
 import org.apache.lucene.codecs.mockrandom.MockRandomPostingsFormat;
+import org.apache.lucene.codecs.simpletext.SimpleTextCodec;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.store.AlreadyClosedException;
+import org.apache.lucene.store.ChecksumIndexInput;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FilterDirectory;
 import org.apache.lucene.store.FlushInfo;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.MockDirectoryWrapper;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.CloseableThreadLocal;
+import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.LuceneTestCase;
@@ -128,9 +139,15 @@ abstract class BaseIndexFileFormatTestCase extends LuceneTestCase {
         queue.addAll(map.values());
         v = 2L * map.size() * RamUsageEstimator.NUM_BYTES_OBJECT_REF;
       } else {
-        v = super.accumulateObject(o, shallowSize, fieldValues, queue);
+        List<Object> references = new ArrayList<>();
+        v = super.accumulateObject(o, shallowSize, fieldValues, references);
+        for (Object r : references) {
+          // AssertingCodec adds Thread references to make sure objects are consumed in the right thread
+          if (r instanceof Thread == false) {
+            queue.add(r);
+          }
+        }
       }
-      // System.out.println(o.getClass() + "=" + v);
       return v;
     }
 
@@ -252,7 +269,7 @@ abstract class BaseIndexFileFormatTestCase extends LuceneTestCase {
   }
 
   /** Test the accuracy of the ramBytesUsed estimations. */
-  @Slow
+  @Nightly
   public void testRamBytesUsed() throws IOException {
     if (Codec.getDefault() instanceof RandomCodec) {
       // this test relies on the fact that two segments will be written with
@@ -287,12 +304,26 @@ abstract class BaseIndexFileFormatTestCase extends LuceneTestCase {
       new SimpleMergedSegmentWarmer(InfoStream.NO_OUTPUT).warm(reader);
     }
 
-    final long actualBytes = RamUsageTester.sizeOf(reader2, new Accumulator(reader2)) - RamUsageTester.sizeOf(reader1, new Accumulator(reader1));
-    final long expectedBytes = ((SegmentReader) reader2).ramBytesUsed() - ((SegmentReader) reader1).ramBytesUsed();
-    final long absoluteError = actualBytes - expectedBytes;
-    final double relativeError = (double) absoluteError / actualBytes;
-    final String message = "Actual RAM usage " + actualBytes + ", but got " + expectedBytes + ", " + 100*relativeError + "% error";
-    assertTrue(message, Math.abs(relativeError) < 0.20d || Math.abs(absoluteError) < 1000);
+    long act1 = RamUsageTester.sizeOf(reader2, new Accumulator(reader2));
+    long act2 = RamUsageTester.sizeOf(reader1, new Accumulator(reader1));
+    final long measuredBytes = act1 - act2;
+
+    long reported1 = ((SegmentReader) reader2).ramBytesUsed();
+    long reported2 = ((SegmentReader) reader1).ramBytesUsed();
+    final long reportedBytes = reported1 - reported2;
+
+    final long absoluteError = Math.abs(measuredBytes - reportedBytes);
+    final double relativeError = (double) absoluteError / measuredBytes;
+    final String message = String.format(Locale.ROOT,
+        "RamUsageTester reports %d bytes but ramBytesUsed() returned %d (%.1f error). " +
+        " [Measured: %d, %d. Reported: %d, %d]",
+        measuredBytes,
+        reportedBytes,
+        (100 * relativeError),
+        act1, act2,
+        reported1, reported2);
+
+    assertTrue(message, relativeError < 0.20d || absoluteError < 1000);
 
     reader1.close();
     reader2.close();
@@ -319,11 +350,12 @@ abstract class BaseIndexFileFormatTestCase extends LuceneTestCase {
     Directory dir = newFSDirectory(createTempDir("justSoYouGetSomeChannelErrors"));
     Codec codec = getCodec();
     
-    SegmentInfo segmentInfo = new SegmentInfo(dir, Version.LATEST, Version.LATEST, "_0", 1, false, codec, Collections.emptyMap(), StringHelper.randomId(), new HashMap<>(), null);
+    SegmentInfo segmentInfo = new SegmentInfo(dir, Version.LATEST, Version.LATEST, "_0", 1, false, codec, Collections.emptyMap(), StringHelper.randomId(), Collections.emptyMap(), null);
     FieldInfo proto = oneDocReader.getFieldInfos().fieldInfo("field");
     FieldInfo field = new FieldInfo(proto.name, proto.number, proto.hasVectors(), proto.omitsNorms(), proto.hasPayloads(), 
                                     proto.getIndexOptions(), proto.getDocValuesType(), proto.getDocValuesGen(), new HashMap<>(),
-                                    proto.getPointDimensionCount(), proto.getPointNumBytes());
+                                    proto.getPointDimensionCount(), proto.getPointIndexDimensionCount(), proto.getPointNumBytes(),
+                                    proto.getVectorDimension(), proto.getVectorScoreFunction(), proto.isSoftDeletesField());
 
     FieldInfos fieldInfos = new FieldInfos(new FieldInfo[] { field } );
 
@@ -334,8 +366,48 @@ abstract class BaseIndexFileFormatTestCase extends LuceneTestCase {
     SegmentReadState readState = new SegmentReadState(dir, segmentInfo, fieldInfos, IOContext.READ);
 
     // PostingsFormat
+    NormsProducer fakeNorms = new NormsProducer() {
+
+      @Override
+      public void close() throws IOException {}
+
+      @Override
+      public long ramBytesUsed() {
+        return 0;
+      }
+
+      @Override
+      public NumericDocValues getNorms(FieldInfo field) throws IOException {
+        if (field.hasNorms() == false) {
+          return null;
+        }
+        return oneDocReader.getNormValues(field.name);
+      }
+
+      @Override
+      public void checkIntegrity() throws IOException {}
+      
+    };
     try (FieldsConsumer consumer = codec.postingsFormat().fieldsConsumer(writeState)) {
-      consumer.write(MultiFields.getFields(oneDocReader));
+      final Fields fields = new Fields() {
+        TreeSet<String> indexedFields = new TreeSet<>(FieldInfos.getIndexedFields(oneDocReader));
+
+        @Override
+        public Iterator<String> iterator() {
+          return indexedFields.iterator();
+        }
+
+        @Override
+        public Terms terms(String field) throws IOException {
+          return oneDocReader.terms(field);
+        }
+
+        @Override
+        public int size() {
+          return indexedFields.size();
+        }
+      };
+      consumer.write(fields, fakeNorms);
       IOUtils.close(consumer);
       IOUtils.close(consumer);
     }
@@ -552,7 +624,7 @@ abstract class BaseIndexFileFormatTestCase extends LuceneTestCase {
         } catch (AlreadyClosedException ace) {
           // OK: writer was closed by abort; we just reopen now:
           dir.setRandomIOExceptionRateOnOpen(0.0); // disable exceptions on openInput until next iteration
-          assertTrue(iw.deleter.isClosed());
+          assertTrue(iw.isDeleterClosed());
           assertTrue(allowAlreadyClosed);
           allowAlreadyClosed = false;
           conf = newIndexWriterConfig(analyzer);
@@ -588,7 +660,7 @@ abstract class BaseIndexFileFormatTestCase extends LuceneTestCase {
           } catch (AlreadyClosedException ace) {
             // OK: writer was closed by abort; we just reopen now:
             dir.setRandomIOExceptionRateOnOpen(0.0); // disable exceptions on openInput until next iteration
-            assertTrue(iw.deleter.isClosed());
+            assertTrue(iw.isDeleterClosed());
             assertTrue(allowAlreadyClosed);
             allowAlreadyClosed = false;
             conf = newIndexWriterConfig(analyzer);
@@ -640,5 +712,248 @@ abstract class BaseIndexFileFormatTestCase extends LuceneTestCase {
     }
     
     Rethrow.rethrow(e);
+  }
+
+  /**
+   * Returns {@code false} if only the regular fields reader should be tested,
+   * and {@code true} if only the merge instance should be tested.
+   */
+  protected boolean shouldTestMergeInstance() {
+    return false;
+  }
+
+  protected final DirectoryReader maybeWrapWithMergingReader(DirectoryReader r) throws IOException {
+    if (shouldTestMergeInstance()) {
+      r = new MergingDirectoryReaderWrapper(r);
+    }
+    return r;
+  }
+
+  /**
+   * A directory that tracks created files that haven't been deleted.
+   */
+  protected static class FileTrackingDirectoryWrapper extends FilterDirectory {
+
+    private final Set<String> files = Collections.newSetFromMap(new ConcurrentHashMap<String,Boolean>());
+
+    /** Sole constructor. */
+    FileTrackingDirectoryWrapper(Directory in) {
+      super(in);
+    }
+
+    /** Get the set of created files. */
+    public Set<String> getFiles() {
+      return Set.copyOf(files);
+    }
+
+    @Override
+    public IndexOutput createOutput(String name, IOContext context) throws IOException {
+      files.add(name);
+      return super.createOutput(name, context);
+    }
+
+    @Override
+    public void rename(String source, String dest) throws IOException {
+      files.remove(source);
+      files.add(dest);
+      super.rename(source, dest);
+    }
+
+    @Override
+    public void deleteFile(String name) throws IOException {
+      files.remove(name);
+      super.deleteFile(name);
+    }
+
+  }
+
+  private static class ReadBytesIndexInputWrapper extends IndexInput {
+
+    private final IndexInput in;
+    private final IntConsumer readByte;
+
+    ReadBytesIndexInputWrapper(IndexInput in, IntConsumer readByte) {
+      super(in.toString());
+      this.in = in;
+      this.readByte = readByte;
+    }
+
+    @Override
+    public IndexInput clone() {
+      return new ReadBytesIndexInputWrapper(in.clone(), readByte);
+    }
+
+    @Override
+    public void close() throws IOException {
+      in.close();
+    }
+
+    @Override
+    public long getFilePointer() {
+      return in.getFilePointer();
+    }
+
+    @Override
+    public void seek(long pos) throws IOException {
+      in.seek(pos);
+    }
+
+    @Override
+    public long length() {
+      return in.length();
+    }
+
+    @Override
+    public IndexInput slice(String sliceDescription, long offset, long length) throws IOException {
+      IndexInput slice = in.slice(sliceDescription, offset, length);
+      return new ReadBytesIndexInputWrapper(slice, o -> readByte.accept(Math.toIntExact(offset + o)));
+    }
+
+    @Override
+    public byte readByte() throws IOException {
+      readByte.accept(Math.toIntExact(getFilePointer()));
+      return in.readByte();
+    }
+
+    @Override
+    public void readBytes(byte[] b, int offset, int len) throws IOException {
+      final int fp = Math.toIntExact(getFilePointer());
+      for (int i = 0; i < len; ++i) {
+        readByte.accept(Math.addExact(fp, i));
+      }
+      in.readBytes(b, offset, len);
+    }
+
+  }
+
+  /** A directory that tracks read bytes. */
+  protected static class ReadBytesDirectoryWrapper extends FilterDirectory {
+
+    /** Sole constructor. */
+    public ReadBytesDirectoryWrapper(Directory in) {
+      super(in);
+    }
+
+    private final Map<String, FixedBitSet> readBytes = new ConcurrentHashMap<>();
+
+    /** Get information about which bytes have been read. */
+    public Map<String, FixedBitSet> getReadBytes() {
+      return Map.copyOf(readBytes);
+    }
+
+    @Override
+    public IndexInput openInput(String name, IOContext context) throws IOException {
+      IndexInput in = super.openInput(name, context);
+      final FixedBitSet set = readBytes.computeIfAbsent(name, n -> new FixedBitSet(Math.toIntExact(in.length())));
+      if (set.length() != in.length()) {
+        throw new IllegalStateException();
+      }
+      return new ReadBytesIndexInputWrapper(in, set::set);
+    }
+
+    @Override
+    public ChecksumIndexInput openChecksumInput(String name, IOContext context) throws IOException {
+      ChecksumIndexInput in = super.openChecksumInput(name, context);
+      final FixedBitSet set = readBytes.computeIfAbsent(name, n -> new FixedBitSet(Math.toIntExact(in.length())));
+      if (set.length() != in.length()) {
+        throw new IllegalStateException();
+      }
+      return new ChecksumIndexInput(in.toString()) {
+
+        @Override
+        public void readBytes(byte[] b, int offset, int len) throws IOException {
+          final int fp = Math.toIntExact(getFilePointer());
+          set.set(fp, Math.addExact(fp, len));
+          in.readBytes(b, offset, len);
+        }
+
+        @Override
+        public byte readByte() throws IOException {
+          set.set(Math.toIntExact(getFilePointer()));
+          return in.readByte();
+        }
+
+        @Override
+        public IndexInput slice(String sliceDescription, long offset, long length) throws IOException {
+          throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long length() {
+          return in.length();
+        }
+
+        @Override
+        public long getFilePointer() {
+          return in.getFilePointer();
+        }
+
+        @Override
+        public void close() throws IOException {
+          in.close();
+        }
+
+        @Override
+        public long getChecksum() throws IOException {
+          return in.getChecksum();
+        }
+      };
+    }
+
+    @Override
+    public IndexOutput createOutput(String name, IOContext context) throws IOException {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public IndexOutput createTempOutput(String prefix, String suffix, IOContext context) throws IOException {
+      throw new UnsupportedOperationException();
+    }
+  }
+
+  /** This test is a best effort at verifying that checkIntegrity doesn't miss any files. It tests that the
+   *  combination of opening a reader and calling checkIntegrity on it reads all bytes of all files. */
+  public void testCheckIntegrityReadsAllBytes() throws Exception {
+    assumeFalse("SimpleText doesn't store checksums of its files", getCodec() instanceof SimpleTextCodec);
+    FileTrackingDirectoryWrapper dir = new FileTrackingDirectoryWrapper(newDirectory());
+    applyCreatedVersionMajor(dir);
+
+    IndexWriterConfig cfg = new IndexWriterConfig(new MockAnalyzer(random()));
+    IndexWriter w = new IndexWriter(dir, cfg);
+    final int numDocs = atLeast(100);
+    for (int i = 0; i < numDocs; ++i) {
+      Document d = new Document();
+      addRandomFields(d);
+      w.addDocument(d);
+    }
+    w.forceMerge(1);
+    w.commit();
+    w.close();
+
+    ReadBytesDirectoryWrapper readBytesWrapperDir = new ReadBytesDirectoryWrapper(dir);
+    IndexReader reader = DirectoryReader.open(readBytesWrapperDir);
+    LeafReader leafReader = getOnlyLeafReader(reader);
+    leafReader.checkIntegrity();
+
+    Map<String, FixedBitSet> readBytesMap = readBytesWrapperDir.getReadBytes();
+
+    Set<String> unreadFiles = new HashSet<>(dir.getFiles());System.out.println(Arrays.toString(dir.listAll()));
+    unreadFiles.removeAll(readBytesMap.keySet());
+    unreadFiles.remove(IndexWriter.WRITE_LOCK_NAME);
+    assertTrue("Some files have not been open: " + unreadFiles, unreadFiles.isEmpty());
+
+    List<String> messages = new ArrayList<>();
+    for (Map.Entry<String, FixedBitSet> entry : readBytesMap.entrySet()) {
+      String name = entry.getKey();
+      FixedBitSet unreadBytes = entry.getValue().clone();
+      unreadBytes.flip(0, unreadBytes.length());
+      int unread = unreadBytes.nextSetBit(0);
+      if (unread != Integer.MAX_VALUE) {
+        messages.add("Offset " + unread + " of file " + name + "(" + unreadBytes.length() + "bytes) was not read.");
+      }
+    }
+    assertTrue(String.join("\n", messages), messages.isEmpty());
+    reader.close();
+    dir.close();
   }
 }

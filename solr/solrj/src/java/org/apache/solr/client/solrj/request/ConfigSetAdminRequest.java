@@ -16,11 +16,8 @@
  */
 package org.apache.solr.client.solrj.request;
 
-import java.io.IOException;
-import java.util.Collection;
 import java.util.Map;
 import java.util.Properties;
-
 
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
@@ -29,7 +26,7 @@ import org.apache.solr.common.params.ConfigSetParams;
 import org.apache.solr.common.params.ConfigSetParams.ConfigSetAction;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
-import org.apache.solr.common.util.ContentStream;
+
 import static org.apache.solr.common.params.CommonParams.NAME;
 
 /**
@@ -43,6 +40,7 @@ public abstract class ConfigSetAdminRequest
 
   protected ConfigSetAction action = null;
 
+  @SuppressWarnings({"rawtypes"})
   protected ConfigSetAdminRequest setAction(ConfigSetAction action) {
     this.action = action;
     return this;
@@ -68,10 +66,6 @@ public abstract class ConfigSetAdminRequest
     return params;
   }
 
-  @Override
-  public Collection<ContentStream> getContentStreams() throws IOException {
-    return null;
-  }
 
   @Override
   protected abstract R createResponse(SolrClient client);
@@ -104,6 +98,11 @@ public abstract class ConfigSetAdminRequest
     protected ConfigSetAdminResponse createResponse(SolrClient client) {
       return new ConfigSetAdminResponse();
     }
+  }
+
+  @Override
+  public String getRequestType() {
+    return SolrRequestType.ADMIN.toString();
   }
 
   // CREATE request
@@ -142,12 +141,11 @@ public abstract class ConfigSetAdminRequest
     @Override
     public SolrParams getParams() {
       ModifiableSolrParams params = new ModifiableSolrParams(super.getParams());
-      if (baseConfigSetName == null) {
-        throw new RuntimeException( "no Base ConfigSet specified!" );
+      if (baseConfigSetName != null) {
+        params.set("baseConfigSet", baseConfigSetName);
       }
-      params.set("baseConfigSet", baseConfigSetName);
       if (properties != null) {
-        for (Map.Entry entry : properties.entrySet()) {
+        for (@SuppressWarnings({"rawtypes"})Map.Entry entry : properties.entrySet()) {
           params.set(PROPERTY_PREFIX + "." + entry.getKey().toString(),
               entry.getValue().toString());
         }

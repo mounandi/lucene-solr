@@ -20,7 +20,7 @@ package org.apache.lucene.analysis.miscellaneous;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link CodepointCountFilter}. 
@@ -31,8 +31,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.CodepointCountFilterFactory" min="0" max="1" /&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 4.5.1
+ * @lucene.spi {@value #NAME}
  */
 public class CodepointCountFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "codepointCount";
+
   final int min;
   final int max;
   public static final String MIN_KEY = "min";
@@ -48,6 +54,11 @@ public class CodepointCountFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public CodepointCountFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public CodepointCountFilter create(TokenStream input) {
     return new CodepointCountFilter(input, min, max);

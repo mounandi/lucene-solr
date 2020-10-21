@@ -23,12 +23,12 @@ import java.util.Random;
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.cloud.DistributedQueue;
 import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest.Create;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest.SplitShard;
 import org.apache.solr.client.solrj.request.QueryRequest;
-import org.apache.solr.client.solrj.response.CollectionAdminResponse;
 import org.apache.solr.client.solrj.response.RequestStatusState;
 import org.apache.solr.common.params.CollectionParams;
 import org.apache.solr.common.params.ModifiableSolrParams;
@@ -50,14 +50,15 @@ public class MultiThreadedOCPTest extends AbstractFullDistribZkTestBase {
   private static final int REQUEST_STATUS_TIMEOUT = 5 * 60;
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-  private static final int NUM_COLLECTIONS = 4;
+  private static final int NUM_COLLECTIONS = 3;
 
   public MultiThreadedOCPTest() {
     sliceCount = 2;
+    
+    fixShardCount(3);
   }
 
   @Test
-  @ShardsFixed(num = 4)
   public void test() throws Exception {
     testParallelCollectionAPICalls();
     testTaskExclusivity();
@@ -68,24 +69,31 @@ public class MultiThreadedOCPTest extends AbstractFullDistribZkTestBase {
 
   private void testFillWorkQueue() throws Exception {
     try (SolrClient client = createNewSolrClient("", getBaseUrl((HttpSolrClient) clients.get(0)))) {
-      DistributedQueue distributedQueue = new DistributedQueue(cloudClient.getZkStateReader().getZkClient(),
-          "/overseer/collection-queue-work", new Overseer.Stats());
+      DistributedQueue distributedQueue = new ZkDistributedQueue(cloudClient.getZkStateReader().getZkClient(),
+          "/overseer/collection-queue-work", new Stats());
       //fill the work queue with blocked tasks by adding more than the no:of parallel tasks
-      for (int i = 0; i < MAX_PARALLEL_TASKS+5; i++) {
+      for (int i = 0; i < MAX_PARALLEL_TASKS + 15; i++) {
         distributedQueue.offer(Utils.toJSON(Utils.makeMap(
             "collection", "A_COLL",
             QUEUE_OPERATION, MOCK_COLL_TASK.toLower(),
-            ASYNC, String.valueOf(i),
+            ASYNC, Integer.toString(i),
 
-            "sleep", (i == 0 ? "1000" : "1") //first task waits for 1 second, and thus blocking
-            // all other tasks. Subsequent tasks only wait for 1ms
+            // third task waits for a long time, and thus blocks the queue for all other tasks for A_COLL.
+            // Subsequent tasks as well as the first two only wait for 1ms
+            "sleep", (i == 2 ? "10000" : "1")
         )));
         log.info("MOCK task added {}", i);
-
       }
-      Thread.sleep(10);//wait and post the next message
 
-      //this is not going to be blocked because it operates on another collection
+      // Wait until we see the second A_COLL task getting processed (assuming the first got processed as well)
+      Long task1CollA = waitForTaskToCompleted(client, 1);
+
+      assertNotNull("Queue did not process first two tasks on A_COLL, can't run test", task1CollA);
+
+      // Make sure the long running task did not finish, otherwise no way the B_COLL task can be tested to run in parallel with it
+      assertNull("Long running task finished too early, can't test", checkTaskHasCompleted(client, 2));
+
+      // Enqueue a task on another collection not competing with the lock on A_COLL and see that it can be executed right away
       distributedQueue.offer(Utils.toJSON(Utils.makeMap(
           "collection", "B_COLL",
           QUEUE_OPERATION, MOCK_COLL_TASK.toLower(),
@@ -93,30 +101,49 @@ public class MultiThreadedOCPTest extends AbstractFullDistribZkTestBase {
           "sleep", "1"
       )));
 
+      // We now check that either the B_COLL task has completed before the third (long running) task on A_COLL,
+      // Or if both have completed (if this check got significantly delayed for some reason), we verify B_COLL was first.
+      Long taskCollB = waitForTaskToCompleted(client, 200);
 
-      Long acoll = null, bcoll = null;
-      for (int i = 0; i < 100; i++) {
-        if (bcoll == null) {
-          CollectionAdminResponse statusResponse = getStatusResponse("200", client);
-          bcoll = (Long) statusResponse.getResponse().get("MOCK_FINISHED");
-        }
-        if (acoll == null) {
-          CollectionAdminResponse statusResponse = getStatusResponse("2", client);
-          acoll = (Long) statusResponse.getResponse().get("MOCK_FINISHED");
-        }
-        if (acoll != null && bcoll != null) break;
-        Thread.sleep(100);
+      // We do not wait for the long running task to finish, that would be a waste of time.
+      Long task2CollA = checkTaskHasCompleted(client, 2);
+
+      // Given the wait delay (500 iterations of 100ms), the task has plenty of time to complete, so this is not expected.
+      assertNotNull("Task on  B_COLL did not complete, can't test", taskCollB);
+      // We didn't wait for the 3rd A_COLL task to complete (test can run quickly) but if it did, we expect the B_COLL to have finished first.
+      assertTrue("task2CollA: " + task2CollA + " taskCollB: " + taskCollB, task2CollA  == null || task2CollA > taskCollB);
+    }
+  }
+
+  /**
+   * Verifies the status of an async task submitted to the Overseer Collection queue.
+   * @return <code>null</code> if the task has not completed, the completion timestamp if the task has completed
+   * (see mockOperation() in {@link org.apache.solr.cloud.api.collections.OverseerCollectionMessageHandler}).
+   */
+  private Long checkTaskHasCompleted(SolrClient client, int requestId) throws IOException, SolrServerException {
+    return (Long) getStatusResponse(Integer.toString(requestId), client).getResponse().get("MOCK_FINISHED");
+  }
+
+  /**
+   * Waits until the specified async task has completed or time ran out.
+   * @return <code>null</code> if the task has not completed, the completion timestamp if the task has completed
+   */
+  private Long waitForTaskToCompleted(SolrClient client, int requestId) throws Exception {
+    for (int i = 0; i < 500; i++) {
+      Long task = checkTaskHasCompleted(client, requestId);
+      if (task != null) {
+        return task;
       }
-      assertTrue(acoll != null && bcoll != null);
-      assertTrue(acoll > bcoll);
+      Thread.sleep(100);
     }
 
+    return null;
   }
 
   private void testParallelCollectionAPICalls() throws IOException, SolrServerException {
     try (SolrClient client = createNewSolrClient("", getBaseUrl((HttpSolrClient) clients.get(0)))) {
       for(int i = 1 ; i <= NUM_COLLECTIONS ; i++) {
-        CollectionAdminRequest.createCollection("ocptest" + i,"conf1",4,1).processAsync(String.valueOf(i), client);
+        CollectionAdminRequest.createCollection("ocptest" + i,"conf1",3,1).processAsync(String.valueOf(i), client);
       }
   
       boolean pass = false;
@@ -149,8 +176,8 @@ public class MultiThreadedOCPTest extends AbstractFullDistribZkTestBase {
 
   private void testTaskExclusivity() throws Exception, SolrServerException {
 
-    DistributedQueue distributedQueue = new DistributedQueue(cloudClient.getZkStateReader().getZkClient(),
-        "/overseer/collection-queue-work", new Overseer.Stats());
+    DistributedQueue distributedQueue = new ZkDistributedQueue(cloudClient.getZkStateReader().getZkClient(),
+        "/overseer/collection-queue-work", new Stats());
     try (SolrClient client = createNewSolrClient("", getBaseUrl((HttpSolrClient) clients.get(0)))) {
 
       Create createCollectionRequest = CollectionAdminRequest.createCollection("ocptest_shardsplit","conf1",4,1);
@@ -206,7 +233,7 @@ public class MultiThreadedOCPTest extends AbstractFullDistribZkTestBase {
 
   private void testDeduplicationOfSubmittedTasks() throws IOException, SolrServerException {
     try (SolrClient client = createNewSolrClient("", getBaseUrl((HttpSolrClient) clients.get(0)))) {
-      CollectionAdminRequest.createCollection("ocptest_shardsplit2","conf1",4,1).processAsync("3000",client);
+      CollectionAdminRequest.createCollection("ocptest_shardsplit2","conf1",3,1).processAsync("3000",client);
   
       SplitShard splitShardRequest = CollectionAdminRequest.splitShard("ocptest_shardsplit2").setShardName(SHARD1);
       splitShardRequest.processAsync("3001",client);
@@ -263,6 +290,7 @@ public class MultiThreadedOCPTest extends AbstractFullDistribZkTestBase {
       ModifiableSolrParams params = new ModifiableSolrParams();
       params.set("action", CollectionParams.CollectionAction.CLUSTERSTATUS.toString());
       params.set("collection", "collection1");
+      @SuppressWarnings({"rawtypes"})
       SolrRequest request = new QueryRequest(params);
       request.setPath("/admin/collections");
 

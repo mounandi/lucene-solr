@@ -19,13 +19,11 @@ package org.apache.solr.servlet;
 import java.net.URLEncoder;
 
 import org.apache.solr.common.params.CommonParams;
-import org.apache.solr.util.AbstractSolrTestCase;
+import org.apache.solr.SolrTestCaseJ4;
 import org.junit.BeforeClass;
 
 
-
-public class DirectSolrConnectionTest extends AbstractSolrTestCase 
-{
+public class DirectSolrConnectionTest extends SolrTestCaseJ4 {
 
   
   @BeforeClass
@@ -52,13 +50,8 @@ public class DirectSolrConnectionTest extends AbstractSolrTestCase
     
     assertTrue( got.indexOf( "<str name=\"echoParams\">explicit</str>" ) > 5 );
     
-    
     // It should throw an exception for unknown handler
-    try {
-      direct.request( "/path to nonexistang thingy!!", null );
-      fail( "should throw an exception" );
-    }
-    catch( Exception ex ){}
+    expectThrows(Exception.class, () -> direct.request( "/path to nonexistang thingy!!", null ));
   }
   
 

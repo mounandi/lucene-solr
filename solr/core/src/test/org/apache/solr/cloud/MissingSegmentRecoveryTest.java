@@ -57,7 +57,6 @@ public class MissingSegmentRecoveryTest extends SolrCloudTestCase {
   @Before
   public void setup() throws SolrServerException, IOException {
     CollectionAdminRequest.createCollection(collection, "conf", 1, 2)
-        .setMaxShardsPerNode(1)
         .process(cluster.getSolrClient());
     waitForState("Expected a collection with one shard and two replicas", collection, clusterShape(1, 2));
     cluster.getSolrClient().setDefaultCollection(collection);
@@ -79,6 +78,10 @@ public class MissingSegmentRecoveryTest extends SolrCloudTestCase {
   
   @After
   public void teardown() throws Exception {
+    if (null == leader) {
+      // test did not initialize, cleanup is No-Op;
+      return;
+    }
     System.clearProperty("CoreInitFailedAction");
     CollectionAdminRequest.deleteCollection(collection).process(cluster.getSolrClient());
   }
@@ -89,6 +92,7 @@ public class MissingSegmentRecoveryTest extends SolrCloudTestCase {
   }
 
   @Test
+  // 12-Jun-2018 @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028")
   public void testLeaderRecovery() throws Exception {
     System.setProperty("CoreInitFailedAction", "fromleader");
 

@@ -21,13 +21,13 @@ import org.apache.solr.ltr.FeatureLoggerTestUtils;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
 import org.apache.solr.ltr.store.rest.ManagedFeatureStore;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestFilterSolrFeature extends TestRerankBase {
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1", "description", "w1", "popularity",
@@ -49,18 +49,18 @@ public class TestFilterSolrFeature extends TestRerankBase {
     assertU(commit());
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
   @Test
   public void testUserTermScoreWithFQ() throws Exception {
-    loadFeature("SomeTermFQ", SolrFeature.class.getCanonicalName(),
+    loadFeature("SomeTermFQ", SolrFeature.class.getName(),
         "{\"fq\":[\"{!terms f=popularity}88888\"]}");
-    loadFeature("SomeEfiFQ", SolrFeature.class.getCanonicalName(),
+    loadFeature("SomeEfiFQ", SolrFeature.class.getName(),
         "{\"fq\":[\"{!terms f=title}${user_query}\"]}");
-    loadModel("Term-modelFQ", LinearModel.class.getCanonicalName(),
+    loadModel("Term-modelFQ", LinearModel.class.getName(),
         new String[] {"SomeTermFQ", "SomeEfiFQ"},
         "{\"weights\":{\"SomeTermFQ\":1.6, \"SomeEfiFQ\":2.0}}");
     final SolrQuery query = new SolrQuery();
@@ -80,7 +80,7 @@ public class TestFilterSolrFeature extends TestRerankBase {
   public void testBadFeature() throws Exception {
     // Missing q/fq
     final String feature = getFeatureInJson("badFeature", "test",
-        SolrFeature.class.getCanonicalName(), "{\"df\":\"foo\"]}");
+        SolrFeature.class.getName(), "{\"df\":\"foo\"]}");
     assertJPut(ManagedFeatureStore.REST_END_POINT, feature,
         "/responseHeader/status==500");
   }

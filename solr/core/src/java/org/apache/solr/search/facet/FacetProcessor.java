@@ -24,6 +24,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.IntFunction;
 
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.BooleanClause;
@@ -39,11 +40,11 @@ import org.apache.solr.search.BitDocSet;
 import org.apache.solr.search.DocIterator;
 import org.apache.solr.search.DocSet;
 import org.apache.solr.search.QParser;
-import org.apache.solr.search.QueryContext;
 import org.apache.solr.search.SolrIndexSearcher;
 import org.apache.solr.search.SyntaxError;
-import org.apache.solr.util.RTimer;
+import org.apache.solr.search.facet.SlotAcc.SlotContext;
 
+/** Base abstraction for a class that computes facets. This is fairly internal to the module. */
 public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
   SimpleOrderedMap<Object> response;
   FacetContext fcontext;
@@ -52,35 +53,15 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
   DocSet filter;  // additional filters specified by "filter"  // TODO: do these need to be on the context to support recomputing during multi-select?
   LinkedHashMap<String,SlotAcc> accMap;
   SlotAcc[] accs;
-  CountSlotAcc countAcc;
-
-  /** factory method for invoking json facet framework as whole.
-   * Note: this is currently only used from SimpleFacets, not from JSON Facet API itself. */
-  public static FacetProcessor<?> createProcessor(SolrQueryRequest req,
-                                                  Map<String, Object> params, DocSet docs){
-    FacetParser parser = new FacetTopParser(req);
-    FacetRequest facetRequest = null;
-    try {
-      facetRequest = parser.parse(params);
-    } catch (SyntaxError syntaxError) {
-      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, syntaxError);
-    }
-
-    FacetContext fcontext = new FacetContext();
-    fcontext.base = docs;
-    fcontext.req = req;
-    fcontext.searcher = req.getSearcher();
-    fcontext.qcontext = QueryContext.newContext(fcontext.searcher);
-
-    return facetRequest.createFacetProcessor(fcontext);
-  }
+  SlotAcc.CountSlotAcc countAcc;
 
   FacetProcessor(FacetContext fcontext, FacetRequestT freq) {
     this.fcontext = fcontext;
     this.freq = freq;
+    fcontext.processor = this;
   }
 
-  public Object getResponse() {
+  public org.apache.solr.common.MapWriter getResponse() {
     return response;
   }
 
@@ -90,22 +71,18 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
 
   private void evalFilters() throws IOException {
     if (freq.domain.filters == null || freq.domain.filters.isEmpty()) return;
-
-    List<Query> qlist = new ArrayList<>(freq.domain.filters.size());
+    this.filter = fcontext.searcher.getDocSet(evalJSONFilterQueryStruct(fcontext, freq.domain.filters));
+  }
+  
+  private static List<Query> evalJSONFilterQueryStruct(FacetContext fcontext, List<Object> filters) throws IOException {
+    List<Query> qlist = new ArrayList<>(filters.size());
     // TODO: prevent parsing filters each time!
-    for (Object rawFilter : freq.domain.filters) {
+    for (Object rawFilter : filters) {
       if (rawFilter instanceof String) {
-        QParser parser = null;
-        try {
-          parser = QParser.getParser((String)rawFilter, fcontext.req);
-          parser.setIsFilter(true);
-          Query symbolicFilter = parser.getQuery();
-          qlist.add(symbolicFilter);
-        } catch (SyntaxError syntaxError) {
-          throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, syntaxError);
-        }
+        qlist.add(parserFilter((String) rawFilter, fcontext.req));
       } else if (rawFilter instanceof Map) {
 
+        @SuppressWarnings({"unchecked"})
         Map<String,Object> m = (Map<String, Object>) rawFilter;
         String type;
         Object args;
@@ -130,17 +107,11 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
 
         String[] qstrings = fcontext.req.getParams().getParams(tag);
 
+        // idea is to support multivalued parameter ie, 0 or more values
+        // so, when value not specified, it is ignored rather than throwing exception
         if (qstrings != null) {
           for (String qstring : qstrings) {
-            QParser parser = null;
-            try {
-              parser = QParser.getParser((String) qstring, fcontext.req);
-              parser.setIsFilter(true);
-              Query symbolicFilter = parser.getQuery();
-              qlist.add(symbolicFilter);
-            } catch (SyntaxError syntaxError) {
-              throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, syntaxError);
-            }
+            qlist.add(parserFilter(qstring, fcontext.req));
           }
         }
 
@@ -149,20 +120,54 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
       }
 
     }
+    return qlist;
+  }
 
-    this.filter = fcontext.searcher.getDocSet(qlist);
+  private static Query parserFilter(String rawFilter, SolrQueryRequest req) {
+    QParser parser = null;
+    try {
+      parser = QParser.getParser(rawFilter, req);
+      parser.setIsFilter(true);
+      Query symbolicFilter = parser.getQuery();
+      if (symbolicFilter == null) {
+        throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+            "QParser yields null, perhaps unresolved parameter reference in: "+rawFilter);
+      }
+      return symbolicFilter;
+    } catch (SyntaxError syntaxError) {
+      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, syntaxError);
+    }
   }
 
   private void handleDomainChanges() throws IOException {
     if (freq.domain == null) return;
-    handleFilterExclusions();
+
+    if (null != freq.domain.explicitQueries) {
+      try {
+        final List<Query> domainQs = evalJSONFilterQueryStruct(fcontext, freq.domain.explicitQueries);
+        if (domainQs.isEmpty()) {
+          throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+                                  "'query' domain must not evaluate to an empty list of queries");
+        }
+        fcontext.base = fcontext.searcher.getDocSet(domainQs);
+      } catch (SolrException e) {
+        throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+                                "Unable to parse domain 'query': " + freq.domain.explicitQueries +
+                                " -- reason: " + e.getMessage(),
+                                e);
+      }
+    } else {
+      // mutualy exclusive to freq.domain.explicitQueries
+      handleFilterExclusions();
+    }
 
     // Check filters... if we do have filters they apply after domain changes.
     // We still calculate them first because we can use it in a parent->child domain change.
     evalFilters();
 
     handleJoinField();
-    
+    handleGraphField();
+
     boolean appliedFilters = handleBlockJoin();
 
     if (this.filter != null && !appliedFilters) {
@@ -177,9 +182,8 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
       return;
     }
 
-    // TODO: somehow remove responsebuilder dependency
-    ResponseBuilder rb = SolrRequestInfo.getRequestInfo().getResponseBuilder();
-    Map tagMap = (Map) rb.req.getContext().get("tags");
+    @SuppressWarnings({"rawtypes"})
+    Map tagMap = (Map) fcontext.req.getContext().get("tags");
     if (tagMap == null) {
       // no filters were tagged
       return;
@@ -204,6 +208,9 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
     if (excludeSet.size() == 0) return;
 
     List<Query> qlist = new ArrayList<>();
+
+    // TODO: somehow remove responsebuilder dependency
+    ResponseBuilder rb = SolrRequestInfo.getRequestInfo().getResponseBuilder();
 
     // add the base query
     if (!excludeSet.containsKey(rb.getQuery())) {
@@ -238,7 +245,15 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
     final Query domainQuery = freq.domain.joinField.createDomainQuery(fcontext);
     fcontext.base = fcontext.searcher.getDocSet(domainQuery);
   }
-    
+
+  /** modifies the context base if there is a graph field domain change */
+  private void handleGraphField() throws IOException {
+    if (null == freq.domain.graphField) return;
+
+    final Query domainQuery = freq.domain.graphField.createDomainQuery(fcontext);
+    fcontext.base = fcontext.searcher.getDocSet(domainQuery);
+  }
+
   // returns "true" if filters were applied to fcontext.base already
   private boolean handleBlockJoin() throws IOException {
     boolean appliedFilters = false;
@@ -264,7 +279,7 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
       // We need to remember to not redundantly re-apply these filters after.
       DocSet acceptDocs = this.filter;
       if (acceptDocs == null) {
-        acceptDocs = fcontext.searcher.getLiveDocs();
+        acceptDocs = fcontext.searcher.getLiveDocSet();
       } else {
         appliedFilters = true;
       }
@@ -277,25 +292,24 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
     return appliedFilters;
   }
 
-  protected void processStats(SimpleOrderedMap<Object> bucket, DocSet docs, int docCount) throws IOException {
+  protected void processStats(SimpleOrderedMap<Object> bucket, Query bucketQ, DocSet docs, long docCount) throws IOException {
     if (docCount == 0 && !freq.processEmpty || freq.getFacetStats().size() == 0) {
       bucket.add("count", docCount);
       return;
     }
     createAccs(docCount, 1);
-    int collected = collect(docs, 0);
+    long collected = collect(docs, 0, slotNum -> { return new SlotContext(bucketQ); });
     countAcc.incrementCount(0, collected);
     assert collected == docCount;
     addStats(bucket, 0);
   }
 
-  protected void createAccs(int docCount, int slotCount) throws IOException {
+  protected void createAccs(long docCount, int slotCount) throws IOException {
     accMap = new LinkedHashMap<>();
 
     // allow a custom count acc to be used
     if (countAcc == null) {
-      countAcc = new CountSlotArrAcc(fcontext, slotCount);
-      countAcc.key = "count";
+      countAcc = new SlotAcc.CountSlotArrAcc(fcontext, slotCount);
     }
 
     for (Map.Entry<String,AggValueSource> entry : freq.getFacetStats().entrySet()) {
@@ -319,10 +333,22 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
     }
   }
 
-  int collect(DocSet docs, int slot) throws IOException {
-    int count = 0;
+  long collect(DocSet docs, int slot, IntFunction<SlotContext> slotContext) throws IOException {
+    long count = 0;
     SolrIndexSearcher searcher = fcontext.searcher;
 
+    if (0 == docs.size()) {
+      // we may be in a "processEmpty" type situation where the client still cares about this bucket
+      // either way, we should let our accumulators know about the empty set, so they can collect &
+      // compute the slot (ie: let them decide if they care even when it's size==0)
+      if (accs != null) {
+        for (SlotAcc acc : accs) {
+          acc.collect(docs, slot, slotContext); // NOT per-seg collectors
+        }
+      }
+      return count;
+    }
+    
     final List<LeafReaderContext> leaves = searcher.getIndexReader().leaves();
     final Iterator<LeafReaderContext> ctxIt = leaves.iterator();
     LeafReaderContext ctx = null;
@@ -346,15 +372,15 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
         setNextReader(ctx);
       }
       count++;
-      collect(doc - segBase, slot);  // per-seg collectors
+      collect(doc - segBase, slot, slotContext);  // per-seg collectors
     }
     return count;
   }
 
-  void collect(int segDoc, int slot) throws IOException {
+  void collect(int segDoc, int slot, IntFunction<SlotContext> slotContext) throws IOException {
     if (accs != null) {
       for (SlotAcc acc : accs) {
-        acc.collect(segDoc, slot);
+        acc.collect(segDoc, slot, slotContext);
       }
     }
   }
@@ -367,7 +393,7 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
   }
 
   void addStats(SimpleOrderedMap<Object> target, int slotNum) throws IOException {
-    int count = countAcc.getCount(slotNum);
+    long count = countAcc.getCount(slotNum);
     target.add("count", count);
     if (count > 0 || freq.processEmpty) {
       for (SlotAcc acc : accs) {
@@ -380,7 +406,7 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
 
     boolean needDocSet = (skip==false && freq.getFacetStats().size() > 0) || freq.getSubFacets().size() > 0;
 
-    int count;
+    long count;
 
     if (result != null) {
       count = result.size();
@@ -402,7 +428,7 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
 
     try {
       if (!skip) {
-        processStats(bucket, result, count);
+        processStats(bucket, q, result, count);
       }
       processSubs(bucket, q, result, skip, facetInfo);
     } finally {
@@ -413,6 +439,7 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
     }
   }
 
+  @SuppressWarnings({"unchecked"})
   void processSubs(SimpleOrderedMap<Object> response, Query filter, DocSet domain, boolean skip, Map<String,Object> facetInfo) throws IOException {
 
     boolean emptyDomain = domain == null || domain.size() == 0;
@@ -440,27 +467,16 @@ public abstract class FacetProcessor<FacetRequestT extends FacetRequest>  {
       FacetContext subContext = fcontext.sub(filter, domain);
       subContext.facetInfo = facetInfoSub;
       if (!skip) subContext.flags &= ~FacetContext.SKIP_FACET;  // turn off the skip flag if we're not skipping this bucket
-      FacetProcessor subProcessor = subRequest.createFacetProcessor(subContext);
 
       if (fcontext.getDebugInfo() != null) {   // if fcontext.debugInfo != null, it means rb.debug() == true
         FacetDebugInfo fdebug = new FacetDebugInfo();
         subContext.setDebugInfo(fdebug);
         fcontext.getDebugInfo().addChild(fdebug);
-
-        fdebug.setReqDescription(subRequest.getFacetDescription());
-        fdebug.setProcessor(subProcessor.getClass().getSimpleName());
-        if (subContext.filter != null) fdebug.setFilter(subContext.filter.toString());
-
-        final RTimer timer = new RTimer();
-        subProcessor.process();
-        long timeElapsed = (long) timer.getTime();
-        fdebug.setElapse(timeElapsed);
-        fdebug.putInfoItem("domainSize", (long)subContext.base.size());
-      } else {
-        subProcessor.process();
       }
 
-      response.add( sub.getKey(), subProcessor.getResponse() );
+      Object result = subRequest.process(subContext);
+
+      response.add( sub.getKey(), result);
     }
   }
 

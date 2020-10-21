@@ -64,6 +64,7 @@ import static org.apache.solr.update.processor.FieldValueMutatingUpdateProcessor
  * &lt;/processor&gt;</pre>
  *
  * @see java.util.regex.Pattern
+ * @since 4.0.0
  */
 public final class RegexReplaceProcessorFactory extends FieldMutatingUpdateProcessorFactory {
   
@@ -78,7 +79,7 @@ public final class RegexReplaceProcessorFactory extends FieldMutatingUpdateProce
 
   @SuppressWarnings("unchecked")
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
 
     Object patternParam = args.remove(PATTERN_PARAM);
 

@@ -16,15 +16,15 @@
  */
 package org.apache.lucene.queries.function.valuesource;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.queries.function.FunctionValues;
 import org.apache.lucene.queries.function.ValueSource;
 import org.apache.lucene.queries.function.docvalues.BoolDocValues;
 import org.apache.lucene.search.IndexSearcher;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Abstract {@link ValueSource} implementation which wraps multiple ValueSources
@@ -42,7 +42,7 @@ public abstract class MultiBoolFunction extends BoolFunction {
   protected abstract boolean func(int doc, FunctionValues[] vals) throws IOException;
 
   @Override
-  public BoolDocValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
+  public BoolDocValues getValues(Map<Object, Object> context, LeafReaderContext readerContext) throws IOException {
     final FunctionValues[] vals =  new FunctionValues[sources.size()];
     int i=0;
     for (ValueSource source : sources) {
@@ -68,6 +68,7 @@ public abstract class MultiBoolFunction extends BoolFunction {
           }
           sb.append(dv.toString(doc));
         }
+        sb.append(')');
         return sb.toString();
       }
     };
@@ -86,6 +87,7 @@ public abstract class MultiBoolFunction extends BoolFunction {
       }
       sb.append(source.description());
     }
+    sb.append(')');
     return sb.toString();
   }
 
@@ -102,7 +104,7 @@ public abstract class MultiBoolFunction extends BoolFunction {
   }
 
   @Override
-  public void createWeight(Map context, IndexSearcher searcher) throws IOException {
+  public void createWeight(Map<Object, Object> context, IndexSearcher searcher) throws IOException {
     for (ValueSource source : sources) {
       source.createWeight(context, searcher);
     }

@@ -30,8 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
-import org.apache.commons.lang.ArrayUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.ArrayUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
 import org.apache.solr.client.solrj.util.ClientUtils;
@@ -47,6 +47,7 @@ import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.common.util.StrUtils;
 import org.apache.solr.request.SimpleFacets;
 import org.apache.solr.request.SolrQueryRequest;
+import org.apache.solr.response.SolrQueryResponse;
 import org.apache.solr.schema.FieldType;
 import org.apache.solr.schema.PointField;
 import org.apache.solr.search.QueryParsing;
@@ -571,21 +572,8 @@ public class FacetComponent extends SearchComponent {
           // set the initial limit higher to increase accuracy
           dff.initialLimit = doOverRequestMath(dff.initialLimit, dff.overrequestRatio, 
                                                dff.overrequestCount);
-          
-          // If option FACET_DISTRIB_MCO is turned on then we will use 1 as the initial 
-          // minCount (unless the user explicitly set it to something less than 1). If 
-          // option FACET_DISTRIB_MCO is turned off then we will use 0 as the initial 
-          // minCount regardless of what the user might have provided (prior to the
-          // addition of the FACET_DISTRIB_MCO option the default logic was to use 0).
-          // As described in issues SOLR-8559 and SOLR-8988 the use of 1 provides a 
-          // significant performance boost.
-          dff.initialMincount = dff.mco ? Math.min(dff.minCount, 1) : 0;
-                                   
-        } else {
-          // if limit==-1, then no need to artificially lower mincount to 0 if
-          // it's 1
-          dff.initialMincount = Math.min(dff.minCount, 1);
         }
+        dff.initialMincount = Math.min(dff.minCount, 1);
       } else {
         // we're sorting by index order.
         // if minCount==0, we should always be able to get accurate results w/o
@@ -663,7 +651,7 @@ public class FacetComponent extends SearchComponent {
       (fieldToOverRequest, FacetParams.FACET_SORT, defaultSort);
 
     int shardLimit = requestedLimit + offset;
-    int shardMinCount = requestedMinCount;
+    int shardMinCount = Math.min(requestedMinCount, 1);
 
     // per-shard mincount & overrequest
     if ( FacetParams.FACET_SORT_INDEX.equals(sort) && 
@@ -682,9 +670,6 @@ public class FacetComponent extends SearchComponent {
     } else if ( FacetParams.FACET_SORT_COUNT.equals(sort) ) {
       if ( 0 < requestedLimit ) {
         shardLimit = doOverRequestMath(shardLimit, overRequestRatio, overRequestCount);
-        shardMinCount = 0; 
-      } else {
-        shardMinCount = Math.min(requestedMinCount, 1);
       }
     } 
     sreq.params.set(paramStart + FacetParams.FACET_LIMIT, shardLimit);
@@ -727,8 +712,19 @@ public class FacetComponent extends SearchComponent {
       NamedList facet_counts = null;
       try {
         facet_counts = (NamedList) srsp.getSolrResponse().getResponse().get("facet_counts");
+        if (facet_counts==null) {
+          NamedList<?> responseHeader = (NamedList<?>)srsp.getSolrResponse().getResponse().get("responseHeader");
+          if (Boolean.TRUE.equals(responseHeader.getBooleanArg(SolrQueryResponse.RESPONSE_HEADER_PARTIAL_RESULTS_KEY))) {
+            continue;
+          } else {
+            log.warn("corrupted response on {} : {}", srsp.getShardRequest(), srsp.getSolrResponse());
+            throw new SolrException(ErrorCode.SERVER_ERROR,
+                "facet_counts is absent in response from " + srsp.getNodeName() +
+                ", but "+SolrQueryResponse.RESPONSE_HEADER_PARTIAL_RESULTS_KEY+" hasn't been responded");
+          }
+        }
       } catch (Exception ex) {
-        if (rb.req.getParams().getBool(ShardParams.SHARDS_TOLERANT, false)) {
+        if (ShardParams.getShardsTolerantAsBool(rb.req.getParams())) {
           continue; // looks like a shard did not return anything
         }
         throw new SolrException(ErrorCode.SERVER_ERROR,
@@ -873,7 +869,9 @@ public class FacetComponent extends SearchComponent {
       if (ent.getValue().count >= minCount) {
         newQueryFacets.put(ent.getKey(), ent.getValue());
       } else {
-        log.trace("Removing facetQuery/key: " + ent.getKey() + "/" + ent.getValue().toString() + " mincount=" + minCount);
+        if (log.isTraceEnabled()) {
+          log.trace("Removing facetQuery/key: {}/{} mincount={}", ent.getKey(), ent.getValue(), minCount);
+        }
         replace = true;
       }
     }
@@ -1006,10 +1004,8 @@ public class FacetComponent extends SearchComponent {
           ShardFacetCount sfc = dff.counts.get(name);
           if (sfc == null) {
             // we got back a term we didn't ask for?
-            log.error("Unexpected term returned for facet refining. key=" + key
-                      + " term='" + name + "'" + "\n\trequest params=" + sreq.params
-                      + "\n\ttoRefine=" + dff._toRefine + "\n\tresponse="
-                      + shardCounts);
+            log.error("Unexpected term returned for facet refining. key='{}'  term='{}'\n\trequest params={}\n\ttoRefine={}\n\tresponse={}"
+                , key, name, sreq.params, dff._toRefine, shardCounts);
             continue;
           }
           sfc.count += count;
@@ -1037,9 +1033,9 @@ public class FacetComponent extends SearchComponent {
       }
       
       for (Entry<String,List<NamedList<Object>>> pivotFacetResponseFromShard : pivotFacetResponsesFromShard) {
-        PivotFacet masterPivotFacet = fi.pivotFacets.get(pivotFacetResponseFromShard.getKey());
-        masterPivotFacet.mergeResponseFromShard(shardNumber, rb, pivotFacetResponseFromShard.getValue());  
-        masterPivotFacet.removeAllRefinementsForShard(shardNumber);
+        PivotFacet aggregatedPivotFacet = fi.pivotFacets.get(pivotFacetResponseFromShard.getKey());
+        aggregatedPivotFacet.mergeResponseFromShard(shardNumber, rb, pivotFacetResponseFromShard.getValue());
+        aggregatedPivotFacet.removeAllRefinementsForShard(shardNumber);
       }
     }
     
@@ -1437,7 +1433,6 @@ public class FacetComponent extends SearchComponent {
     
     public int initialLimit; // how many terms requested in first phase
     public int initialMincount; // mincount param sent to each shard
-    public boolean mco;
     public double overrequestRatio;
     public int overrequestCount;
     public boolean needRefinements;
@@ -1456,9 +1451,6 @@ public class FacetComponent extends SearchComponent {
         = params.getFieldDouble(field, FacetParams.FACET_OVERREQUEST_RATIO, 1.5);
       this.overrequestCount 
         = params.getFieldInt(field, FacetParams.FACET_OVERREQUEST_COUNT, 10);
-      
-      this.mco 
-      = params.getFieldBool(field, FacetParams.FACET_DISTRIB_MCO, false);
     }
     
     void add(int shardNum, NamedList shardCounts, int numRequested) {
@@ -1496,10 +1488,10 @@ public class FacetComponent extends SearchComponent {
         }
       }
       
-      // the largest possible missing term is initialMincount if we received
+      // the largest possible missing term is (initialMincount - 1) if we received
       // less than the number requested.
       if (numRequested < 0 || numRequested != 0 && numReceived < numRequested) {
-        last = initialMincount;
+        last = Math.max(0, initialMincount - 1);
       }
       
       missingMaxPossible += last;
@@ -1546,7 +1538,9 @@ public class FacetComponent extends SearchComponent {
         if (ent.getValue().count >= minCount) {
           newOne.put(ent.getKey(), ent.getValue());
         } else {
-          log.trace("Removing facet/key: " + ent.getKey() + "/" + ent.getValue().toString() + " mincount=" + minCount);
+          if (log.isTraceEnabled()) {
+            log.trace("Removing facet/key: {}/{} mincount={}", ent.getKey(), ent.getValue(), minCount);
+          }
           replace = true;
         }
       }

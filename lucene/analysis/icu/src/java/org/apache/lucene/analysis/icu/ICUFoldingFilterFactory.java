@@ -19,13 +19,13 @@ package org.apache.lucene.analysis.icu;
 
 import java.util.Map;
 
+import com.ibm.icu.text.FilteredNormalizer2;
+import com.ibm.icu.text.Normalizer2;
+import com.ibm.icu.text.UnicodeSet;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.icu.ICUFoldingFilter;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory; // javadocs
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
-/** 
+/**
  * Factory for {@link ICUFoldingFilter}.
  * <pre class="prettyprint">
  * &lt;fieldType name="text_folded" class="solr.TextField" positionIncrementGap="100"&gt;
@@ -34,24 +34,47 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.ICUFoldingFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
-public class ICUFoldingFilterFactory extends TokenFilterFactory implements MultiTermAwareComponent {
+public class ICUFoldingFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "icuFolding";
+
+  private final Normalizer2 normalizer;
 
   /** Creates a new ICUFoldingFilterFactory */
   public ICUFoldingFilterFactory(Map<String,String> args) {
     super(args);
+
+    Normalizer2 normalizer = ICUFoldingFilter.NORMALIZER;
+    String filter = get(args, "filter");
+    if (filter != null) {
+      UnicodeSet set = new UnicodeSet(filter);
+      if (!set.isEmpty()) {
+        set.freeze();
+        normalizer = new FilteredNormalizer2(normalizer, set);
+      }
+    }
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+    this.normalizer = normalizer;
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public ICUFoldingFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override
   public TokenStream create(TokenStream input) {
-    return new ICUFoldingFilter(input);
+    return new ICUFoldingFilter(input, normalizer);
   }
 
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

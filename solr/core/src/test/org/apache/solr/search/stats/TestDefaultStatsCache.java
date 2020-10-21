@@ -23,11 +23,13 @@ import org.apache.solr.common.SolrDocumentList;
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.junit.Test;
 
+// See: https://issues.apache.org/jira/browse/SOLR-12028 Tests cannot remove files on Windows machines occasionally
 public class TestDefaultStatsCache extends BaseDistributedSearchTestCase {
   private int docId = 0;
   
   @Override
   public void distribSetUp() throws Exception {
+    System.setProperty("metricsEnabled", "true");
     super.distribSetUp();
     System.setProperty("solr.statsCache", LocalStatsCache.class.getName());
   }
@@ -40,6 +42,7 @@ public class TestDefaultStatsCache extends BaseDistributedSearchTestCase {
   @Test 
   public void test() throws Exception {
     del("*:*");
+    commit();
     String aDocId=null;
     for (int i = 0; i < clients.size(); i++) {
       int shard = i + 1;

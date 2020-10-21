@@ -16,6 +16,7 @@
  */
 package org.apache.solr.core;
 
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -30,40 +31,92 @@ public class MetricsConfig {
   private final PluginInfo meterSupplier;
   private final PluginInfo timerSupplier;
   private final PluginInfo histogramSupplier;
+  private final PluginInfo historyHandler;
+  private final boolean enabled;
 
-  private MetricsConfig(PluginInfo[] metricReporters, Set<String> hiddenSysProps,
+  private MetricsConfig(boolean enabled,
+                        PluginInfo[] metricReporters, Set<String> hiddenSysProps,
                         PluginInfo counterSupplier, PluginInfo meterSupplier,
-                        PluginInfo timerSupplier, PluginInfo histogramSupplier) {
+                        PluginInfo timerSupplier, PluginInfo histogramSupplier,
+                        PluginInfo historyHandler) {
+    this.enabled = enabled;
     this.metricReporters = metricReporters;
     this.hiddenSysProps = hiddenSysProps;
     this.counterSupplier = counterSupplier;
     this.meterSupplier = meterSupplier;
     this.timerSupplier = timerSupplier;
     this.histogramSupplier = histogramSupplier;
+    this.historyHandler = historyHandler;
   }
 
+  public boolean isEnabled() {
+    return enabled;
+  }
+
+  private static final PluginInfo[] NO_OP_REPORTERS = new PluginInfo[0];
+
   public PluginInfo[] getMetricReporters() {
-    return metricReporters;
+    if (enabled) {
+      return metricReporters;
+    } else {
+      return NO_OP_REPORTERS;
+    }
   }
 
   public Set<String> getHiddenSysProps() {
-    return hiddenSysProps;
+    if (enabled) {
+      return hiddenSysProps;
+    } else {
+      return Collections.emptySet();
+    }
   }
 
+  /** Symbolic name to use as plugin class name for no-op implementations. */
+  public static final String NOOP_IMPL_CLASS = "__noop__";
+
+  private static final PluginInfo NO_OP_PLUGIN =
+      new PluginInfo("typeUnused",
+            Collections.singletonMap("class", NOOP_IMPL_CLASS),
+            null, null);
+
   public PluginInfo getCounterSupplier() {
-    return counterSupplier;
+    if (enabled) {
+      return counterSupplier;
+    } else {
+      return NO_OP_PLUGIN;
+    }
   }
 
   public PluginInfo getMeterSupplier() {
-    return meterSupplier;
+    if (enabled) {
+      return meterSupplier;
+    } else {
+      return NO_OP_PLUGIN;
+    }
   }
 
   public PluginInfo getTimerSupplier() {
-    return timerSupplier;
+    if (enabled) {
+      return timerSupplier;
+    } else {
+      return NO_OP_PLUGIN;
+    }
   }
 
   public PluginInfo getHistogramSupplier() {
-    return histogramSupplier;
+    if (enabled) {
+      return histogramSupplier;
+    } else {
+      return NO_OP_PLUGIN;
+    }
+  }
+
+  public PluginInfo getHistoryHandler() {
+    if (enabled) {
+      return historyHandler;
+    } else {
+      return NO_OP_PLUGIN;
+    }
   }
 
   public static class MetricsConfigBuilder {
@@ -73,9 +126,17 @@ public class MetricsConfig {
     private PluginInfo meterSupplier;
     private PluginInfo timerSupplier;
     private PluginInfo histogramSupplier;
+    private PluginInfo historyHandler;
+    // default to metrics enabled
+    private boolean enabled = true;
 
     public MetricsConfigBuilder() {
 
+    }
+
+    public MetricsConfigBuilder setEnabled(boolean enabled) {
+      this.enabled = enabled;
+      return this;
     }
 
     public MetricsConfigBuilder setHiddenSysProps(Set<String> hiddenSysProps) {
@@ -111,9 +172,14 @@ public class MetricsConfig {
       return this;
     }
 
+    public MetricsConfigBuilder setHistoryHandler(PluginInfo info) {
+      this.historyHandler = info;
+      return this;
+    }
+
     public MetricsConfig build() {
-      return new MetricsConfig(metricReporterPlugins, hiddenSysProps, counterSupplier, meterSupplier,
-          timerSupplier, histogramSupplier);
+      return new MetricsConfig(enabled, metricReporterPlugins, hiddenSysProps, counterSupplier, meterSupplier,
+          timerSupplier, histogramSupplier, historyHandler);
     }
 
   }

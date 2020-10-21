@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.text.ParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -32,21 +33,24 @@ import org.apache.solr.cloud.CloudDescriptor;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrInputDocument;
+import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
 import org.apache.solr.common.util.ExecutorUtil;
 import org.apache.solr.common.util.NamedList;
+import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.core.CloseHook;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.request.SolrRequestInfo;
 import org.apache.solr.response.SolrQueryResponse;
+import org.apache.solr.security.PKIAuthenticationPlugin;
 import org.apache.solr.update.AddUpdateCommand;
 import org.apache.solr.update.CommitUpdateCommand;
 import org.apache.solr.update.DeleteUpdateCommand;
 import org.apache.solr.util.DateMathParser;
-import org.apache.solr.util.DefaultSolrThreadFactory;
+import org.apache.solr.common.util.SolrNamedThreadFactory;
 import org.apache.solr.util.plugin.SolrCoreAware;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -95,7 +99,7 @@ import static org.apache.solr.common.SolrException.ErrorCode.SERVER_ERROR;
  *  </li>
  *  <li><code>ttlParamName</code> - Name of an update request param this process should 
  *      look for in each request when processing document additions, defaulting to  
- *      <code>_ttl_</code>. If the the specified param name exists in an update request, 
+ *      <code>_ttl_</code>. If the specified param name exists in an update request, 
  *      the param value will be parsed as a {@linkplain DateMathParser Date Math Expression}
  *      relative to <code>NOW</code> and the result will be used as a default for any 
  *      document included in that request that does not already have a value in the 
@@ -160,6 +164,7 @@ import static org.apache.solr.common.SolrException.ErrorCode.SERVER_ERROR;
  *   &lt;null name="ttlParamName"/&gt;
  *   &lt;str name="expirationFieldName"&gt;_expire_at_&lt;/str&gt;
  * &lt;/processor&gt;</pre> 
+ * @since 4.8.0
  */
 public final class DocExpirationUpdateProcessorFactory 
   extends UpdateRequestProcessorFactory 
@@ -190,7 +195,8 @@ public final class DocExpirationUpdateProcessorFactory
   private SolrException confErr(final String msg, SolrException root) {
     return new SolrException(SERVER_ERROR, this.getClass().getSimpleName()+": "+msg, root);
   }
-  private String removeArgStr(final NamedList args, final String arg, final String def,
+  private String removeArgStr(@SuppressWarnings({"rawtypes"})final NamedList args,
+                              final String arg, final String def,
                               final String errMsg) {
 
     if (args.indexOf(arg,0) < 0) return def;
@@ -205,7 +211,7 @@ public final class DocExpirationUpdateProcessorFactory
 
   @SuppressWarnings("unchecked")
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
 
     deleteChainName = removeArgStr(args, DEL_CHAIN_NAME_CONF, null,
                                    "must be a <str> or <null/> for default chain");
@@ -254,7 +260,7 @@ public final class DocExpirationUpdateProcessorFactory
 
   private void initDeleteExpiredDocsScheduler(SolrCore core) {
     executor = new ScheduledThreadPoolExecutor
-      (1, new DefaultSolrThreadFactory("autoExpireDocs"),
+      (1, new SolrNamedThreadFactory("autoExpireDocs"),
        new RejectedExecutionHandler() {
         public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
           log.warn("Skipping execution of '{}' using '{}'", r, e);
@@ -346,7 +352,7 @@ public final class DocExpirationUpdateProcessorFactory
 
   /**
    * <p>
-   * Runnable that uses the the <code>deleteChainName</code> configured for 
+   * Runnable that uses the <code>deleteChainName</code> configured for 
    * this factory to execute a delete by query (using the configured 
    * <code>expireField</code>) followed by a soft commit to re-open searchers (if needed)
    * </p>
@@ -377,10 +383,15 @@ public final class DocExpirationUpdateProcessorFactory
     public void run() {
       // setup the request context early so the logging (including any from 
       // shouldWeDoPeriodicDelete() ) includes the core context info
-      final SolrQueryRequest req = new LocalSolrQueryRequest
+      final LocalSolrQueryRequest req = new LocalSolrQueryRequest
         (factory.core, Collections.<String,String[]>emptyMap());
       try {
+        // HACK: to indicate to PKI that this is a server initiated request for the purposes
+        // of distributed requet/credential forwarding...
+        req.setUserPrincipalName(PKIAuthenticationPlugin.NODE_IS_USER);
+        
         final SolrQueryResponse rsp = new SolrQueryResponse();
+        rsp.addResponseHeader(new SimpleOrderedMap<>(1));
         SolrRequestInfo.setRequestInfo(new SolrRequestInfo(req, rsp));
         try {
           
@@ -393,8 +404,8 @@ public final class DocExpirationUpdateProcessorFactory
           UpdateRequestProcessorChain chain = core.getUpdateProcessingChain(deleteChainName);
           UpdateRequestProcessor proc = chain.createProcessor(req, rsp);
           if (null == proc) {
-            log.warn("No active processors, skipping automatic deletion " + 
-                     "of expired docs using chain: {}", deleteChainName);
+            log.warn("No active processors, skipping automatic deletion of expired docs using chain: {}"
+                     , deleteChainName);
             return;
           }
           try {
@@ -421,12 +432,10 @@ public final class DocExpirationUpdateProcessorFactory
 
           log.info("Finished periodic deletion of expired docs");
         } catch (IOException ioe) {
-          log.error("IOException in periodic deletion of expired docs: " +
-                    ioe.getMessage(), ioe);
+          log.error("IOException in periodic deletion of expired docs: ", ioe);
           // DO NOT RETHROW: ScheduledExecutor will suppress subsequent executions
         } catch (RuntimeException re) {
-          log.error("Runtime error in periodic deletion of expired docs: " + 
-                    re.getMessage(), re);
+          log.error("Runtime error in periodic deletion of expired docs: ", re);
           // DO NOT RETHROW: ScheduledExecutor will suppress subsequent executions
         } finally {
           SolrRequestInfo.clearRequestInfo();
@@ -469,12 +478,13 @@ public final class DocExpirationUpdateProcessorFactory
     CloudDescriptor desc = core.getCoreDescriptor().getCloudDescriptor();
     String col = desc.getCollectionName();
 
-    List<Slice> slices = new ArrayList<Slice>(zk.getClusterState().getCollection(col).getActiveSlices());
-    Collections.sort(slices, COMPARE_SLICES_BY_NAME);
-    if (slices.isEmpty()) {
+    DocCollection docCollection = zk.getClusterState().getCollection(col);
+    if (docCollection.getActiveSlicesArr().length == 0) {
       log.error("Collection {} has no active Slices?", col);
       return false;
     }
+    List<Slice> slices = new ArrayList<>(Arrays.asList(docCollection.getActiveSlicesArr()));
+    Collections.sort(slices, COMPARE_SLICES_BY_NAME);
     Replica firstSliceLeader = slices.get(0).getLeader();
     if (null == firstSliceLeader) {
       log.warn("Slice in charge of periodic deletes for {} does not currently have a leader",
@@ -489,7 +499,7 @@ public final class DocExpirationUpdateProcessorFactory
     if (previouslyInChargeOfDeletes && ! inChargeOfDeletesRightNow) {
       // don't spam the logs constantly, just log when we know that we're not the guy
       // (the first time -- or anytime we were, but no longer are)
-      log.info("Not currently in charge of periodic deletes for this collection, " + 
+      log.info("Not currently in charge of periodic deletes for this collection, {}",
                "will not trigger delete or log again until this changes");
     }
 

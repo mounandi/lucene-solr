@@ -21,48 +21,44 @@ import java.lang.invoke.MethodHandles;
 import java.nio.charset.StandardCharsets;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakLingering;
+
 import org.apache.commons.io.FileUtils;
-import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.LuceneTestCase;
+import org.apache.lucene.util.QuickPatchThreadsFilter;
+import org.apache.solr.SolrIgnoredThreadsFilter;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.request.CollectionAdminRequest;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.util.BadZookeeperThreadsFilter;
-import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Test 5 nodes Solr cluster with Kerberos plugin enabled.
- * This test is Ignored right now as Mini KDC has a known bug that
- * doesn't allow us to run multiple nodes on the same host.
- * https://issues.apache.org/jira/browse/HADOOP-9893
  */
 @ThreadLeakFilters(defaultFilters = true, filters = {
+    SolrIgnoredThreadsFilter.class,
+    QuickPatchThreadsFilter.class,
     BadZookeeperThreadsFilter.class // Zookeeper login leaks TGT renewal threads
 })
 
 @LuceneTestCase.Slow
+@ThreadLeakLingering(linger = 10000) // minikdc has some lingering threads
 public class TestSolrCloudWithKerberosAlt extends SolrCloudTestCase {
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
   private static final int numShards = 1;
   private static final int numReplicas = 1;
-  private static final int maxShardsPerNode = 1;
-  private static final int nodeCount = (numShards*numReplicas + (maxShardsPerNode-1))/maxShardsPerNode;
+  private static final int nodeCount = numShards*numReplicas;
   private static final String configName = "solrCloudCollectionConfig";
   private static final String collectionName = "testkerberoscollection";
   
   private KerberosTestServices kerberosTestServices;
-
-  @BeforeClass
-  public static void betterNotBeJava9() {
-    assumeFalse("FIXME: SOLR-8182: This test fails under Java 9", Constants.JRE_IS_MINIMUM_JAVA9);
-  }
 
   @Override
   public void setUp() throws Exception {
@@ -104,8 +100,8 @@ public class TestSolrCloudWithKerberosAlt extends SolrCloudTestCase {
     System.setProperty("solr.kerberos.keytab", keytabFile.getAbsolutePath());
     System.setProperty("authenticationPlugin", "org.apache.solr.security.KerberosPlugin");
     boolean enableDt = random().nextBoolean();
-    log.info("Enable delegation token: " + enableDt);
-    System.setProperty("solr.kerberos.delegation.token.enabled", new Boolean(enableDt).toString());
+    log.info("Enable delegation token: {}", enableDt);
+    System.setProperty("solr.kerberos.delegation.token.enabled", Boolean.toString(enableDt));
     // Extracts 127.0.0.1 from HTTP/127.0.0.1@EXAMPLE.COM
     System.setProperty("solr.kerberos.name.rules", "RULE:[1:$1@$0](.*EXAMPLE.COM)s/@.*//"
         + "\nRULE:[2:$2@$0](.*EXAMPLE.COM)s/@.*//"
@@ -129,14 +125,11 @@ public class TestSolrCloudWithKerberosAlt extends SolrCloudTestCase {
   private void testCollectionCreateSearchDelete() throws Exception {
     CloudSolrClient client = cluster.getSolrClient();
     CollectionAdminRequest.createCollection(collectionName, configName, numShards, numReplicas)
-        .setMaxShardsPerNode(maxShardsPerNode)
         .process(client);
 
-    AbstractDistribZkTestBase.waitForRecoveriesToFinish
-        (collectionName, client.getZkStateReader(), true, true, 330);
+    cluster.waitForActiveCollection(collectionName, numShards, numShards * numReplicas);
 
     // modify/query collection
-
     new UpdateRequest().add("id", "1").commit(client, collectionName);
     QueryResponse rsp = client.query(collectionName, new SolrQuery("*:*"));
     assertEquals(1, rsp.getResults().getNumFound());
@@ -145,7 +138,7 @@ public class TestSolrCloudWithKerberosAlt extends SolrCloudTestCase {
     CollectionAdminRequest.deleteCollection(collectionName).process(client);
         
     AbstractDistribZkTestBase.waitForCollectionToDisappear
-        (collectionName, client.getZkStateReader(), true, true, 330);
+        (collectionName, client.getZkStateReader(), true, 330);
   }
 
   @Override

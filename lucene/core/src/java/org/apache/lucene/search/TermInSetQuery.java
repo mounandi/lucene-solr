@@ -23,7 +23,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 import java.util.SortedSet;
 
 import org.apache.lucene.index.IndexReader;
@@ -33,8 +32,8 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.PrefixCodedTerms;
 import org.apache.lucene.index.PrefixCodedTerms.TermIterator;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.index.TermContext;
 import org.apache.lucene.index.TermState;
+import org.apache.lucene.index.TermStates;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.BooleanClause.Occur;
@@ -44,15 +43,20 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefBuilder;
 import org.apache.lucene.util.DocIdSetBuilder;
 import org.apache.lucene.util.RamUsageEstimator;
+import org.apache.lucene.util.automaton.Automata;
+import org.apache.lucene.util.automaton.Automaton;
+import org.apache.lucene.util.automaton.ByteRunAutomaton;
+import org.apache.lucene.util.automaton.CompiledAutomaton;
+import org.apache.lucene.util.automaton.Operations;
 
 /**
  * Specialization for a disjunction over many terms that behaves like a
  * {@link ConstantScoreQuery} over a {@link BooleanQuery} containing only
  * {@link org.apache.lucene.search.BooleanClause.Occur#SHOULD} clauses.
- * <p>For instance in the following example, both @{code q1} and {@code q2}
+ * <p>For instance in the following example, both {@code q1} and {@code q2}
  * would yield the same scores:
  * <pre class="prettyprint">
- * Query q1 = new TermInSetQuery(new Term("field", "foo"), new Term("field", "bar"));
+ * Query q1 = new TermInSetQuery("field", new BytesRef("foo"), new BytesRef("bar"));
  *
  * BooleanQuery bq = new BooleanQuery();
  * bq.add(new TermQuery(new Term("field", "foo")), Occur.SHOULD);
@@ -79,7 +83,7 @@ public class TermInSetQuery extends Query implements Accountable {
    * Creates a new {@link TermInSetQuery} from the given collection of terms.
    */
   public TermInSetQuery(String field, Collection<BytesRef> terms) {
-    BytesRef[] sortedTerms = terms.toArray(new BytesRef[terms.size()]);
+    BytesRef[] sortedTerms = terms.toArray(new BytesRef[0]);
     // already sorted if we are a SortedSet with natural order
     boolean sorted = terms instanceof SortedSet && ((SortedSet<BytesRef>)terms).comparator() == null;
     if (!sorted) {
@@ -110,7 +114,7 @@ public class TermInSetQuery extends Query implements Accountable {
 
   @Override
   public Query rewrite(IndexReader reader) throws IOException {
-    final int threshold = Math.min(BOOLEAN_REWRITE_TERM_COUNT_THRESHOLD, BooleanQuery.getMaxClauseCount());
+    final int threshold = Math.min(BOOLEAN_REWRITE_TERM_COUNT_THRESHOLD, IndexSearcher.getMaxClauseCount());
     if (termData.size() <= threshold) {
       BooleanQuery.Builder bq = new BooleanQuery.Builder();
       TermIterator iterator = termData.iterator();
@@ -120,6 +124,29 @@ public class TermInSetQuery extends Query implements Accountable {
       return new ConstantScoreQuery(bq.build());
     }
     return super.rewrite(reader);
+  }
+
+  @Override
+  public void visit(QueryVisitor visitor) {
+    if (visitor.acceptField(field) == false) {
+      return;
+    }
+    if (termData.size() == 1) {
+      visitor.consumeTerms(this, new Term(field, termData.iterator().next()));
+    }
+    if (termData.size() > 1) {
+      visitor.consumeTermsMatching(this, field, this::asByteRunAutomaton);
+    }
+  }
+
+  private ByteRunAutomaton asByteRunAutomaton() {
+    TermIterator iterator = termData.iterator();
+    List<Automaton> automata = new ArrayList<>();
+    for (BytesRef term = iterator.next(); term != null; term = iterator.next()) {
+      automata.add(Automata.makeBinary(term));
+    }
+    return new CompiledAutomaton(Operations.union(automata)).runAutomaton;
+
   }
 
   @Override
@@ -148,15 +175,19 @@ public class TermInSetQuery extends Query implements Accountable {
   @Override
   public String toString(String defaultField) {
     StringBuilder builder = new StringBuilder();
-    boolean first = true;
+    builder.append(field);
+    builder.append(":(");
+
     TermIterator iterator = termData.iterator();
+    boolean first = true;
     for (BytesRef term = iterator.next(); term != null; term = iterator.next()) {
       if (!first) {
         builder.append(' ');
       }
       first = false;
-      builder.append(new Term(iterator.field(), term).toString());
+      builder.append(Term.toString(term));
     }
+    builder.append(')');
 
     return builder.toString();
   }
@@ -205,15 +236,16 @@ public class TermInSetQuery extends Query implements Accountable {
   }
 
   @Override
-  public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+  public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
     return new ConstantScoreWeight(this, boost) {
 
       @Override
-      public void extractTerms(Set<Term> terms) {
-        // no-op
-        // This query is for abuse cases when the number of terms is too high to
-        // run efficiently as a BooleanQuery. So likewise we hide its terms in
-        // order to protect highlighters
+      public Matches matches(LeafReaderContext context, int doc) throws IOException {
+        Terms terms = context.reader().terms(field);
+        if (terms == null || terms.hasPositions() == false) {
+          return super.matches(context, doc);
+        }
+        return MatchesUtils.forField(field, () -> DisjunctionMatchesIterator.fromTermsEnum(context, doc, getQuery(), field, termData.iterator()));
       }
 
       /**
@@ -233,7 +265,7 @@ public class TermInSetQuery extends Query implements Accountable {
 
         // We will first try to collect up to 'threshold' terms into 'matchingTerms'
         // if there are two many terms, we will fall back to building the 'builder'
-        final int threshold = Math.min(BOOLEAN_REWRITE_TERM_COUNT_THRESHOLD, BooleanQuery.getMaxClauseCount());
+        final int threshold = Math.min(BOOLEAN_REWRITE_TERM_COUNT_THRESHOLD, IndexSearcher.getMaxClauseCount());
         assert termData.size() > threshold : "Query should have been rewritten";
         List<TermAndState> matchingTerms = new ArrayList<>(threshold);
         DocIdSetBuilder builder = null;
@@ -264,12 +296,12 @@ public class TermInSetQuery extends Query implements Accountable {
           assert builder == null;
           BooleanQuery.Builder bq = new BooleanQuery.Builder();
           for (TermAndState t : matchingTerms) {
-            final TermContext termContext = new TermContext(searcher.getTopReaderContext());
-            termContext.register(t.state, context.ord, t.docFreq, t.totalTermFreq);
-            bq.add(new TermQuery(new Term(t.field, t.term), termContext), Occur.SHOULD);
+            final TermStates termStates = new TermStates(searcher.getTopReaderContext());
+            termStates.register(t.state, context.ord, t.docFreq, t.totalTermFreq);
+            bq.add(new TermQuery(new Term(t.field, t.term), termStates), Occur.SHOULD);
           }
           Query q = new ConstantScoreQuery(bq.build());
-          final Weight weight = searcher.rewrite(q).createWeight(searcher, needsScores, score());
+          final Weight weight = searcher.rewrite(q).createWeight(searcher, scoreMode, score());
           return new WeightOrDocIdSet(weight);
         } else {
           assert builder != null;
@@ -285,7 +317,7 @@ public class TermInSetQuery extends Query implements Accountable {
         if (disi == null) {
           return null;
         }
-        return new ConstantScoreScorer(this, score(), disi);
+        return new ConstantScoreScorer(this, score(), scoreMode, disi);
       }
 
       @Override
@@ -315,6 +347,14 @@ public class TermInSetQuery extends Query implements Accountable {
           return scorer(weightOrBitSet.set);
         }
       }
+
+      @Override
+      public boolean isCacheable(LeafReaderContext ctx) {
+        // Only cache instances that have a reasonable size. Otherwise it might cause memory issues
+        // with the query cache if most memory ends up being spent on queries rather than doc id sets.
+        return ramBytesUsed() <= RamUsageEstimator.QUERY_DEFAULT_RAM_BYTES_USED;
+      }
+
     };
   }
 }

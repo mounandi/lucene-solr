@@ -16,7 +16,7 @@
  */
 package org.apache.solr.update.processor;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.solr.common.SolrInputField;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.SolrCore;
@@ -59,6 +59,7 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.muta
  * &lt;processor class="solr.FirstFieldValueUpdateProcessorFactory"&gt;
  *   &lt;str name="fieldName"&gt;primary_author&lt;/str&gt;
  * &lt;/processor&gt;</pre>
+ * @since 4.0.0
  */
 public final class ConcatFieldUpdateProcessorFactory extends FieldMutatingUpdateProcessorFactory {
 
@@ -66,7 +67,7 @@ public final class ConcatFieldUpdateProcessorFactory extends FieldMutatingUpdate
 
   @SuppressWarnings("unchecked")
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
     Object d = args.remove("delimiter");
     if (null != d) delimiter = d.toString();
 

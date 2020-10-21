@@ -26,6 +26,7 @@ import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.CoreContainer;
 import org.apache.solr.core.SolrConfig;
 import org.apache.solr.core.SolrCore;
+import org.apache.solr.handler.IndexFetcher;
 import org.apache.solr.handler.ReplicationHandler;
 import org.apache.solr.request.LocalSolrQueryRequest;
 import org.apache.solr.request.SolrQueryRequest;
@@ -36,13 +37,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class ReplicateFromLeader {
-  private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-  private CoreContainer cc;
-  private String coreName;
+  private final CoreContainer cc;
+  private final String coreName;
 
-  private ReplicationHandler replicationProcess;
-  private long lastVersion = 0;
+  private volatile ReplicationHandler replicationProcess;
+  private volatile long lastVersion = 0;
 
   public ReplicateFromLeader(CoreContainer cc, String coreName) {
     this.cc = cc;
@@ -65,18 +66,22 @@ public class ReplicateFromLeader {
       }
       SolrConfig.UpdateHandlerInfo uinfo = core.getSolrConfig().getUpdateHandlerInfo();
       String pollIntervalStr = "00:00:03";
+      if (System.getProperty("jetty.testMode") != null) {
+        pollIntervalStr = "00:00:01";
+      }
       if (uinfo.autoCommmitMaxTime != -1) {
         pollIntervalStr = toPollIntervalStr(uinfo.autoCommmitMaxTime/2);
       } else if (uinfo.autoSoftCommmitMaxTime != -1) {
         pollIntervalStr = toPollIntervalStr(uinfo.autoSoftCommmitMaxTime/2);
       }
-      LOG.info("Will start replication from leader with poll interval: {}", pollIntervalStr );
+      log.info("Will start replication from leader with poll interval: {}", pollIntervalStr );
 
-      NamedList<Object> slaveConfig = new NamedList<>();
-      slaveConfig.add("fetchFromLeader", Boolean.TRUE);
-      slaveConfig.add("pollInterval", pollIntervalStr);
+      NamedList<Object> followerConfig = new NamedList<>();
+      followerConfig.add("fetchFromLeader", Boolean.TRUE);
+      followerConfig.add(ReplicationHandler.SKIP_COMMIT_ON_LEADER_VERSION_ZERO, switchTransactionLog);
+      followerConfig.add("pollInterval", pollIntervalStr);
       NamedList<Object> replicationConfig = new NamedList<>();
-      replicationConfig.add("slave", slaveConfig);
+      replicationConfig.add("follower", followerConfig);
 
       String lastCommitVersion = getCommitVersion(core);
       if (lastCommitVersion != null) {
@@ -85,8 +90,8 @@ public class ReplicateFromLeader {
 
       replicationProcess = new ReplicationHandler();
       if (switchTransactionLog) {
-        replicationProcess.setPollListener((solrCore, pollSuccess) -> {
-          if (pollSuccess) {
+        replicationProcess.setPollListener((solrCore, fetchResult) -> {
+          if (fetchResult == IndexFetcher.IndexFetchResult.INDEX_FETCH_SUCCESS) {
             String commitVersion = getCommitVersion(core);
             if (commitVersion == null) return;
             if (Long.parseLong(commitVersion) == lastVersion) return;
@@ -95,7 +100,7 @@ public class ReplicateFromLeader {
                 new ModifiableSolrParams());
             CommitUpdateCommand cuc = new CommitUpdateCommand(req, false);
             cuc.setVersion(Long.parseLong(commitVersion));
-            updateLog.copyOverOldUpdates(cuc);
+            updateLog.commitAndSwitchToNewTlog(cuc);
             lastVersion = Long.parseLong(commitVersion);
           }
         });
@@ -112,7 +117,7 @@ public class ReplicateFromLeader {
       if (commitVersion == null) return null;
       else return commitVersion;
     } catch (Exception e) {
-      LOG.warn("Cannot get commit command version from index commit point ",e);
+      log.warn("Cannot get commit command version from index commit point ",e);
       return null;
     }
   }
@@ -128,7 +133,7 @@ public class ReplicateFromLeader {
 
   public void stopReplication() {
     if (replicationProcess != null) {
-      replicationProcess.close();
+      replicationProcess.shutdown();
     }
   }
 }

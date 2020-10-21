@@ -31,8 +31,11 @@ import org.apache.solr.common.params.RequiredSolrParams;
 import org.apache.solr.common.params.SolrParams;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.SimpleOrderedMap;
+import org.apache.solr.schema.CurrencyFieldType;
+import org.apache.solr.schema.CurrencyValue;
 import org.apache.solr.schema.DatePointField;
 import org.apache.solr.schema.DateRangeField;
+import org.apache.solr.schema.ExchangeRateProvider;
 import org.apache.solr.schema.FieldType;
 import org.apache.solr.schema.IndexSchema;
 import org.apache.solr.schema.SchemaField;
@@ -88,13 +91,14 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
 
     if ((schemaField.getType() instanceof DateRangeField) && method.equals(FacetParams.FacetRangeMethod.DV)) {
       // the user has explicitly selected the FacetRangeMethod.DV method
-      log.warn("Range facet method '" + FacetParams.FacetRangeMethod.DV + "' is not supported together with field type '" +
-          DateRangeField.class + "'. Will use method '" + FacetParams.FacetRangeMethod.FILTER + "' instead");
+      log.warn("Range facet method '{}' is not supported together with field type '{}'. Will use method '{}' instead"
+          , FacetParams.FacetRangeMethod.DV, DateRangeField.class, FacetParams.FacetRangeMethod.FILTER);
       method = FacetParams.FacetRangeMethod.FILTER;
     }
     if (method.equals(FacetParams.FacetRangeMethod.DV) && !schemaField.hasDocValues() && (schemaField.getType().isPointField())) {
-      log.warn("Range facet method '" + FacetParams.FacetRangeMethod.DV + "' is not supported on PointFields without docValues." +
-          "Will use method '" + FacetParams.FacetRangeMethod.FILTER + "' instead");
+      log.warn("Range facet method '{}' is not supported on PointFields without docValues. Will use method '{}' instead"
+          , FacetParams.FacetRangeMethod.DV
+          , FacetParams.FacetRangeMethod.FILTER);
       method = FacetParams.FacetRangeMethod.FILTER;
     }
 
@@ -121,8 +125,8 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
     this.groupFacet = params.getBool(GroupParams.GROUP_FACET, false);
     if (groupFacet && method.equals(FacetParams.FacetRangeMethod.DV)) {
       // the user has explicitly selected the FacetRangeMethod.DV method
-      log.warn("Range facet method '" + FacetParams.FacetRangeMethod.DV + "' is not supported together with '" +
-          GroupParams.GROUP_FACET + "'. Will use method '" + FacetParams.FacetRangeMethod.FILTER + "' instead");
+      log.warn("Range facet method '{}' is not supported together with '{}'. Will use method '{}' instead"
+          , FacetParams.FacetRangeMethod.DV, GroupParams.GROUP_FACET, FacetParams.FacetRangeMethod.FILTER);
       method = FacetParams.FacetRangeMethod.FILTER;
     }
 
@@ -189,6 +193,8 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
               (SolrException.ErrorCode.BAD_REQUEST,
                   "Unable to range facet on Point field of unexpected type:" + this.facetOn);
       }
+    } else if (ft instanceof CurrencyFieldType) {
+      calc = new CurrencyRangeEndpointCalculator(this);
     } else {
       throw new SolrException
           (SolrException.ErrorCode.BAD_REQUEST,
@@ -451,12 +457,14 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
       this.field = rfr.getSchemaField();
     }
 
-    public T getComputedEnd() {
+    /** The Computed End point of all ranges, as an Object of type suitable for direct inclusion in the response data */
+    public Object getComputedEnd() {
       assert computed;
       return computedEnd;
     }
 
-    public T getStart() {
+    /** The Start point of all ranges, as an Object of type suitable for direct inclusion in the response data */
+    public Object getStart() {
       assert computed;
       return start;
     }
@@ -659,7 +667,7 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
 
     @Override
     public Float parseAndAddGap(Float value, String gap) {
-      return new Float(value.floatValue() + Float.parseFloat(gap));
+      return value.floatValue() + Float.parseFloat(gap);
     }
   }
 
@@ -677,7 +685,7 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
 
     @Override
     public Double parseAndAddGap(Double value, String gap) {
-      return new Double(value.doubleValue() + Double.parseDouble(gap));
+      return value.doubleValue() + Double.parseDouble(gap);
     }
   }
 
@@ -695,7 +703,7 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
 
     @Override
     public Integer parseAndAddGap(Integer value, String gap) {
-      return new Integer(value.intValue() + Integer.parseInt(gap));
+      return value.intValue() + Integer.parseInt(gap);
     }
   }
 
@@ -713,7 +721,7 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
 
     @Override
     public Long parseAndAddGap(Long value, String gap) {
-      return new Long(value.longValue() + Long.parseLong(gap));
+      return value.longValue() + Long.parseLong(gap);
     }
   }
 
@@ -756,6 +764,68 @@ public class RangeFacetRequest extends FacetComponent.FacetBase {
     }
   }
 
+  private static class CurrencyRangeEndpointCalculator
+    extends RangeEndpointCalculator<CurrencyValue> {
+    private String defaultCurrencyCode;
+    private ExchangeRateProvider exchangeRateProvider;
+    public CurrencyRangeEndpointCalculator(final RangeFacetRequest rangeFacetRequest) {
+      super(rangeFacetRequest);
+      if(!(this.field.getType() instanceof CurrencyFieldType)) {
+        throw new SolrException(SolrException.ErrorCode.BAD_REQUEST,
+                                "Cannot perform range faceting over non CurrencyField fields");
+      }
+      defaultCurrencyCode =
+        ((CurrencyFieldType)this.field.getType()).getDefaultCurrency();
+      exchangeRateProvider =
+        ((CurrencyFieldType)this.field.getType()).getProvider();
+    }
+
+    @Override
+    protected Object parseGap(String rawval) throws java.text.ParseException {
+      return parseVal(rawval).strValue();
+    }
+
+    @Override
+    public String formatValue(CurrencyValue val) {
+      return val.strValue();
+    }
+
+    /** formats the value as a String since {@link CurrencyValue} is not suitable for response writers */
+    @Override
+    public Object getComputedEnd() {
+      assert computed;
+      return formatValue(computedEnd);
+    }
+    
+    /** formats the value as a String since {@link CurrencyValue} is not suitable for response writers */
+    @Override
+    public Object getStart() {
+      assert computed;
+      return formatValue(start);
+    }
+    
+    @Override
+    protected CurrencyValue parseVal(String rawval) {
+      return CurrencyValue.parse(rawval, defaultCurrencyCode);
+    }
+
+    @Override
+    public CurrencyValue parseAndAddGap(CurrencyValue value, String gap) {
+      if(value == null) {
+        throw new NullPointerException("Cannot perform range faceting on null CurrencyValue");
+      }
+      CurrencyValue gapCurrencyValue =
+        CurrencyValue.parse(gap, defaultCurrencyCode);
+      long gapAmount =
+        CurrencyValue.convertAmount(this.exchangeRateProvider,
+                                    gapCurrencyValue.getCurrencyCode(),
+                                    gapCurrencyValue.getAmount(),
+                                    value.getCurrencyCode());
+      return new CurrencyValue(value.getAmount() + gapAmount,
+                               value.getCurrencyCode());
+    }
+  }
+  
   /**
    * Represents a single facet range (or gap) for which the count is to be calculated
    */

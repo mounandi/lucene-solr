@@ -17,20 +17,16 @@
 
 package org.apache.solr.client.solrj.request;
 
-import java.io.IOException;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Set;
 import java.util.TreeSet;
 
-import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.impl.NoOpResponseParser;
 import org.apache.solr.client.solrj.response.DelegationTokenResponse;
-
 import org.apache.solr.common.params.ModifiableSolrParams;
 import org.apache.solr.common.params.SolrParams;
-import org.apache.solr.common.util.ContentStream;
 
 /**
  * Class for making Solr delegation token requests.
@@ -52,14 +48,6 @@ public abstract class DelegationTokenRequest
   }
 
   protected abstract Q getThis();
-
-  /**
-   * {@inheritDoc}
-   */
-  @Override
-  public Collection<ContentStream> getContentStreams() throws IOException {
-    return null;
-  }
 
   @Override
   protected abstract R createResponse(SolrClient client);
@@ -93,6 +81,11 @@ public abstract class DelegationTokenRequest
 
     @Override
     public DelegationTokenResponse.Get createResponse(SolrClient client) { return new DelegationTokenResponse.Get(); }
+
+    @Override
+    public String getRequestType() {
+      return SolrRequestType.ADMIN.toString();
+    }
   }
 
   public static class Renew extends DelegationTokenRequest<Renew, DelegationTokenResponse.Renew> {
@@ -120,6 +113,11 @@ public abstract class DelegationTokenRequest
 
     @Override
     public DelegationTokenResponse.Renew createResponse(SolrClient client) { return new DelegationTokenResponse.Renew(); }
+
+    @Override
+    public String getRequestType() {
+      return SolrRequestType.ADMIN.toString();
+    }
   }
 
   public static class Cancel extends DelegationTokenRequest<Cancel, DelegationTokenResponse.Cancel> {
@@ -148,5 +146,10 @@ public abstract class DelegationTokenRequest
 
     @Override
     public DelegationTokenResponse.Cancel createResponse(SolrClient client) { return new DelegationTokenResponse.Cancel(); }
+
+    @Override
+    public String getRequestType() {
+      return SolrRequestType.ADMIN.toString();
+    }
   }
 }

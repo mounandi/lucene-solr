@@ -47,8 +47,8 @@ This module exposes the following functionality:
   <li><a href="#transform">Text Transformation</a>: Transforms Unicode text in
   a context-sensitive fashion: e.g. mapping Traditional to Simplified Chinese</li>
 </ul>
-<hr/>
-<h1><a name="segmentation">Text Segmentation</a></h1>
+<hr>
+<h1><a id="segmentation">Text Segmentation</a></h1>
 <p>
 Text Segmentation (Tokenization) divides document and query text into index terms
 (typically words). Unicode provides special properties and rules so that this can
@@ -76,8 +76,8 @@ algorithm.
    */
   Tokenizer tokenizer = new ICUTokenizer(reader);
 </pre>
-<hr/>
-<h1><a name="collation">Collation</a></h1>
+<hr>
+<h1><a id="collation">Collation</a></h1>
 <p>
   <code>ICUCollationKeyAnalyzer</code>
   converts each token into its binary <code>CollationKey</code> using the 
@@ -115,14 +115,15 @@ algorithm.
 <pre class="prettyprint">
   Collator collator = Collator.getInstance(new ULocale("ar"));
   ICUCollationKeyAnalyzer analyzer = new ICUCollationKeyAnalyzer(collator);
-  RAMDirectory ramDir = new RAMDirectory();
-  IndexWriter writer = new IndexWriter(ramDir, new IndexWriterConfig(analyzer));
+  Path indexPath = Files.createTempDirectory("tempIndex");
+  Directory dir = FSDirectory.open(indexPath);
+  IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(analyzer));
   Document doc = new Document();
   doc.add(new Field("content", "\u0633\u0627\u0628", 
                     Field.Store.YES, Field.Index.ANALYZED));
   writer.addDocument(doc);
   writer.close();
-  IndexSearcher is = new IndexSearcher(ramDir, true);
+  IndexSearcher is = new IndexSearcher(dir, true);
 
   QueryParser aqp = new QueryParser("content", analyzer);
   aqp.setAnalyzeRangeTerms(true);
@@ -141,24 +142,25 @@ algorithm.
 <pre class="prettyprint">
   Analyzer analyzer 
     = new ICUCollationKeyAnalyzer(Collator.getInstance(new ULocale("da", "dk")));
-  RAMDirectory indexStore = new RAMDirectory();
-  IndexWriter writer = new IndexWriter(indexStore, new IndexWriterConfig(analyzer));
+  Path indexPath = Files.createTempDirectory("tempIndex");
+  Directory dir = FSDirectory.open(indexPath);
+  IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(analyzer));
   String[] tracer = new String[] { "A", "B", "C", "D", "E" };
   String[] data = new String[] { "HAT", "HUT", "H\u00C5T", "H\u00D8T", "HOT" };
   String[] sortedTracerOrder = new String[] { "A", "E", "B", "D", "C" };
-  for (int i = 0 ; i < data.length ; ++i) {
+  for (int i = 0 ; i &lt; data.length ; ++i) {
     Document doc = new Document();
     doc.add(new Field("tracer", tracer[i], Field.Store.YES, Field.Index.NO));
     doc.add(new Field("contents", data[i], Field.Store.NO, Field.Index.ANALYZED));
     writer.addDocument(doc);
   }
   writer.close();
-  IndexSearcher searcher = new IndexSearcher(indexStore, true);
+  IndexSearcher searcher = new IndexSearcher(dir, true);
   Sort sort = new Sort();
   sort.setSort(new SortField("contents", SortField.STRING));
   Query query = new MatchAllDocsQuery();
   ScoreDoc[] result = searcher.search(query, null, 1000, sort).scoreDocs;
-  for (int i = 0 ; i < result.length ; ++i) {
+  for (int i = 0 ; i &lt; result.length ; ++i) {
     Document doc = searcher.doc(result[i].doc);
     assertEquals(sortedTracerOrder[i], doc.getValues("tracer")[0]);
   }
@@ -169,13 +171,14 @@ algorithm.
   Collator collator = Collator.getInstance(new ULocale("tr", "TR"));
   collator.setStrength(Collator.PRIMARY);
   Analyzer analyzer = new ICUCollationKeyAnalyzer(collator);
-  RAMDirectory ramDir = new RAMDirectory();
-  IndexWriter writer = new IndexWriter(ramDir, new IndexWriterConfig(analyzer));
+  Path indexPath = Files.createTempDirectory("tempIndex");
+  Directory dir = FSDirectory.open(indexPath);
+  IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig(analyzer));
   Document doc = new Document();
   doc.add(new Field("contents", "DIGY", Field.Store.NO, Field.Index.ANALYZED));
   writer.addDocument(doc);
   writer.close();
-  IndexSearcher is = new IndexSearcher(ramDir, true);
+  IndexSearcher is = new IndexSearcher(dir, true);
   QueryParser parser = new QueryParser("contents", analyzer);
   Query query = parser.parse("d\u0131gy");   // U+0131: dotless i
   ScoreDoc[] result = is.search(query, null, 1000).scoreDocs;
@@ -222,8 +225,8 @@ algorithm.
   you use <code>CollationKeyAnalyzer</code> to generate index terms, do not use
   <code>ICUCollationKeyAnalyzer</code> on the query side, or vice versa.
 </p>
-<hr/>
-<h1><a name="normalization">Normalization</a></h1>
+<hr>
+<h1><a id="normalization">Normalization</a></h1>
 <p>
   <code>ICUNormalizer2Filter</code> normalizes term text to a 
   <a href="http://unicode.org/reports/tr15/">Unicode Normalization Form</a>, so 
@@ -250,8 +253,8 @@ algorithm.
    */
   TokenStream tokenstream = new ICUNormalizer2Filter(tokenizer, normalizer);
 </pre>
-<hr/>
-<h1><a name="casefolding">Case Folding</a></h1>
+<hr>
+<h1><a id="casefolding">Case Folding</a></h1>
 <p>
 Default caseless matching, or case-folding is more than just conversion to
 lowercase. For example, it handles cases such as the Greek sigma, so that
@@ -285,8 +288,8 @@ this integration. To perform case-folding, you use normalization with the form
    */
   TokenStream tokenstream = new ICUNormalizer2Filter(tokenizer);
 </pre>
-<hr/>
-<h1><a name="searchfolding">Search Term Folding</a></h1>
+<hr>
+<h1><a id="searchfolding">Search Term Folding</a></h1>
 <p>
 Search term folding removes distinctions (such as accent marks) between 
 similar characters. It is useful for a fuzzy or loose search.
@@ -313,8 +316,8 @@ many character foldings recursively.
    */
   TokenStream tokenstream = new ICUFoldingFilter(tokenizer);
 </pre>
-<hr/>
-<h1><a name="transform">Text Transformation</a></h1>
+<hr>
+<h1><a id="transform">Text Transformation</a></h1>
 <p>
 ICU provides text-transformation functionality via its Transliteration API. This allows
 you to transform text in a variety of ways, taking context into account.
@@ -349,11 +352,11 @@ and
    */
   TokenStream tokenstream = new ICUTransformFilter(tokenizer, Transliterator.getInstance("Serbian-Latin/BGN"));
 </pre>
-<hr/>
-<h1><a name="backcompat">Backwards Compatibility</a></h1>
+<hr>
+<h1><a id="backcompat">Backwards Compatibility</a></h1>
 <p>
 This module exists to provide up-to-date Unicode functionality that supports
-the most recent version of Unicode (currently 8.0). However, some users who wish
+the most recent version of Unicode (currently 11.0). However, some users who wish
 for stronger backwards compatibility can restrict
 {@link org.apache.lucene.analysis.icu.ICUNormalizer2Filter} to operate on only
 a specific Unicode Version by using a {@link com.ibm.icu.text.FilteredNormalizer2}. 

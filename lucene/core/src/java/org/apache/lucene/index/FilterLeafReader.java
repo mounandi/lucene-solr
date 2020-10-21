@@ -44,7 +44,7 @@ public abstract class FilterLeafReader extends LeafReader {
    *  an instance of {@link FilterLeafReader}.  */
   public static LeafReader unwrap(LeafReader reader) {
     while (reader instanceof FilterLeafReader) {
-      reader = ((FilterLeafReader) reader).in;
+      reader = ((FilterLeafReader) reader).getDelegate();
     }
     return reader;
   }
@@ -59,7 +59,7 @@ public abstract class FilterLeafReader extends LeafReader {
      * Creates a new FilterFields.
      * @param in the underlying Fields instance.
      */
-    public FilterFields(Fields in) {
+    protected FilterFields(Fields in) {
       if (in == null) {
         throw new NullPointerException("incoming Fields must not be null");
       }
@@ -95,7 +95,7 @@ public abstract class FilterLeafReader extends LeafReader {
      * Creates a new FilterTerms
      * @param in the underlying Terms instance.
      */
-    public FilterTerms(Terms in) {
+    protected FilterTerms(Terms in) {
       if (in == null) {
         throw new NullPointerException("incoming Terms must not be null");
       }
@@ -162,7 +162,7 @@ public abstract class FilterLeafReader extends LeafReader {
      * Creates a new FilterTermsEnum
      * @param in the underlying TermsEnum instance.
      */
-    public FilterTermsEnum(TermsEnum in) {
+    protected FilterTermsEnum(TermsEnum in) {
       if (in == null) {
         throw new NullPointerException("incoming TermsEnum must not be null");
       }
@@ -177,6 +177,11 @@ public abstract class FilterLeafReader extends LeafReader {
     @Override
     public SeekStatus seekCeil(BytesRef text) throws IOException {
       return in.seekCeil(text);
+    }
+    
+    @Override
+    public boolean seekExact(BytesRef text) throws IOException {
+      return in.seekExact(text);
     }
 
     @Override
@@ -214,6 +219,20 @@ public abstract class FilterLeafReader extends LeafReader {
       return in.postings(reuse, flags);
     }
 
+    @Override
+    public ImpactsEnum impacts(int flags) throws IOException {
+      return in.impacts(flags);
+    }
+
+    @Override
+    public void seekExact(BytesRef term, TermState state) throws IOException {
+      in.seekExact(term, state);
+    }
+
+    @Override
+    public TermState termState() throws IOException {
+      return in.termState();
+    }
   }
 
   /** Base class for filtering {@link PostingsEnum} implementations. */
@@ -225,16 +244,11 @@ public abstract class FilterLeafReader extends LeafReader {
      * Create a new FilterPostingsEnum
      * @param in the underlying PostingsEnum instance.
      */
-    public FilterPostingsEnum(PostingsEnum in) {
+    protected FilterPostingsEnum(PostingsEnum in) {
       if (in == null) {
         throw new NullPointerException("incoming PostingsEnum must not be null");
       }
       this.in = in;
-    }
-
-    @Override
-    public AttributeSource attributes() {
-      return in.attributes();
     }
 
     @Override
@@ -291,7 +305,7 @@ public abstract class FilterLeafReader extends LeafReader {
    * <p>Note that base reader is closed if this FilterLeafReader is closed.</p>
    * @param in specified base reader.
    */
-  public FilterLeafReader(LeafReader in) {
+  protected FilterLeafReader(LeafReader in) {
     super();
     if (in == null) {
       throw new NullPointerException("incoming LeafReader must not be null");
@@ -314,6 +328,11 @@ public abstract class FilterLeafReader extends LeafReader {
   @Override
   public PointValues getPointValues(String field) throws IOException {
     return in.getPointValues(field);
+  }
+
+  @Override
+  public VectorValues getVectorValues(String field) throws IOException {
+    return in.getVectorValues(field);
   }
 
   @Override

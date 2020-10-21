@@ -20,10 +20,22 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.common.SolrException;
+import org.junit.Test;
 
-public class NamedListTest extends LuceneTestCase {
+public class NamedListTest extends SolrTestCase {
+
+  @Test
+  public void testToString() {
+    NamedList<String> nl = new NamedList<>();
+    assertEquals("{}", nl.toString());
+    nl.add("key1", "value1");
+    assertEquals("{key1=value1}", nl.toString());
+    nl.add("key2", "value2");
+    assertEquals("{key1=value1, key2=value2}", nl.toString());
+  }
+
   public void testRemove() {
     NamedList<String> nl = new NamedList<>();
     nl.add("key1", "value1");
@@ -62,7 +74,9 @@ public class NamedListTest extends LuceneTestCase {
     assertEquals(5, values.size());
     assertEquals(0, nl.size());
   }
-  
+
+  @Test
+  // commented out on: 24-Dec-2018   @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // added 20-Sep-2018
   public void testRemoveArgs() {
     NamedList<Object> nl = new NamedList<>();
     nl.add("key1", "value1-1");
@@ -84,14 +98,8 @@ public class NamedListTest extends LuceneTestCase {
     assertEquals("value1-3", values.get(2));
     assertEquals(6, values.size());
     assertEquals(7, nl.size());
-    try {
-      values = (ArrayList<String>) nl.removeConfigArgs("key2");
-      fail();
-    }
-    catch(SolrException e) {
-      // Expected exception.
-      assertTrue(true);
-    }
+
+    expectThrows(SolrException.class, () -> nl.removeConfigArgs("key2"));
     // nl should be unmodified when removeArgs throws an exception.
     assertEquals(7, nl.size());
   }
@@ -124,7 +132,7 @@ public class NamedListTest extends LuceneTestCase {
     NamedList<Object> nl2 = new NamedList<>();
     nl2.add("key2a", "value2a");
     nl2.add("key2b", nl2b);
-    nl2.add("k2int1", (int) 5);
+    nl2.add("k2int1", 5);
     NamedList<Object> nl3 = new NamedList<>();
     nl3.add("key3a", nl3a);
     nl3.add("key3b", "value3b");
@@ -187,9 +195,14 @@ public class NamedListTest extends LuceneTestCase {
     assertNull(enltest4);
   }
 
+  @Test
+  // commented out on: 24-Dec-2018   @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // added 20-Sep-2018
+  @SuppressWarnings({"unchecked"})
   public void testShallowMap() {
+    @SuppressWarnings({"rawtypes"})
     NamedList nl = new NamedList();
     nl.add("key1", "Val1");
+    @SuppressWarnings({"rawtypes"})
     Map m = nl.asShallowMap();
     m.put("key1", "Val1_");
     assertEquals("Val1_", nl.get("key1"));

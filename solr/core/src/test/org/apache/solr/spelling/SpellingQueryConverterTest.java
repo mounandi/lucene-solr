@@ -21,7 +21,7 @@ import java.util.Collection;
 import java.util.List;
 
 import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
-import org.apache.lucene.util.LuceneTestCase;
+import org.apache.solr.SolrTestCase;
 import org.apache.solr.common.util.NamedList;
 import org.junit.Test;
 
@@ -32,9 +32,10 @@ import org.junit.Test;
  *
  * @since solr 1.3
  */
-public class SpellingQueryConverterTest extends LuceneTestCase {
+public class SpellingQueryConverterTest extends SolrTestCase {
 
   @Test
+  @SuppressWarnings({"rawtypes"})
   public void test() throws Exception {
     SpellingQueryConverter converter = new SpellingQueryConverter();
     converter.init(new NamedList());
@@ -45,6 +46,7 @@ public class SpellingQueryConverterTest extends LuceneTestCase {
   }
   
   @Test
+  @SuppressWarnings({"rawtypes"})
   public void testNumeric() throws Exception {
     SpellingQueryConverter converter = new SpellingQueryConverter();
     converter.init(new NamedList());
@@ -59,6 +61,7 @@ public class SpellingQueryConverterTest extends LuceneTestCase {
   }
   
   @Test
+  @SuppressWarnings({"rawtypes"})
   public void testSpecialChars()  {
     SpellingQueryConverter converter = new SpellingQueryConverter();
     converter.init(new NamedList());
@@ -115,6 +118,7 @@ public class SpellingQueryConverterTest extends LuceneTestCase {
   }
 
   @Test
+  @SuppressWarnings({"rawtypes"})
   public void testUnicode() {
     SpellingQueryConverter converter = new SpellingQueryConverter();
     converter.init(new NamedList());
@@ -135,6 +139,7 @@ public class SpellingQueryConverterTest extends LuceneTestCase {
   }
 
   @Test
+  @SuppressWarnings({"rawtypes"})
   public void testMultipleClauses() {
     SpellingQueryConverter converter = new SpellingQueryConverter();
     converter.init(new NamedList());
@@ -152,6 +157,7 @@ public class SpellingQueryConverterTest extends LuceneTestCase {
   }
   
   @Test
+  @SuppressWarnings({"rawtypes"})
   public void testRequiredOrProhibitedFlags() {
     SpellingQueryConverter converter = new SpellingQueryConverter();
     converter.init(new NamedList());

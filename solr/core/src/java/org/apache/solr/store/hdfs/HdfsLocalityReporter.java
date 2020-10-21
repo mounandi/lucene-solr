@@ -26,18 +26,20 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import com.codahale.metrics.MetricRegistry;
 import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.solr.core.SolrInfoBean;
 import org.apache.solr.metrics.MetricsMap;
-import org.apache.solr.metrics.SolrMetricManager;
-import org.apache.solr.metrics.SolrMetricProducer;
+import org.apache.solr.metrics.SolrMetricsContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class HdfsLocalityReporter implements SolrInfoBean, SolrMetricProducer {
+/**
+ * @deprecated since 8.6
+ */
+@Deprecated
+public class HdfsLocalityReporter implements SolrInfoBean {
   public static final String LOCALITY_BYTES_TOTAL = "locality.bytes.total";
   public static final String LOCALITY_BYTES_LOCAL = "locality.bytes.local";
   public static final String LOCALITY_BYTES_RATIO = "locality.bytes.ratio";
@@ -45,13 +47,13 @@ public class HdfsLocalityReporter implements SolrInfoBean, SolrMetricProducer {
   public static final String LOCALITY_BLOCKS_LOCAL = "locality.blocks.local";
   public static final String LOCALITY_BLOCKS_RATIO = "locality.blocks.ratio";
 
-  private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
   private String hostname;
   private final ConcurrentMap<HdfsDirectory,ConcurrentMap<FileStatus,BlockLocation[]>> cache;
 
   private final Set<String> metricNames = ConcurrentHashMap.newKeySet();
-  private MetricRegistry registry;
+  private SolrMetricsContext solrMetricsContext;
 
   public HdfsLocalityReporter() {
     cache = new ConcurrentHashMap<>();
@@ -81,22 +83,17 @@ public class HdfsLocalityReporter implements SolrInfoBean, SolrMetricProducer {
   }
 
   @Override
-  public Set<String> getMetricNames() {
-    return metricNames;
-  }
-
-  @Override
-  public MetricRegistry getMetricRegistry() {
-    return registry;
+  public SolrMetricsContext getSolrMetricsContext() {
+    return solrMetricsContext;
   }
 
   /**
    * Provide statistics on HDFS block locality, both in terms of bytes and block counts.
    */
   @Override
-  public void initializeMetrics(SolrMetricManager manager, String registryName, String scope) {
-    registry = manager.registry(registryName);
-    MetricsMap metricsMap = new MetricsMap((detailed, map) -> {
+  public void initializeMetrics(SolrMetricsContext parentContext, String scope) {
+    solrMetricsContext = parentContext.getChildContext(this);
+    MetricsMap metricsMap = new MetricsMap(map -> {
       long totalBytes = 0;
       long localBytes = 0;
       int totalCount = 0;
@@ -125,7 +122,7 @@ public class HdfsLocalityReporter implements SolrInfoBean, SolrMetricProducer {
               }
             }
           } catch (IOException e) {
-            logger.warn("Could not retrieve locality information for {} due to exception: {}",
+            log.warn("Could not retrieve locality information for {} due to exception: {}",
                 hdfsDirectory.getHdfsDirPath(), e);
           }
         }
@@ -145,7 +142,7 @@ public class HdfsLocalityReporter implements SolrInfoBean, SolrMetricProducer {
         map.put(LOCALITY_BLOCKS_RATIO, localCount / (double) totalCount);
       }
     });
-    manager.registerGauge(this, registryName, metricsMap, true, "hdfsLocality", getCategory().toString(), scope);
+    solrMetricsContext.gauge(metricsMap, true, "hdfsLocality", getCategory().toString(), scope);
   }
 
   /**
@@ -156,7 +153,11 @@ public class HdfsLocalityReporter implements SolrInfoBean, SolrMetricProducer {
    *          The directory to keep metrics on.
    */
   public void registerDirectory(HdfsDirectory dir) {
-    logger.info("Registering direcotry {} for locality metrics.", dir.getHdfsDirPath().toString());
+    if (log.isInfoEnabled()) {
+      if (log.isInfoEnabled()) {
+        log.info("Registering direcotry {} for locality metrics.", dir.getHdfsDirPath());
+      }
+    }
     cache.put(dir, new ConcurrentHashMap<FileStatus, BlockLocation[]>());
   }
 
@@ -177,7 +178,7 @@ public class HdfsLocalityReporter implements SolrInfoBean, SolrMetricProducer {
     FileStatus[] statuses = fs.listStatus(dir.getHdfsDirPath());
     List<FileStatus> statusList = Arrays.asList(statuses);
 
-    logger.debug("Updating locality information for: {}", statusList);
+    log.debug("Updating locality information for: {}", statusList);
 
     // Keep only the files that still exist
     cachedStatuses.retainAll(statusList);

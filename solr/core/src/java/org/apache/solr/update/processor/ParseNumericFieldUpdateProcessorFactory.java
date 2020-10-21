@@ -16,7 +16,7 @@
  */
 package org.apache.solr.update.processor;
 
-import org.apache.commons.lang.LocaleUtils;
+import org.apache.commons.lang3.LocaleUtils;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.core.SolrCore;
 import org.apache.solr.schema.FieldType;
@@ -41,6 +41,7 @@ import java.util.Locale;
  * See {@link Locale} for a description of acceptable language, country (optional)
  * and variant (optional) values, joined with underscore(s).
  * </p>
+ * @since 4.4.0
  */
 public abstract class ParseNumericFieldUpdateProcessorFactory extends FieldMutatingUpdateProcessorFactory {
 
@@ -49,7 +50,7 @@ public abstract class ParseNumericFieldUpdateProcessorFactory extends FieldMutat
   protected Locale locale = Locale.ROOT;
 
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
     String localeParam = (String)args.remove(LOCALE_PARAM);
     if (null != localeParam) {
       locale = LocaleUtils.toLocale(localeParam);

@@ -18,6 +18,7 @@
 package org.apache.lucene.index;
 
 import java.io.IOException;
+import java.util.Objects;
 
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.FieldsProducer;
@@ -194,6 +195,11 @@ class MergeReaderWrapper extends LeafReader {
   }
 
   @Override
+  public VectorValues getVectorValues(String fieldName) throws IOException {
+    return in.getVectorValues(fieldName);
+  }
+
+  @Override
   public int numDocs() {
     return in.numDocs();
   }
@@ -226,9 +232,7 @@ class MergeReaderWrapper extends LeafReader {
   }
 
   private void checkBounds(int docID) {
-    if (docID < 0 || docID >= maxDoc()) {       
-      throw new IndexOutOfBoundsException("docID must be >= 0 and < maxDoc=" + maxDoc() + " (got docID=" + docID + ")");
-    }
+    Objects.checkIndex(docID, maxDoc());
   }
 
   @Override

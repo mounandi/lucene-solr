@@ -34,6 +34,8 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.DoubleValuesSource;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.TwoPhaseIterator;
 import org.apache.lucene.search.Weight;
@@ -133,15 +135,26 @@ public class SerializedDVStrategy extends SpatialStrategy {
     }
 
     @Override
-    public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException {
+    public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
       return new ConstantScoreWeight(this, boost) {
         @Override
         public Scorer scorer(LeafReaderContext context) throws IOException {
           DocIdSetIterator approximation = DocIdSetIterator.all(context.reader().maxDoc());
           TwoPhaseIterator it = predicateValueSource.iterator(context, approximation);
-          return new ConstantScoreScorer(this, score(), it);
+          return new ConstantScoreScorer(this, score(), scoreMode, it);
         }
+
+        @Override
+        public boolean isCacheable(LeafReaderContext ctx) {
+          return predicateValueSource.isCacheable(ctx);
+        }
+
       };
+    }
+
+    @Override
+    public void visit(QueryVisitor visitor) {
+      visitor.visitLeaf(this);
     }
 
     @Override
@@ -196,6 +209,11 @@ public class SerializedDVStrategy extends SpatialStrategy {
         }
 
       };
+    }
+
+    @Override
+    public boolean isCacheable(LeafReaderContext ctx) {
+      return DocValues.isCacheable(ctx, fieldName);
     }
 
     @Override

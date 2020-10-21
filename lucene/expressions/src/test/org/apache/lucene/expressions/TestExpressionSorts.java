@@ -32,6 +32,7 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.CheckHits;
+import org.apache.lucene.search.DoubleValuesSource;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.Query;
@@ -40,6 +41,7 @@ import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.English;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
@@ -58,7 +60,7 @@ public class TestExpressionSorts extends LuceneTestCase {
     super.setUp();
     dir = newDirectory();
     RandomIndexWriter iw = new RandomIndexWriter(random(), dir);
-    int numDocs = TestUtil.nextInt(random(), 2049, 4000);
+    int numDocs = atLeast(500);
     for (int i = 0; i < numDocs; i++) {
       Document document = new Document();
       document.add(newTextField("english", English.intToEnglish(i), Field.Store.NO));
@@ -82,7 +84,7 @@ public class TestExpressionSorts extends LuceneTestCase {
   }
   
   public void testQueries() throws Exception {
-    int n = atLeast(4);
+    int n = atLeast(1);
     for (int i = 0; i < n; i++) {
       assertQuery(new MatchAllDocsQuery());
       assertQuery(new TermQuery(new Term("english", "one")));
@@ -109,13 +111,13 @@ public class TestExpressionSorts extends LuceneTestCase {
       };
       Collections.shuffle(Arrays.asList(fields), random());
       int numSorts = TestUtil.nextInt(random(), 1, fields.length);
-      assertQuery(query, new Sort(Arrays.copyOfRange(fields, 0, numSorts)));
+      assertQuery(query, new Sort(ArrayUtil.copyOfSubArray(fields, 0, numSorts)));
     }
   }
 
   void assertQuery(Query query, Sort sort) throws Exception {
     int size = TestUtil.nextInt(random(), 1, searcher.getIndexReader().maxDoc() / 5);
-    TopDocs expected = searcher.search(query, size, sort, random().nextBoolean(), random().nextBoolean());
+    TopDocs expected = searcher.search(query, size, sort, random().nextBoolean());
     
     // make our actual sort, mutating original by replacing some of the 
     // sortfields with equivalent expressions
@@ -127,7 +129,7 @@ public class TestExpressionSorts extends LuceneTestCase {
         SortField s = original[i];
         Expression expr = JavascriptCompiler.compile(s.getField());
         SimpleBindings simpleBindings = new SimpleBindings();
-        simpleBindings.add(s);
+        simpleBindings.add(s.getField(), fromSortField(s));
         boolean reverse = s.getType() == SortField.Type.SCORE || s.getReverse();
         mutated[i] = expr.getSortField(simpleBindings, reverse);
       } else {
@@ -136,13 +138,30 @@ public class TestExpressionSorts extends LuceneTestCase {
     }
     
     Sort mutatedSort = new Sort(mutated);
-    TopDocs actual = searcher.search(query, size, mutatedSort, random().nextBoolean(), random().nextBoolean());
+    TopDocs actual = searcher.search(query, size, mutatedSort, random().nextBoolean());
     CheckHits.checkEqual(query, expected.scoreDocs, actual.scoreDocs);
     
-    if (size < actual.totalHits) {
+    if (size < actual.totalHits.value) {
       expected = searcher.searchAfter(expected.scoreDocs[size-1], query, size, sort);
       actual = searcher.searchAfter(actual.scoreDocs[size-1], query, size, mutatedSort);
       CheckHits.checkEqual(query, expected.scoreDocs, actual.scoreDocs);
+    }
+  }
+
+  private DoubleValuesSource fromSortField(SortField field) {
+    switch(field.getType()) {
+      case INT:
+        return DoubleValuesSource.fromIntField(field.getField());
+      case LONG:
+        return DoubleValuesSource.fromLongField(field.getField());
+      case FLOAT:
+        return DoubleValuesSource.fromFloatField(field.getField());
+      case DOUBLE:
+        return DoubleValuesSource.fromDoubleField(field.getField());
+      case SCORE:
+        return DoubleValuesSource.SCORES;
+      default:
+        throw new UnsupportedOperationException();
     }
   }
 }

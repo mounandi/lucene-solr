@@ -73,13 +73,12 @@ public class TestRequestForwarding extends SolrTestCaseJ4 {
   private void createCollection(String name, String config) throws Exception {
     CollectionAdminResponse response;
     CollectionAdminRequest.Create create = CollectionAdminRequest.createCollection(name,config,2,1);
-    create.setMaxShardsPerNode(1);
     response = create.process(solrCluster.getSolrClient());
     
     if (response.getStatus() != 0 || response.getErrorMessages() != null) {
       fail("Could not create collection. Response" + response.toString());
     }
     ZkStateReader zkStateReader = solrCluster.getSolrClient().getZkStateReader();
-    AbstractDistribZkTestBase.waitForRecoveriesToFinish(name, zkStateReader, false, true, 100);
+    solrCluster.waitForActiveCollection(name, 2, 2);
   }
 }

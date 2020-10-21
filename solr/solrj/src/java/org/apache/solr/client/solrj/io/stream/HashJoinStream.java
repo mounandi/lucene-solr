@@ -40,6 +40,7 @@ import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
  * You are expected to provide a set of fields for which the hash will be calculated from. If a tuple does
  * not contain a value (ie, null) for one of the fields the hash is being computed on then that tuple will 
  * not be considered a match to anything. Ie, all fields which are part of the hash must have a non-null value.
+ * @since 6.0.0
 **/
 public class HashJoinStream extends TupleStream implements Expressible {
 
@@ -49,10 +50,10 @@ public class HashJoinStream extends TupleStream implements Expressible {
   protected TupleStream fullStream;
   protected List<String> leftHashOn;
   protected List<String> rightHashOn;
-  protected HashMap<Integer, List<Tuple>> hashedTuples;
+  protected HashMap<String, List<Tuple>> hashedTuples;
   
   protected Tuple workingFullTuple = null;
-  protected Integer workingFullHash = null;
+  protected String workingFullHash = null;
   protected int workngHashSetIdx = 0;
   
   public HashJoinStream(TupleStream fullStream, TupleStream hashStream, List<String> hashOn) throws IOException {
@@ -198,7 +199,7 @@ public class HashJoinStream extends TupleStream implements Expressible {
     
     Tuple tuple = hashStream.read();
     while(!tuple.EOF){
-      Integer hash = calculateHash(tuple, rightHashOn);
+      String hash = computeHash(tuple, rightHashOn);
       if(null != hash){
         if(hashedTuples.containsKey(hash)){
           hashedTuples.get(hash).add(tuple);
@@ -213,7 +214,7 @@ public class HashJoinStream extends TupleStream implements Expressible {
     }
   }
   
-  protected Integer calculateHash(Tuple tuple, List<String> hashOn){
+  protected String computeHash(Tuple tuple, List<String> hashOn){
     StringBuilder sb = new StringBuilder();
     for(String part : hashOn){
       Object obj = tuple.get(part);
@@ -224,7 +225,7 @@ public class HashJoinStream extends TupleStream implements Expressible {
       sb.append("::"); // this is here to separate fields
     }
     
-    return sb.toString().hashCode();
+    return sb.toString();
   }
 
   public void close() throws IOException {
@@ -245,7 +246,7 @@ public class HashJoinStream extends TupleStream implements Expressible {
       
       // If fullTuple doesn't have a valid hash or if there is no doc to 
       // join with then retry loop - keep going until we find one
-      Integer fullHash = calculateHash(fullTuple, leftHashOn);
+      String fullHash = computeHash(fullTuple, leftHashOn);
       if(null == fullHash || !hashedTuples.containsKey(fullHash)){
         continue findNextWorkingFullTuple;
       }

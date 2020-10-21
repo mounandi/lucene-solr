@@ -18,8 +18,7 @@ package org.apache.lucene.analysis.ja;
 
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.ja.JapaneseReadingFormFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 import java.util.Map;
 
@@ -34,8 +33,14 @@ import java.util.Map;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;
  * </pre>
+ * @since 3.6.0
+ * @lucene.spi {@value #NAME}
  */
 public class JapaneseReadingFormFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "japaneseReadingForm";
+
   private static final String ROMAJI_PARAM = "useRomaji";
   private final boolean useRomaji;
   
@@ -46,6 +51,11 @@ public class JapaneseReadingFormFilterFactory extends TokenFilterFactory {
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public JapaneseReadingFormFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

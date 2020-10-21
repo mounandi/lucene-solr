@@ -20,10 +20,7 @@ package org.apache.lucene.analysis.tr;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.tr.TurkishLowerCaseFilter;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link TurkishLowerCaseFilter}.
@@ -34,8 +31,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.TurkishLowerCaseFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
-public class TurkishLowerCaseFilterFactory extends TokenFilterFactory  implements MultiTermAwareComponent {
+public class TurkishLowerCaseFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "turkishLowercase";
   
   /** Creates a new TurkishLowerCaseFilterFactory */
   public TurkishLowerCaseFilterFactory(Map<String,String> args) {
@@ -45,13 +47,18 @@ public class TurkishLowerCaseFilterFactory extends TokenFilterFactory  implement
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public TurkishLowerCaseFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new TurkishLowerCaseFilter(input);
   }
 
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }

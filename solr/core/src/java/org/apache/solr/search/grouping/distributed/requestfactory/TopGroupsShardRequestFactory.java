@@ -48,9 +48,6 @@ public class TopGroupsShardRequestFactory implements ShardRequestFactory {
    */
   public static final String GROUP_NULL_VALUE = "" + ReverseStringFilter.START_OF_HEADING_MARKER;
 
-  /**
-   * {@inheritDoc}
-   */
   @Override
   public ShardRequest[] constructRequest(ResponseBuilder rb) {
     // If we have a group.query we need to query all shards... Or we move this to the group first phase queries
@@ -68,8 +65,7 @@ public class TopGroupsShardRequestFactory implements ShardRequestFactory {
   private ShardRequest[] createRequestForSpecificShards(ResponseBuilder rb) {
     // Determine all unique shards to query for TopGroups
     Set<String> uniqueShards = new HashSet<>();
-    for (String command : rb.searchGroupToShards.keySet()) {
-      Map<SearchGroup<BytesRef>, Set<String>> groupsToShard = rb.searchGroupToShards.get(command);
+    for (Map<SearchGroup<BytesRef>, Set<String>> groupsToShard : rb.searchGroupToShards.values()) {
       for (Set<String> shards : groupsToShard.values()) {
         uniqueShards.addAll(shards);
       }

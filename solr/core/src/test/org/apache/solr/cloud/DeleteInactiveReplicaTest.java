@@ -17,6 +17,8 @@
 package org.apache.solr.cloud;
 
 import java.lang.invoke.MethodHandles;
+import java.nio.file.Files;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.solr.client.solrj.SolrClient;
 import org.apache.solr.client.solrj.embedded.JettySolrRunner;
@@ -25,8 +27,11 @@ import org.apache.solr.client.solrj.request.CoreAdminRequest;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
 import org.apache.solr.common.cloud.Slice;
-import org.apache.solr.common.cloud.ZkStateReader;
-import org.apache.solr.core.CoreContainer;
+import org.apache.solr.common.util.TimeSource;
+import org.apache.solr.core.CoreDescriptor;
+import org.apache.solr.core.SolrCore;
+import org.apache.solr.util.FileUtils;
+import org.apache.solr.util.TimeOut;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.Logger;
@@ -40,7 +45,6 @@ public class DeleteInactiveReplicaTest extends SolrCloudTestCase {
   public static void setupCluster() throws Exception {
     configureCluster(4)
         .addConfig("conf", configset("cloud-minimal"))
-        .withProperty(ZkStateReader.LEGACY_CLOUD, "false")
         .configure();
   }
 
@@ -50,10 +54,8 @@ public class DeleteInactiveReplicaTest extends SolrCloudTestCase {
     String collectionName = "delDeadColl";
     int replicationFactor = 2;
     int numShards = 2;
-    int maxShardsPerNode = ((((numShards + 1) * replicationFactor) / cluster.getJettySolrRunners().size())) + 1;
 
     CollectionAdminRequest.createCollection(collectionName, "conf", numShards, replicationFactor)
-        .setMaxShardsPerNode(maxShardsPerNode)
         .process(cluster.getSolrClient());
     waitForState("Expected a cluster of 2 shards and 2 replicas", collectionName, (n, c) -> {
       return DocCollection.isFullyActive(n, c, numShards, replicationFactor);
@@ -64,6 +66,10 @@ public class DeleteInactiveReplicaTest extends SolrCloudTestCase {
     Slice shard = getRandomShard(collectionState);
     Replica replica = getRandomReplica(shard);
     JettySolrRunner jetty = cluster.getReplicaJetty(replica);
+    CoreDescriptor replicaCd;
+    try (SolrCore core = jetty.getCoreContainer().getCore(replica.getCoreName())) {
+      replicaCd = core.getCoreDescriptor();
+    }
     cluster.stopJettySolrRunner(jetty);
 
     waitForState("Expected replica " + replica.getName() + " on down node to be removed from cluster state", collectionName, (n, c) -> {
@@ -71,7 +77,9 @@ public class DeleteInactiveReplicaTest extends SolrCloudTestCase {
       return r == null || r.getState() != Replica.State.ACTIVE;
     });
 
-    log.info("Removing replica {}/{} ", shard.getName(), replica.getName());
+    if (log.isInfoEnabled()) {
+      log.info("Removing replica {}/{} ", shard.getName(), replica.getName());
+    }
     CollectionAdminRequest.deleteReplica(collectionName, shard.getName(), replica.getName())
         .process(cluster.getSolrClient());
     waitForState("Expected deleted replica " + replica.getName() + " to be removed from cluster state", collectionName, (n, c) -> {
@@ -80,12 +88,9 @@ public class DeleteInactiveReplicaTest extends SolrCloudTestCase {
 
     cluster.startJettySolrRunner(jetty);
     log.info("restarted jetty");
-
-    CoreContainer cc = jetty.getCoreContainer();
-    CoreContainer.CoreLoadFailure loadFailure = cc.getCoreInitFailures().get(replica.getCoreName());
-    assertNotNull("Deleted core was still loaded!", loadFailure);
-    assertTrue("Unexpected load failure message: " + loadFailure.exception.getMessage(),
-        loadFailure.exception.getMessage().contains("does not exist in shard"));
+    TimeOut timeOut = new TimeOut(60, TimeUnit.SECONDS, TimeSource.NANO_TIME);
+    timeOut.waitFor("Expected data dir and instance dir of " + replica.getName() + " is deleted", ()
+        -> !Files.exists(replicaCd.getInstanceDir()) && !FileUtils.fileExists(replicaCd.getDataDir()));
 
     // Check that we can't create a core with no coreNodeName
     try (SolrClient queryClient = getHttpSolrClient(jetty.getBaseUrl().toString())) {

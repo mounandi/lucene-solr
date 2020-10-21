@@ -18,7 +18,6 @@ package org.apache.lucene.util;
 
 
 import java.io.IOException;
-import java.util.Arrays;
 
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
@@ -62,7 +61,7 @@ public final class PagedBytes implements Accountable {
     private final long bytesUsedPerBlock;
 
     private Reader(PagedBytes pagedBytes) {
-      blocks = Arrays.copyOf(pagedBytes.blocks, pagedBytes.numBlocks);
+      blocks = ArrayUtil.copyOfSubArray(pagedBytes.blocks, 0, pagedBytes.numBlocks);
       blockBits = pagedBytes.blockBits;
       blockMask = pagedBytes.blockMask;
       blockSize = pagedBytes.blockSize;
@@ -154,9 +153,7 @@ public final class PagedBytes implements Accountable {
   }
 
   private void addBlock(byte[] block) {
-    if (blocks.length == numBlocks) {
-      blocks = Arrays.copyOf(blocks, ArrayUtil.oversize(numBlocks, RamUsageEstimator.NUM_BYTES_OBJECT_REF));
-    }
+    blocks = ArrayUtil.grow(blocks, numBlocks + 1);
     blocks[numBlocks++] = block;
   }
 
@@ -285,6 +282,10 @@ public final class PagedBytes implements Accountable {
     return pointer;
   }
 
+  /**
+   * Input that transparently iterates over pages
+   * @lucene.internal
+   */
   public final class PagedBytesDataInput extends DataInput {
     private int currentBlockIndex;
     private int currentBlockUpto;
@@ -353,6 +354,10 @@ public final class PagedBytes implements Accountable {
     }
   }
 
+  /**
+   * Output that transparently spills to new pages as necessary
+   * @lucene.internal
+   */
   public final class PagedBytesDataOutput extends DataOutput {
     @Override
     public void writeByte(byte b) {

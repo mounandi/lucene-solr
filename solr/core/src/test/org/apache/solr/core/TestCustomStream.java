@@ -17,63 +17,25 @@
 
 package org.apache.solr.core;
 
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 
-import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.cloud.AbstractFullDistribZkTestBase;
-import org.apache.solr.handler.TestBlobHandler;
 import org.apache.solr.util.RestTestHarness;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 /**
  * Created by caomanhdat on 6/3/16.
  */
 public class TestCustomStream extends AbstractFullDistribZkTestBase {
-  private List<RestTestHarness> restTestHarnesses = new ArrayList<>();
-
-  private void setupHarnesses() {
-    for (final SolrClient client : clients) {
-      RestTestHarness harness = new RestTestHarness(() -> ((HttpSolrClient)client).getBaseURL());
-      restTestHarnesses.add(harness);
-    }
-  }
-
-  @BeforeClass
-  public static void enableRuntimeLib() throws Exception {
-    System.setProperty("enable.runtime.lib", "true");
-  }
-
-  @Override
-  public void distribTearDown() throws Exception {
-    super.distribTearDown();
-    for (RestTestHarness r : restTestHarnesses) {
-      r.close();
-    }
-  }
 
   @Test
   public void testDynamicLoadingCustomStream() throws Exception {
-    System.setProperty("enable.runtime.lib", "true");
-    setupHarnesses();
-
-    String blobName = "colltest";
-
-    HttpSolrClient randomClient = (HttpSolrClient) clients.get(random().nextInt(clients.size()));
-    String baseURL = randomClient.getBaseURL();
-    baseURL = baseURL.substring(0, baseURL.lastIndexOf('/'));
-
-    TestBlobHandler.createSystemCollection(getHttpSolrClient(baseURL, randomClient.getHttpClient()));
-    waitForRecoveriesToFinish(".system", true);
-
+    setupRestTestHarnesses();
     String payload = "{\n" +
         "'create-expressible' : { 'name' : 'hello', 'class': 'org.apache.solr.core.HelloStream' }\n" +
         "}";
 
-    RestTestHarness client = restTestHarnesses.get(random().nextInt(restTestHarnesses.size()));
+    RestTestHarness client = randomRestTestHarness();
     TestSolrConfigHandler.runConfigCommand(client,"/config",payload);
     TestSolrConfigHandler.testForResponseElement(client,
         null,

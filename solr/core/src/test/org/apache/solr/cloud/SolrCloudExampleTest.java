@@ -18,7 +18,6 @@ package org.apache.solr.cloud;
 
 import java.io.File;
 import java.io.FilenameFilter;
-import java.io.StringReader;
 import java.lang.invoke.MethodHandles;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -28,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.http.HttpEntity;
@@ -35,7 +35,7 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.util.EntityUtils;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
-import org.apache.solr.client.solrj.request.ContentStreamUpdateRequest;
+import org.apache.solr.client.solrj.request.StreamingUpdateRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.cloud.DocCollection;
 import org.apache.solr.common.cloud.Replica;
@@ -44,12 +44,11 @@ import org.apache.solr.common.cloud.ZkStateReader;
 import org.apache.solr.util.ExternalPaths;
 import org.apache.solr.util.SolrCLI;
 import org.junit.Test;
-import org.noggit.JSONParser;
-import org.noggit.ObjectBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.util.Arrays.asList;
+import static org.apache.solr.common.util.Utils.fromJSONString;
 import static org.apache.solr.common.util.Utils.getObjectByPath;
 
 /**
@@ -68,8 +67,9 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
   }
 
   @Test
+  // 12-Jun-2018 @BadApple(bugUrl="https://issues.apache.org/jira/browse/SOLR-12028") // 04-May-2018
   public void testLoadDocsIntoGettingStartedCollection() throws Exception {
-    waitForThingsToLevelOut(30000);
+    waitForThingsToLevelOut(30, TimeUnit.SECONDS);
 
     log.info("testLoadDocsIntoGettingStartedCollection initialized OK ... running test logic");
 
@@ -98,7 +98,7 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
 
     SolrCLI.CreateCollectionTool tool = new SolrCLI.CreateCollectionTool();
     CommandLine cli = SolrCLI.processCommandLineArgs(SolrCLI.joinCommonAndToolOptions(tool.getOptions()), args);
-    log.info("Creating the '"+testCollectionName+"' collection using SolrCLI with: "+solrUrl);
+    log.info("Creating the '{}' collection using SolrCLI with: {}", testCollectionName, solrUrl);
     tool.runTool(cli);
     assertTrue("Collection '" + testCollectionName + "' doesn't exist after trying to create it!",
         cloudClient.getZkStateReader().getClusterState().hasCollection(testCollectionName));
@@ -140,10 +140,10 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
                  expectedXmlFileCount, xmlFiles.size());
     
     for (File xml : xmlFiles) {
-      ContentStreamUpdateRequest req = new ContentStreamUpdateRequest("/update");
-      req.addFile(xml, "application/xml");
-      log.info("POSTing "+xml.getAbsolutePath());
-      cloudClient.request(req);
+      if (log.isInfoEnabled()) {
+        log.info("POSTing {}", xml.getAbsolutePath());
+      }
+      cloudClient.request(new StreamingUpdateRequest("/update",xml,"application/xml"));
     }
     cloudClient.commit();
 
@@ -158,14 +158,14 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
     }
     assertEquals("*:* found unexpected number of documents", expectedXmlDocCount, numFound);
 
-    log.info("Updating Config for " + testCollectionName);
+    log.info("Updating Config for {}", testCollectionName);
     doTestConfigUpdate(testCollectionName, solrUrl);
 
-    log.info("Running healthcheck for " + testCollectionName);
+    log.info("Running healthcheck for {}", testCollectionName);
     doTestHealthcheck(testCollectionName, cloudClient.getZkHost());
 
     // verify the delete action works too
-    log.info("Running delete for "+testCollectionName);
+    log.info("Running delete for {}", testCollectionName);
     doTestDeleteAction(testCollectionName, solrUrl);
 
     log.info("testLoadDocsIntoGettingStartedCollection succeeded ... shutting down now!");
@@ -205,10 +205,10 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
     Map<String, Object> configJson = SolrCLI.getJson(configUrl);
     Object maxTimeFromConfig = SolrCLI.atPath("/config/updateHandler/autoSoftCommit/maxTime", configJson);
     assertNotNull(maxTimeFromConfig);
-    assertEquals(new Long(-1L), maxTimeFromConfig);
+    assertEquals(-1L, maxTimeFromConfig);
 
     String prop = "updateHandler.autoSoftCommit.maxTime";
-    Long maxTime = new Long(3000L);
+    Long maxTime = 3000L;
     String[] args = new String[]{
         "-collection", testCollectionName,
         "-property", prop,
@@ -220,7 +220,7 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
 
     SolrCLI.ConfigTool tool = new SolrCLI.ConfigTool();
     CommandLine cli = SolrCLI.processCommandLineArgs(SolrCLI.joinCommonAndToolOptions(tool.getOptions()), args);
-    log.info("Sending set-property '" + prop + "'=" + maxTime + " to SolrCLI.ConfigTool.");
+    log.info("Sending set-property '{}'={} to SolrCLI.ConfigTool.", prop, maxTime);
     assertTrue("Set config property failed!", tool.runTool(cli) == 0);
 
     configJson = SolrCLI.getJson(configUrl);
@@ -236,7 +236,9 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
     assertEquals("Should have been able to get a value from the /query request handler",
         "explicit", SolrCLI.atPath("/config/requestHandler/\\/query/defaults/echoParams", configJson));
 
-    log.info("live_nodes_count :  " + cloudClient.getZkStateReader().getClusterState().getLiveNodes());
+    if (log.isInfoEnabled()) {
+      log.info("live_nodes_count :  {}", cloudClient.getZkStateReader().getClusterState().getLiveNodes());
+    }
 
     // Since it takes some time for this command to complete we need to make sure all the reloads for
     // all the cores have been done.
@@ -266,6 +268,7 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
     for (Slice slice : coll.getActiveSlices()) {
       for (Replica replica : slice.getReplicas()) {
         String uri = "" + replica.get(ZkStateReader.BASE_URL_PROP) + "/" + replica.get(ZkStateReader.CORE_NAME_PROP) + "/config";
+        @SuppressWarnings({"rawtypes"})
         Map respMap = getAsMap(cloudClient, uri);
         Long maxTime = (Long) (getObjectByPath(respMap, true, asList("config", "updateHandler", "autoSoftCommit", "maxTime")));
         ret.put(replica.getCoreName(), maxTime);
@@ -274,13 +277,14 @@ public class SolrCloudExampleTest extends AbstractFullDistribZkTestBase {
     return ret;
   }
 
+  @SuppressWarnings({"rawtypes"})
   private Map getAsMap(CloudSolrClient cloudClient, String uri) throws Exception {
     HttpGet get = new HttpGet(uri);
     HttpEntity entity = null;
     try {
       entity = cloudClient.getLbClient().getHttpClient().execute(get).getEntity();
       String response = EntityUtils.toString(entity, StandardCharsets.UTF_8);
-      return (Map) ObjectBuilder.getVal(new JSONParser(new StringReader(response)));
+      return (Map) fromJSONString(response);
     } finally {
       EntityUtils.consumeQuietly(entity);
     }

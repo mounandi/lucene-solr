@@ -19,14 +19,14 @@ package org.apache.solr.ltr.feature;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestUserTermScorerQuery extends TestRerankBase  {
 
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1", "description", "w1", "popularity",
@@ -48,17 +48,17 @@ public class TestUserTermScorerQuery extends TestRerankBase  {
     assertU(commit());
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
   @Test
   public void testUserTermScorerQuery() throws Exception {
     // before();
-    loadFeature("matchedTitleDFExt", SolrFeature.class.getCanonicalName(),
+    loadFeature("matchedTitleDFExt", SolrFeature.class.getName(),
         "{\"q\":\"${user_query}\",\"df\":\"title\"}");
-    loadModel("Term-matchedTitleDFExt", LinearModel.class.getCanonicalName(),
+    loadModel("Term-matchedTitleDFExt", LinearModel.class.getName(),
         new String[] {"matchedTitleDFExt"},
         "{\"weights\":{\"matchedTitleDFExt\":1.1}}");
     final SolrQuery query = new SolrQuery();

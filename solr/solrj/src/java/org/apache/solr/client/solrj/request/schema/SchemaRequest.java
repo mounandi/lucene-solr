@@ -17,21 +17,18 @@
 package org.apache.solr.client.solrj.request.schema;
 
 import java.io.IOException;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
+import java.io.OutputStream;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.request.RequestWriter;
 import org.apache.solr.client.solrj.response.schema.SchemaResponse;
+import org.apache.solr.common.params.CommonParams;
 import org.apache.solr.common.params.SolrParams;
-import org.apache.solr.common.util.ContentStream;
-import org.apache.solr.common.util.ContentStreamBase;
 import org.apache.solr.common.util.NamedList;
-import org.noggit.CharArr;
-import org.noggit.JSONWriter;
+import org.apache.solr.common.util.Utils;
 
 /**
  * <p>This class offers access to the operations exposed by the Solr Schema API.</p>
@@ -45,8 +42,8 @@ import org.noggit.JSONWriter;
  * based on this class within the client applications.</p>
  * <p>This class is experimental and it is subject to change.</p>
  *
- * @see <a href="https://cwiki.apache.org/confluence/display/solr/Schema+API">Solr Schema API</a>
- * @see <a href="https://cwiki.apache.org/confluence/display/solr/Managed+Resources">Solr managed resources</a>
+ * @see <a href="https://lucene.apache.org/solr/guide/schema-api.html">Solr Schema API</a>
+ * @see <a href="https://lucene.apache.org/solr/guide/managed-resources.html">Solr managed resources</a>
  * @since solr 5.3
  */
 public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
@@ -246,7 +243,7 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
     }
 
     public DynamicField(String dynamicFieldName, SolrParams q) {
-      super(METHOD.GET, "/schema/dynamicfields/" + dynamicFieldName);
+      super(METHOD.GET, "/schema/dynamicfields/" + dynamicFieldName, q);
     }
 
     @Override
@@ -265,7 +262,7 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
     }
 
     public FieldTypes(SolrParams q) {
-      super(METHOD.GET, "/schema/fieldtypes");
+      super(METHOD.GET, "/schema/fieldtypes", q);
     }
 
     @Override
@@ -366,7 +363,7 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
      * Creates a new instance of the request.
      *
      * @param fieldAttributes field type attributes that can be used to enrich the field definition.
-     * @see <a href="https://cwiki.apache.org/confluence/display/solr/Defining+Fields">Defining Solr fields</a>
+     * @see <a href="https://lucene.apache.org/solr/guide/defining-fields.html">Defining Solr fields</a>
      */
     public AddField(Map<String, Object> fieldAttributes) {
       this(fieldAttributes, null);
@@ -389,7 +386,7 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
    * will not partially modify a field's definition.  If the field does not exist in the schema the method call
    * {@link #process(SolrClient, String)} will fail.
    *
-   * @see <a href="https://cwiki.apache.org/confluence/display/solr/Defining+Fields">Defining Solr fields</a>
+   * @see <a href="https://lucene.apache.org/solr/guide/defining-fields.html">Defining Solr fields</a>
    */
   public static class ReplaceField extends SingleUpdate {
     /**
@@ -445,8 +442,8 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
   /**
    * Adds a new dynamic field rule to the schema of the specified collection.
    *
-   * @see <a href="https://cwiki.apache.org/confluence/display/solr/Defining+Fields">Defining Solr fields</a>
-   * @see <a href="https://cwiki.apache.org/confluence/display/solr/Dynamic+Fields">Solr dynamic fields</a>
+   * @see <a href="https://lucene.apache.org/solr/guide/defining-fields.html">Defining Solr fields</a>
+   * @see <a href="https://lucene.apache.org/solr/guide/dynamic-fields.html">Solr dynamic fields</a>
    */
   public static class AddDynamicField extends SingleUpdate {
     /**
@@ -482,8 +479,8 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
      * Creates a new instance of the request.
      *
      * @param dynamicFieldAttributes field type attributes that can be used to enrich the field definition.
-     * @see <a href="https://cwiki.apache.org/confluence/display/solr/Defining+Fields">Defining Solr fields</a>
-     * @see <a href="https://cwiki.apache.org/confluence/display/solr/Dynamic+Fields">Solr dynamic fields</a>
+     * @see <a href="https://lucene.apache.org/solr/guide/defining-fields.html">Defining Solr fields</a>
+     * @see <a href="https://lucene.apache.org/solr/guide/dynamic-fields.html">Solr dynamic fields</a>
      */
     public ReplaceDynamicField(Map<String, Object> dynamicFieldAttributes) {
       this(dynamicFieldAttributes, null);
@@ -538,7 +535,7 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
      * Creates a new instance of the request.
      *
      * @param fieldTypeDefinition the field type definition
-     * @see <a href="https://cwiki.apache.org/confluence/display/solr/Solr+Field+Types">Solr field types</a>
+     * @see <a href="https://lucene.apache.org/solr/guide/solr-field-types.html">Solr field types</a>
      */
     public AddFieldType(FieldTypeDefinition fieldTypeDefinition) {
       this(fieldTypeDefinition, null);
@@ -567,7 +564,7 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
      * Creates a new instance of the request.
      *
      * @param fieldTypeDefinition the field type definition
-     * @see <a href="https://cwiki.apache.org/confluence/display/solr/Solr+Field+Types">Solr field types</a>
+     * @see <a href="https://lucene.apache.org/solr/guide/solr-field-types.html">Solr field types</a>
      */
     public ReplaceFieldType(FieldTypeDefinition fieldTypeDefinition) {
       this(fieldTypeDefinition, null);
@@ -623,7 +620,7 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
      *
      * @param source the source field name
      * @param dest   the collection of the destination field names
-     * @see <a href="https://cwiki.apache.org/confluence/display/solr/Copying+Fields">Copying fields</a>
+     * @see <a href="https://lucene.apache.org/solr/guide/copying-fields.html">Copying fields</a>
      */
     public AddCopyField(String source, List<String> dest) {
       this(source, dest, (SolrParams) null);
@@ -636,7 +633,7 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
      * @param dest     the collection of the destination field names
      * @param maxChars the number of characters to be copied from the source to the dest. Specifying
      *                 0 as value, means that all the source characters will be copied to the dest.
-     * @see <a href="https://cwiki.apache.org/confluence/display/solr/Copying+Fields">Copying fields</a>
+     * @see <a href="https://lucene.apache.org/solr/guide/copying-fields.html">Copying fields</a>
      */
     public AddCopyField(String source, List<String> dest, Integer maxChars) {
       this(source, dest, maxChars, null);
@@ -706,10 +703,19 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
     protected abstract NamedList<Object> getRequestParameters();
 
     @Override
-    public Collection<ContentStream> getContentStreams() throws IOException {
-      CharArr json = new CharArr();
-      new SchemaRequestJSONWriter(json).write(getRequestParameters());
-      return Collections.singletonList(new ContentStreamBase.StringStream(json.toString()));
+    public RequestWriter.ContentWriter getContentWriter(String expectedType) {
+      return new RequestWriter.ContentWriter() {
+        @Override
+        public void write(OutputStream os) throws IOException {
+          Utils.writeJson(getRequestParameters(),
+              os, false);
+        }
+
+        @Override
+        public String getContentType() {
+          return CommonParams.JSON_MIME;
+        }
+      };
     }
 
     @Override
@@ -771,63 +777,4 @@ public class SchemaRequest extends AbstractSchemaRequest<SchemaResponse> {
     }
   }
 
-  /**
-   * Simple extension of the noggit JSONWriter used to be write objects
-   * of type {@link NamedList}.
-   * Writing of objects of the type {@link NamedList} is done in very much
-   * the same way as for a map.
-   * <p>
-   * This writer is particularly useful when doing multiple update requests.
-   * In update Schema API there can be done multiple add operations of the same
-   * type (e.g. : add-field-type), they are grouped in an associative array, even though
-   * this can't be done normally in JSON. For such a use-case, the {@link NamedList}
-   * objects are particularly useful because they can group key-value mappings
-   * having the same values for the keys (unlike maps).
-   */
-  private static class SchemaRequestJSONWriter extends JSONWriter {
-    public SchemaRequestJSONWriter(CharArr out, int indentSize) {
-      super(out, indentSize);
-    }
-
-    public SchemaRequestJSONWriter(CharArr out) {
-      super(out);
-    }
-
-    public void write(Object o) {
-      if (o instanceof NamedList) {
-        write((NamedList) o);
-      } else super.write(o);
-    }
-
-    /**
-     * @see #write(Map)
-     */
-    @SuppressWarnings("unchecked")
-    public void write(NamedList<?> val) {
-      this.startObject();
-      int sz = val.size();
-      boolean first = true;
-      Iterator i$ = val.iterator();
-
-      while (i$.hasNext()) {
-        Map.Entry<String, ?> entry = (Map.Entry<String, ?>) i$.next();
-        if (first) {
-          first = false;
-        } else {
-          this.writeValueSeparator();
-        }
-
-        if (sz > 1) {
-          this.indent();
-        }
-
-        this.writeString(entry.getKey());
-        this.writeNameSeparator();
-        this.write(entry.getValue());
-      }
-
-      this.endObject();
-    }
-  }
 }
-

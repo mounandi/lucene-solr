@@ -43,6 +43,7 @@ import org.apache.lucene.util.mutable.MutableValueInt;
  * 
  * @see Integer
  * @deprecated Trie fields are deprecated as of Solr 7.0
+ * @see IntPointField
  */
 @Deprecated
 public class TrieIntField extends TrieField implements IntValueFieldType {
@@ -55,9 +56,9 @@ public class TrieIntField extends TrieField implements IntValueFieldType {
     if(val==null) return null;
     if (val instanceof Number) return ((Number) val).intValue();
     try {
-      if (val instanceof String) return Integer.parseInt((String) val);
+      if (val instanceof CharSequence) return Integer.parseInt(val.toString());
     } catch (NumberFormatException e) {
-      Float v = Float.parseFloat((String) val);
+      Float v = Float.parseFloat(val.toString());
       return v.intValue();
     }
     return super.toNativeType(val);
@@ -68,7 +69,7 @@ public class TrieIntField extends TrieField implements IntValueFieldType {
     
     return new SortedSetFieldSource(f.getName(), choice) {
       @Override
-      public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
+      public FunctionValues getValues(@SuppressWarnings({"rawtypes"})Map context, LeafReaderContext readerContext) throws IOException {
         SortedSetFieldSource thisAsSortedSetFieldSource = this; // needed for nested anon class ref
         
         SortedSetDocValues sortedSet = DocValues.getSortedSet(readerContext.reader(), field);

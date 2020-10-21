@@ -27,9 +27,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.ResourceLoader;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenFilterFactory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.IOUtils;
@@ -48,8 +48,14 @@ import org.apache.lucene.util.IOUtils;
  * 
  * See <a href="http://wiki.apache.org/solr/Hunspell">http://wiki.apache.org/solr/Hunspell</a>
  * @lucene.experimental
+ * @since 3.5.0
+ * @lucene.spi {@value #NAME}
  */
 public class HunspellStemFilterFactory extends TokenFilterFactory implements ResourceLoaderAware {
+
+  /** SPI name */
+  public static final String NAME = "hunspellStem";
+
   private static final String PARAM_DICTIONARY    = "dictionary";
   private static final String PARAM_AFFIX         = "affix";
   // NOTE: this one is currently unused?:
@@ -80,6 +86,11 @@ public class HunspellStemFilterFactory extends TokenFilterFactory implements Res
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameters: " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public HunspellStemFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

@@ -27,6 +27,7 @@ import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MultiCollector;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.Weight;
@@ -41,7 +42,7 @@ import org.apache.lucene.util.mutable.MutableValue;
  */
 public class GroupingSearch {
 
-  private final GroupSelector grouper;
+  private final GroupSelector<?> grouper;
   private final Query groupEndDocs;
 
   private Sort groupSort = Sort.RELEVANCE;
@@ -49,8 +50,6 @@ public class GroupingSearch {
 
   private int groupDocsOffset;
   private int groupDocsLimit = 1;
-  private boolean fillSortFields;
-  private boolean includeScores = true;
   private boolean includeMaxScore = true;
 
   private Double maxCacheRAMMB;
@@ -73,13 +72,21 @@ public class GroupingSearch {
   }
 
   /**
+   * Constructs a <code>GroupingSearch</code> instance that groups documents using a {@link GroupSelector}
+   * @param groupSelector a {@link GroupSelector} that defines groups for this GroupingSearch
+   */
+  public GroupingSearch(GroupSelector<?> groupSelector) {
+    this(groupSelector, null);
+  }
+
+  /**
    * Constructs a <code>GroupingSearch</code> instance that groups documents by function using a {@link ValueSource}
    * instance.
    *
    * @param groupFunction      The function to group by specified as {@link ValueSource}
    * @param valueSourceContext The context of the specified groupFunction
    */
-  public GroupingSearch(ValueSource groupFunction, Map<?, ?> valueSourceContext) {
+  public GroupingSearch(ValueSource groupFunction, Map<Object, Object> valueSourceContext) {
     this(new ValueSourceGroupSelector(groupFunction, valueSourceContext), null);
   }
 
@@ -93,7 +100,7 @@ public class GroupingSearch {
     this(null, groupEndDocs);
   }
 
-  private GroupingSearch(GroupSelector grouper, Query groupEndDocs) {
+  private GroupingSearch(GroupSelector<?> grouper, Query groupEndDocs) {
     this.grouper = grouper;
     this.groupEndDocs = groupEndDocs;
   }
@@ -146,15 +153,14 @@ public class GroupingSearch {
     matchingGroupHeads = allGroupHeads ? allGroupHeadsCollector.retrieveGroupHeads(searcher.getIndexReader().maxDoc())
         : new Bits.MatchNoBits(searcher.getIndexReader().maxDoc());
 
-    Collection<SearchGroup> topSearchGroups = firstPassCollector.getTopGroups(groupOffset, fillSortFields);
+    Collection<SearchGroup> topSearchGroups = firstPassCollector.getTopGroups(groupOffset);
     if (topSearchGroups == null) {
       return new TopGroups(new SortField[0], new SortField[0], 0, 0, new GroupDocs[0], Float.NaN);
     }
 
     int topNInsideGroup = groupDocsOffset + groupDocsLimit;
     TopGroupsCollector secondPassCollector
-        = new TopGroupsCollector(grouper, topSearchGroups, groupSort, sortWithinGroup, topNInsideGroup,
-                                         includeScores, includeMaxScore, fillSortFields);
+        = new TopGroupsCollector(grouper, topSearchGroups, groupSort, sortWithinGroup, topNInsideGroup, includeMaxScore);
 
     if (cachedCollector != null && cachedCollector.isCached()) {
       cachedCollector.replay(secondPassCollector);
@@ -171,11 +177,12 @@ public class GroupingSearch {
 
   protected TopGroups<?> groupByDocBlock(IndexSearcher searcher, Query query, int groupOffset, int groupLimit) throws IOException {
     int topN = groupOffset + groupLimit;
-    final Weight groupEndDocs = searcher.createNormalizedWeight(this.groupEndDocs, false);
-    BlockGroupingCollector c = new BlockGroupingCollector(groupSort, topN, includeScores, groupEndDocs);
+    final Query endDocsQuery = searcher.rewrite(this.groupEndDocs);
+    final Weight groupEndDocs = searcher.createWeight(endDocsQuery, ScoreMode.COMPLETE_NO_SCORES, 1);
+    BlockGroupingCollector c = new BlockGroupingCollector(groupSort, topN, groupSort.needsScores() || sortWithinGroup.needsScores(), groupEndDocs);
     searcher.search(query, c);
     int topNInsideGroup = groupDocsOffset + groupDocsLimit;
-    return c.getTopGroups(sortWithinGroup, groupOffset, groupDocsOffset, topNInsideGroup, fillSortFields);
+    return c.getTopGroups(sortWithinGroup, groupOffset, groupDocsOffset, topNInsideGroup);
   }
 
   /**
@@ -264,28 +271,6 @@ public class GroupingSearch {
    */
   public GroupingSearch setGroupDocsLimit(int groupDocsLimit) {
     this.groupDocsLimit = groupDocsLimit;
-    return this;
-  }
-
-  /**
-   * Whether to also fill the sort fields per returned group and groups docs.
-   *
-   * @param fillSortFields Whether to also fill the sort fields per returned group and groups docs
-   * @return <code>this</code>
-   */
-  public GroupingSearch setFillSortFields(boolean fillSortFields) {
-    this.fillSortFields = fillSortFields;
-    return this;
-  }
-
-  /**
-   * Whether to include the scores per doc inside a group.
-   *
-   * @param includeScores Whether to include the scores per doc inside a group
-   * @return <code>this</code>
-   */
-  public GroupingSearch setIncludeScores(boolean includeScores) {
-    this.includeScores = includeScores;
     return this;
   }
 

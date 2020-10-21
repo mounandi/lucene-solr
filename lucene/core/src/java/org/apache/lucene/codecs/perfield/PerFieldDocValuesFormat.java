@@ -54,8 +54,8 @@ import org.apache.lucene.util.IOUtils;
  * {@link ServiceLoader Service Provider Interface} to resolve format names.
  * <p>
  * Files written by each docvalues format have an additional suffix containing the 
- * format name. For example, in a per-field configuration instead of <tt>_1.dat</tt> 
- * filenames would look like <tt>_1_Lucene40_0.dat</tt>.
+ * format name. For example, in a per-field configuration instead of <code>_1.dat</code> 
+ * filenames would look like <code>_1_Lucene40_0.dat</code>.
  * @see ServiceLoader
  * @lucene.experimental
  */
@@ -74,7 +74,7 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
 
   
   /** Sole constructor. */
-  public PerFieldDocValuesFormat() {
+  protected PerFieldDocValuesFormat() {
     super(PER_FIELD_NAME);
   }
 
@@ -135,7 +135,11 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
 
       // Group each consumer by the fields it handles
       for (FieldInfo fi : mergeState.mergeFieldInfos) {
-        DocValuesConsumer consumer = getInstance(fi);
+        if (fi.getDocValuesType() == DocValuesType.NONE) {
+          continue;
+        }
+        // merge should ignore current format for the fields being merged
+        DocValuesConsumer consumer = getInstance(fi, true);
         Collection<String> fieldsForConsumer = consumersToField.get(consumer);
         if (fieldsForConsumer == null) {
           fieldsForConsumer = new ArrayList<>();
@@ -156,9 +160,23 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
     }
 
     private DocValuesConsumer getInstance(FieldInfo field) throws IOException {
+      return getInstance(field, false);
+    }
+
+    /**
+     * DocValuesConsumer for the given field.
+     * @param field - FieldInfo object.
+     * @param ignoreCurrentFormat - ignore the existing format attributes.
+     * @return DocValuesConsumer for the field.
+     * @throws IOException if there is a low-level IO error
+     */
+    private DocValuesConsumer getInstance(FieldInfo field, boolean ignoreCurrentFormat) throws IOException {
       DocValuesFormat format = null;
       if (field.getDocValuesGen() != -1) {
-        final String formatName = field.getAttribute(PER_FIELD_FORMAT_KEY);
+        String formatName = null;
+        if (ignoreCurrentFormat == false) {
+          formatName = field.getAttribute(PER_FIELD_FORMAT_KEY);
+        }
         // this means the field never existed in that segment, yet is applied updates
         if (formatName != null) {
           format = DocValuesFormat.forName(formatName);
@@ -171,21 +189,19 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
         throw new IllegalStateException("invalid null DocValuesFormat for field=\"" + field.name + "\"");
       }
       final String formatName = format.getName();
-      
-      String previousValue = field.putAttribute(PER_FIELD_FORMAT_KEY, formatName);
-      if (field.getDocValuesGen() == -1 && previousValue != null) {
-        throw new IllegalStateException("found existing value for " + PER_FIELD_FORMAT_KEY + 
-                                        ", field=" + field.name + ", old=" + previousValue + ", new=" + formatName);
-      }
-      
+
+      field.putAttribute(PER_FIELD_FORMAT_KEY, formatName);
       Integer suffix = null;
-      
+
       ConsumerAndSuffix consumer = formats.get(format);
       if (consumer == null) {
         // First time we are seeing this format; create a new instance
 
         if (field.getDocValuesGen() != -1) {
-          final String suffixAtt = field.getAttribute(PER_FIELD_SUFFIX_KEY);
+          String suffixAtt = null;
+          if (!ignoreCurrentFormat) {
+            suffixAtt = field.getAttribute(PER_FIELD_SUFFIX_KEY);
+          }
           // even when dvGen is != -1, it can still be a new field, that never
           // existed in the segment, and therefore doesn't have the recorded
           // attributes yet.
@@ -193,7 +209,7 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
             suffix = Integer.valueOf(suffixAtt);
           }
         }
-        
+
         if (suffix == null) {
           // bump the suffix
           suffix = suffixes.get(formatName);
@@ -204,7 +220,7 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
           }
         }
         suffixes.put(formatName, suffix);
-        
+
         final String segmentSuffix = getFullSegmentSuffix(segmentWriteState.segmentSuffix,
                                                           getSuffix(formatName, Integer.toString(suffix)));
         consumer = new ConsumerAndSuffix();
@@ -216,13 +232,8 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
         assert suffixes.containsKey(formatName);
         suffix = consumer.suffix;
       }
-      
-      previousValue = field.putAttribute(PER_FIELD_SUFFIX_KEY, Integer.toString(suffix));
-      if (field.getDocValuesGen() == -1 && previousValue != null) {
-        throw new IllegalStateException("found existing value for " + PER_FIELD_SUFFIX_KEY + 
-                                        ", field=" + field.name + ", old=" + previousValue + ", new=" + suffix);
-      }
 
+      field.putAttribute(PER_FIELD_SUFFIX_KEY, Integer.toString(suffix));
       // TODO: we should only provide the "slice" of FIS
       // that this DVF actually sees ...
       return consumer.consumer;
@@ -253,7 +264,7 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
     private final Map<String,DocValuesProducer> formats = new HashMap<>();
     
     // clone for merge
-    FieldsReader(FieldsReader other) throws IOException {
+    FieldsReader(FieldsReader other) {
       Map<DocValuesProducer,DocValuesProducer> oldToNew = new IdentityHashMap<>();
       // First clone all formats
       for(Map.Entry<String,DocValuesProducer> ent : other.formats.entrySet()) {
@@ -360,7 +371,7 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
     }
     
     @Override
-    public DocValuesProducer getMergeInstance() throws IOException {
+    public DocValuesProducer getMergeInstance() {
       return new FieldsReader(this);
     }
 

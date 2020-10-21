@@ -16,6 +16,7 @@
  */
 package org.apache.solr.common;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -41,13 +42,18 @@ import org.apache.solr.common.util.NamedList;
  */
 public class SolrDocument extends SolrDocumentBase<Object, SolrDocument> implements Iterable<Map.Entry<String, Object>>
 {
-  private final Map<String,Object> _fields;
+  protected final Map<String,Object> _fields;
   
   private List<SolrDocument> _childDocuments;
   
   public SolrDocument()
   {
     _fields = new LinkedHashMap<>();
+  }
+
+  @Override
+  public void writeMap(EntryWriter ew) throws IOException {
+    _fields.forEach(ew.getBiConsumer());
   }
 
   public SolrDocument(Map<String, Object> fields) {
@@ -93,8 +99,8 @@ public class SolrDocument extends SolrDocumentBase<Object, SolrDocument> impleme
    * set multiple fields with the included contents.  This will replace any existing 
    * field with the given name
    */
-  @SuppressWarnings("unchecked")
-  public void setField(String name, Object value) 
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  public void setField(String name, Object value)
   {
     if( value instanceof Object[] ) {
       value = new ArrayList(Arrays.asList( (Object[])value ));
@@ -105,7 +111,7 @@ public class SolrDocument extends SolrDocumentBase<Object, SolrDocument> impleme
     else if( value instanceof NamedList ) {
       // nothing
     }
-    else if( value instanceof Iterable ) {
+    else if( value instanceof Iterable && !(value instanceof SolrDocumentBase)) {
       ArrayList<Object> lst = new ArrayList<>();
       for( Object o : (Iterable)value ) {
         lst.add( o );
@@ -154,7 +160,7 @@ public class SolrDocument extends SolrDocumentBase<Object, SolrDocument> impleme
     }
     
     // Add the values to the collection
-    if( value instanceof Iterable ) {
+    if( value instanceof Iterable && !(value instanceof SolrDocumentBase)) {
       for( Object o : (Iterable<Object>)value ) {
         vals.add( o );
       }
@@ -180,6 +186,7 @@ public class SolrDocument extends SolrDocumentBase<Object, SolrDocument> impleme
   public Object getFirstValue(String name) {
     Object v = _fields.get( name );
     if (v == null || !(v instanceof Collection)) return v;
+    @SuppressWarnings({"rawtypes"})
     Collection c = (Collection)v;
     if (c.size() > 0 ) {
       return c.iterator().next();
@@ -281,7 +288,7 @@ public class SolrDocument extends SolrDocumentBase<Object, SolrDocument> impleme
       /** Get the field Value */
       @Override
       public Object get(Object key) { 
-        return getFirstValue( (String)key ); 
+        return getFirstValue( (String)key);
       }
       
       // Easily Supported methods
@@ -388,7 +395,6 @@ public class SolrDocument extends SolrDocumentBase<Object, SolrDocument> impleme
      }
    }
 
-   /** Returns the list of child documents, or null if none. */
    @Override
    public List<SolrDocument> getChildDocuments() {
      return _childDocuments;
@@ -401,7 +407,10 @@ public class SolrDocument extends SolrDocumentBase<Object, SolrDocument> impleme
    }
 
   @Override
+  
+  @Deprecated
   public int getChildDocumentCount() {
+    if (_childDocuments == null) return 0;
     return _childDocuments.size();
   }
 }

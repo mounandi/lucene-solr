@@ -22,10 +22,9 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Collection;
-import java.util.HashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -36,9 +35,8 @@ import org.apache.jute.OutputArchive;
 import org.apache.jute.Record;
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.impl.HttpSolrClient.RemoteSolrException;
+import org.apache.solr.client.solrj.impl.BaseHttpSolrClient.RemoteSolrException;
 import org.apache.solr.client.solrj.request.ConfigSetAdminRequest.Create;
-import org.apache.solr.client.solrj.response.ConfigSetAdminResponse;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.common.cloud.ZkConfigManager;
@@ -56,9 +54,9 @@ import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.ServerCnxn;
 import org.apache.zookeeper.server.ZKDatabase;
 import org.apache.zookeeper.server.quorum.Leader.Proposal;
+import org.apache.zookeeper.txn.TxnDigest;
 import org.apache.zookeeper.txn.TxnHeader;
 import org.junit.After;
-import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -80,7 +78,7 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
   public void setUp() throws Exception {
     super.setUp();
     final Path testDir = createTempDir();
-    String zkDir = testDir.resolve("zookeeper/server1/data").toString();
+    final Path zkDir = testDir.resolve("zookeeper/server1/data");
     zkTestServer = new ZkTestServer(zkDir);
     zkTestServer.run();
     zkTestServer.setZKDatabase(new FailureDuringCopyZKDatabase(zkTestServer.getZKDatabase(), zkTestServer));
@@ -91,8 +89,14 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
   @Override
   @After
   public void tearDown() throws Exception {
-    solrCluster.shutdown();
-    zkTestServer.shutdown();
+    if (null != solrCluster) {
+      solrCluster.shutdown();
+      solrCluster = null;
+    }
+    if (null != zkTestServer) {
+      zkTestServer.shutdown();
+      zkTestServer = null;
+    }
     super.tearDown();
   }
 
@@ -112,14 +116,10 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
 
       Create create = new Create();
       create.setBaseConfigSetName(BASE_CONFIGSET_NAME).setConfigSetName(CONFIGSET_NAME);
-      try {
-        ConfigSetAdminResponse response = create.process(solrClient);
-        Assert.fail("Expected solr exception");
-      } catch (RemoteSolrException se) {
-        // partial creation should have been cleaned up
-        assertFalse(configManager.configExists(CONFIGSET_NAME));
-        assertEquals(SolrException.ErrorCode.SERVER_ERROR.code, se.code());
-      }
+      RemoteSolrException se = expectThrows(RemoteSolrException.class, () -> create.process(solrClient));
+      // partial creation should have been cleaned up
+      assertFalse(configManager.configExists(CONFIGSET_NAME));
+      assertEquals(SolrException.ErrorCode.SERVER_ERROR.code, se.code());
     } finally {
       zkClient.close();
     }
@@ -137,6 +137,7 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
           getConfigSetProps(oldProps), StandardCharsets.UTF_8);
     }
     solrCluster.uploadConfigSet(tmpConfigDir.toPath(), baseConfigSetName);
+    solrCluster.getZkClient().setData("/configs/" + baseConfigSetName, "{\"trusted\": false}".getBytes(StandardCharsets.UTF_8), true);
   }
 
   private StringBuilder getConfigSetProps(Map<String, String> map) {
@@ -210,18 +211,13 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
     }
 
     @Override
-    public synchronized LinkedList<Proposal> getCommittedLog() {
+    public synchronized Collection<Proposal> getCommittedLog() {
       return zkdb.getCommittedLog();
     }
 
     @Override
     public long getDataTreeLastProcessedZxid() {
       return zkdb.getDataTreeLastProcessedZxid();
-    }
-
-    @Override
-    public void setDataTreeInit(boolean b) {
-      zkdb.setDataTreeInit(b);
     }
 
     @Override
@@ -265,7 +261,7 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
     }
 
     @Override
-    public HashSet<String> getEphemerals(long sessionId) {
+    public Set<String> getEphemerals(long sessionId) {
       return zkdb.getEphemerals(sessionId);
     }
 
@@ -275,8 +271,8 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
     }
 
     @Override
-    public ProcessTxnResult processTxn(TxnHeader hdr, Record txn) {
-      return zkdb.processTxn(hdr, txn);
+    public ProcessTxnResult processTxn(TxnHeader hdr, Record txn, TxnDigest digest) {
+      return zkdb.processTxn(hdr, txn, digest);
     }
 
     @Override
@@ -302,9 +298,14 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
 
     @Override
     public void setWatches(long relativeZxid, List<String> dataWatches,
-            List<String> existWatches, List<String> childWatches, Watcher watcher) {
-      zkdb.setWatches(relativeZxid, dataWatches, existWatches, childWatches, watcher);
-    }
+                           List<String> existWatches, List<String> childWatches,
+                           List<String> persistentWatches,
+                           List<String> persistentRecursiveWatches,
+                           Watcher watcher) {
+      zkdb.setWatches(relativeZxid, dataWatches, existWatches, childWatches,
+              persistentWatches, persistentRecursiveWatches, watcher);
+
+      }
 
     @Override
     public List<ACL> getACL(String path, Stat stat) throws NoNodeException {
@@ -362,5 +363,15 @@ public class TestConfigSetsAPIZkFailure extends SolrTestCaseJ4 {
     public void close() throws IOException {
       zkdb.close();
     }
+    @Override
+    public int getTxnCount() {
+      return zkdb.getTxnCount();
+    }
+
+    @Override
+    public long getTxnSize() {
+      return zkdb.getTxnSize();
+    }
+
   }
 }

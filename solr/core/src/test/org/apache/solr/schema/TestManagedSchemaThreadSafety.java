@@ -28,7 +28,6 @@ import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.solr.SolrTestCaseJ4;
-import org.apache.solr.cloud.MockZkController;
 import org.apache.solr.cloud.ZkController;
 import org.apache.solr.cloud.ZkSolrResourceLoader;
 import org.apache.solr.cloud.ZkTestServer;
@@ -91,15 +90,17 @@ public class TestManagedSchemaThreadSafety extends SolrTestCaseJ4 {
 
   @BeforeClass
   public static void startZkServer() throws Exception {
-    zkServer = new ZkTestServer(createTempDir().toString());
+    zkServer = new ZkTestServer(createTempDir());
     zkServer.run();
     loaderPath = createTempDir();
   }
 
   @AfterClass
   public static void stopZkServer() throws Exception {
-    zkServer.shutdown();
-    zkServer = null;
+    if (null != zkServer) {
+      zkServer.shutdown();
+      zkServer = null;
+    }
     loaderPath = null;
   }
 
@@ -135,13 +136,14 @@ public class TestManagedSchemaThreadSafety extends SolrTestCaseJ4 {
   }
 
   private ZkController createZkController(SolrZkClient client) throws KeeperException, InterruptedException {
+    assumeWorkingMockito();
     
     CoreContainer mockAlwaysUpCoreContainer = mock(CoreContainer.class, 
         Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS));
     when(mockAlwaysUpCoreContainer.isShutDown()).thenReturn(Boolean.FALSE);  // Allow retry on session expiry
     
     
-    MockZkController zkController = mock(MockZkController.class,
+    ZkController zkController = mock(ZkController.class,
         Mockito.withSettings().defaultAnswer(Mockito.CALLS_REAL_METHODS));
 
     when(zkController.getCoreContainer()).thenReturn(mockAlwaysUpCoreContainer);
@@ -169,11 +171,12 @@ public class TestManagedSchemaThreadSafety extends SolrTestCaseJ4 {
     return zkController;
   }
 
+  @SuppressWarnings({"rawtypes"})
   private Runnable indexSchemaLoader(String configsetName, final ZkController zkController) {
     return () -> {
       try {
-        SolrResourceLoader loader = new ZkSolrResourceLoader(loaderPath, configsetName, zkController);
-        SolrConfig solrConfig = SolrConfig.readFromResourceLoader(loader, "solrconfig.xml");
+        SolrResourceLoader loader = new ZkSolrResourceLoader(loaderPath, configsetName, null, zkController);
+        SolrConfig solrConfig = SolrConfig.readFromResourceLoader(loader, "solrconfig.xml", true, null);
 
         ManagedIndexSchemaFactory factory = new ManagedIndexSchemaFactory();
         factory.init(new NamedList());

@@ -17,11 +17,15 @@
 package org.apache.lucene.document;
 
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.apache.lucene.analysis.Analyzer; // javadocs
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexableFieldType;
 import org.apache.lucene.index.PointValues;
+import org.apache.lucene.index.VectorValues;
 
 /**
  * Describes the properties of a field.
@@ -39,7 +43,11 @@ public class FieldType implements IndexableFieldType  {
   private boolean frozen;
   private DocValuesType docValuesType = DocValuesType.NONE;
   private int dimensionCount;
+  private int indexDimensionCount;
   private int dimensionNumBytes;
+  private int vectorDimension;
+  private VectorValues.ScoreFunction vectorScoreFunction = VectorValues.ScoreFunction.NONE;
+  private Map<String, String> attributes;
 
   /**
    * Create a new mutable FieldType with all of the properties from <code>ref</code>
@@ -55,7 +63,13 @@ public class FieldType implements IndexableFieldType  {
     this.indexOptions = ref.indexOptions();
     this.docValuesType = ref.docValuesType();
     this.dimensionCount = ref.pointDimensionCount();
+    this.indexDimensionCount = ref.pointIndexDimensionCount();
     this.dimensionNumBytes = ref.pointNumBytes();
+    this.vectorDimension = ref.vectorDimension();
+    this.vectorScoreFunction = ref.vectorScoreFunction();
+    if (ref.getAttributes() != null) {
+      this.attributes = new HashMap<>(ref.getAttributes());
+    }
     // Do not copy frozen!
   }
   
@@ -279,11 +293,28 @@ public class FieldType implements IndexableFieldType  {
    * Enables points indexing.
    */
   public void setDimensions(int dimensionCount, int dimensionNumBytes) {
+    this.setDimensions(dimensionCount, dimensionCount, dimensionNumBytes);
+  }
+
+  /**
+   * Enables points indexing with selectable dimension indexing.
+   */
+  public void setDimensions(int dimensionCount, int indexDimensionCount, int dimensionNumBytes) {
+    checkIfFrozen();
     if (dimensionCount < 0) {
       throw new IllegalArgumentException("dimensionCount must be >= 0; got " + dimensionCount);
     }
     if (dimensionCount > PointValues.MAX_DIMENSIONS) {
       throw new IllegalArgumentException("dimensionCount must be <= " + PointValues.MAX_DIMENSIONS + "; got " + dimensionCount);
+    }
+    if (indexDimensionCount < 0) {
+      throw new IllegalArgumentException("indexDimensionCount must be >= 0; got " + indexDimensionCount);
+    }
+    if (indexDimensionCount > dimensionCount) {
+      throw new IllegalArgumentException("indexDimensionCount must be <= dimensionCount: " + dimensionCount + "; got " + indexDimensionCount);
+    }
+    if (indexDimensionCount > PointValues.MAX_INDEX_DIMENSIONS) {
+      throw new IllegalArgumentException("indexDimensionCount must be <= " + PointValues.MAX_INDEX_DIMENSIONS + "; got " + indexDimensionCount);
     }
     if (dimensionNumBytes < 0) {
       throw new IllegalArgumentException("dimensionNumBytes must be >= 0; got " + dimensionNumBytes);
@@ -292,16 +323,22 @@ public class FieldType implements IndexableFieldType  {
       throw new IllegalArgumentException("dimensionNumBytes must be <= " + PointValues.MAX_NUM_BYTES + "; got " + dimensionNumBytes);
     }
     if (dimensionCount == 0) {
-      if (dimensionNumBytes != 0) {
-        throw new IllegalArgumentException("when dimensionCount is 0, dimensionNumBytes must 0; got " + dimensionNumBytes);
+      if (indexDimensionCount != 0) {
+        throw new IllegalArgumentException("when dimensionCount is 0, indexDimensionCount must be 0; got " + indexDimensionCount);
       }
+      if (dimensionNumBytes != 0) {
+        throw new IllegalArgumentException("when dimensionCount is 0, dimensionNumBytes must be 0; got " + dimensionNumBytes);
+      }
+    } else if (indexDimensionCount == 0) {
+      throw new IllegalArgumentException("when dimensionCount is > 0, indexDimensionCount must be > 0; got " + indexDimensionCount);
     } else if (dimensionNumBytes == 0) {
       if (dimensionCount != 0) {
-        throw new IllegalArgumentException("when dimensionNumBytes is 0, dimensionCount must 0; got " + dimensionCount);
+        throw new IllegalArgumentException("when dimensionNumBytes is 0, dimensionCount must be 0; got " + dimensionCount);
       }
     }
 
     this.dimensionCount = dimensionCount;
+    this.indexDimensionCount = indexDimensionCount;
     this.dimensionNumBytes = dimensionNumBytes;
   }
 
@@ -311,8 +348,60 @@ public class FieldType implements IndexableFieldType  {
   }
 
   @Override
+  public int pointIndexDimensionCount() {
+    return indexDimensionCount;
+  }
+
+  @Override
   public int pointNumBytes() {
     return dimensionNumBytes;
+  }
+
+  void setVectorDimensionsAndScoreFunction(int numDimensions, VectorValues.ScoreFunction distFunc) {
+    checkIfFrozen();
+    if (numDimensions <= 0) {
+      throw new IllegalArgumentException("vector numDimensions must be > 0; got " + numDimensions);
+    }
+    if (numDimensions > VectorValues.MAX_DIMENSIONS) {
+      throw new IllegalArgumentException("vector numDimensions must be <= VectorValues.MAX_DIMENSIONS (=" + VectorValues.MAX_DIMENSIONS + "); got " + numDimensions);
+    }
+    this.vectorDimension = numDimensions;
+    this.vectorScoreFunction = distFunc;
+  }
+
+  @Override
+  public int vectorDimension() {
+    return vectorDimension;
+  }
+
+  @Override
+  public VectorValues.ScoreFunction vectorScoreFunction() {
+    return vectorScoreFunction;
+  }
+
+  /**
+   * Puts an attribute value.
+   * <p>
+   * This is a key-value mapping for the field that the codec can use
+   * to store additional metadata.
+   * <p>
+   * If a value already exists for the field, it will be replaced with
+   * the new value. This method is not thread-safe, user must not add attributes
+   * while other threads are indexing documents with this field type.
+   *
+   * @lucene.experimental
+   */
+  public String putAttribute(String key, String value) {
+    checkIfFrozen();
+    if (attributes == null) {
+      attributes = new HashMap<>();
+    }
+    return attributes.put(key, value);
+  }
+
+  @Override
+  public Map<String, String> getAttributes() {
+    return attributes;
   }
 
   /** Prints a Field for human consumption. */
@@ -355,6 +444,8 @@ public class FieldType implements IndexableFieldType  {
       }
       result.append("pointDimensionCount=");
       result.append(dimensionCount);
+      result.append(",pointIndexDimensionCount=");
+      result.append(indexDimensionCount);
       result.append(",pointNumBytes=");
       result.append(dimensionNumBytes);
     }
@@ -400,6 +491,7 @@ public class FieldType implements IndexableFieldType  {
     final int prime = 31;
     int result = 1;
     result = prime * result + dimensionCount;
+    result = prime * result + indexDimensionCount;
     result = prime * result + dimensionNumBytes;
     result = prime * result + ((docValuesType == null) ? 0 : docValuesType.hashCode());
     result = prime * result + indexOptions.hashCode();
@@ -420,6 +512,7 @@ public class FieldType implements IndexableFieldType  {
     if (getClass() != obj.getClass()) return false;
     FieldType other = (FieldType) obj;
     if (dimensionCount != other.dimensionCount) return false;
+    if (indexDimensionCount != other.indexDimensionCount) return false;
     if (dimensionNumBytes != other.dimensionNumBytes) return false;
     if (docValuesType != other.docValuesType) return false;
     if (indexOptions != other.indexOptions) return false;

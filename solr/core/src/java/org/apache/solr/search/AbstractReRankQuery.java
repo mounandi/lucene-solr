@@ -18,11 +18,14 @@ package org.apache.solr.search;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Set;
 
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.QueryVisitor;
 import org.apache.lucene.search.Rescorer;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.TopDocsCollector;
 import org.apache.lucene.search.Weight;
 import org.apache.lucene.util.BytesRef;
@@ -34,7 +37,7 @@ public abstract class AbstractReRankQuery extends RankQuery {
   protected Query mainQuery;
   final protected int reRankDocs;
   final protected Rescorer reRankQueryRescorer;
-  protected Map<BytesRef, Integer> boostedPriority;
+  protected Set<BytesRef> boostedPriority;
 
   public AbstractReRankQuery(Query mainQuery, int reRankDocs, Rescorer reRankQueryRescorer) {
     this.mainQuery = mainQuery;
@@ -53,13 +56,13 @@ public abstract class AbstractReRankQuery extends RankQuery {
     return null;
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public TopDocsCollector getTopDocsCollector(int len, QueryCommand cmd, IndexSearcher searcher) throws IOException {
-
     if(this.boostedPriority == null) {
       SolrRequestInfo info = SolrRequestInfo.getRequestInfo();
       if(info != null) {
         Map context = info.getReq().getContext();
-        this.boostedPriority = (Map<BytesRef, Integer>)context.get(QueryElevationComponent.BOOSTED_PRIORITY);
+        this.boostedPriority = (Set<BytesRef>)context.get(QueryElevationComponent.BOOSTED);
       }
     }
 
@@ -76,8 +79,14 @@ public abstract class AbstractReRankQuery extends RankQuery {
 
   protected abstract Query rewrite(Query rewrittenMainQuery) throws IOException;
 
-  public Weight createWeight(IndexSearcher searcher, boolean needsScores, float boost) throws IOException{
-    final Weight mainWeight = mainQuery.createWeight(searcher, needsScores, boost);
+  @Override
+  public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException{
+    final Weight mainWeight = mainQuery.createWeight(searcher, scoreMode, boost);
     return new ReRankWeight(mainQuery, reRankQueryRescorer, searcher, mainWeight);
+  }
+
+  @Override
+  public void visit(QueryVisitor visitor) {
+    visitor.visitLeaf(this);
   }
 }

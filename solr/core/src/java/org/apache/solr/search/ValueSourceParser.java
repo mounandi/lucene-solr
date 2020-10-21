@@ -27,20 +27,21 @@ import java.util.Map;
 
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.queries.function.BoostedQuery;
+import org.apache.lucene.queries.function.FunctionScoreQuery;
 import org.apache.lucene.queries.function.FunctionValues;
 import org.apache.lucene.queries.function.ValueSource;
 import org.apache.lucene.queries.function.docvalues.BoolDocValues;
 import org.apache.lucene.queries.function.docvalues.DoubleDocValues;
 import org.apache.lucene.queries.function.docvalues.LongDocValues;
 import org.apache.lucene.queries.function.valuesource.*;
+import org.apache.lucene.queries.payloads.PayloadDecoder;
 import org.apache.lucene.queries.payloads.PayloadFunction;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.spell.JaroWinklerDistance;
-import org.apache.lucene.search.spell.LevensteinDistance;
+import org.apache.lucene.search.spell.LevenshteinDistance;
 import org.apache.lucene.search.spell.NGramDistance;
 import org.apache.lucene.search.spell.StringDistance;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -49,22 +50,29 @@ import org.apache.solr.common.util.NamedList;
 import org.apache.solr.request.SolrRequestInfo;
 import org.apache.solr.schema.CurrencyFieldType;
 import org.apache.solr.schema.FieldType;
+import org.apache.solr.schema.IndexSchema;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.schema.StrField;
 import org.apache.solr.schema.TextField;
 import org.apache.solr.search.facet.AggValueSource;
 import org.apache.solr.search.facet.AvgAgg;
 import org.apache.solr.search.facet.CountAgg;
+import org.apache.solr.search.facet.CountValsAgg;
 import org.apache.solr.search.facet.HLLAgg;
 import org.apache.solr.search.facet.MinMaxAgg;
+import org.apache.solr.search.facet.MissingAgg;
 import org.apache.solr.search.facet.PercentileAgg;
+import org.apache.solr.search.facet.RelatednessAgg;
 import org.apache.solr.search.facet.StddevAgg;
 import org.apache.solr.search.facet.SumAgg;
 import org.apache.solr.search.facet.SumsqAgg;
 import org.apache.solr.search.facet.UniqueAgg;
+import org.apache.solr.search.facet.UniqueBlockFieldAgg;
+import org.apache.solr.search.facet.UniqueBlockQueryAgg;
 import org.apache.solr.search.facet.VarianceAgg;
 import org.apache.solr.search.function.CollapseScoreFunction;
 import org.apache.solr.search.function.ConcatStringFunction;
+import org.apache.solr.search.function.EqualFunction;
 import org.apache.solr.search.function.OrdFieldSource;
 import org.apache.solr.search.function.ReverseOrdFieldSource;
 import org.apache.solr.search.function.SolrComparisonBoolFunction;
@@ -77,7 +85,6 @@ import org.apache.solr.search.function.distance.StringDistanceFunction;
 import org.apache.solr.search.function.distance.VectorDistanceFunction;
 import org.apache.solr.search.join.ChildFieldValueSourceParser;
 import org.apache.solr.util.DateMathParser;
-import org.apache.solr.util.PayloadDecoder;
 import org.apache.solr.util.PayloadUtils;
 import org.apache.solr.util.plugin.NamedListInitializedPlugin;
 import org.locationtech.spatial4j.distance.DistanceUtils;
@@ -91,7 +98,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
    * Initialize the plugin.
    */
   @Override
-  public void init(NamedList args) {}
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {}
 
   /**
    * Parse the user input into a ValueSource.
@@ -325,8 +332,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
         Query q = fp.parseNestedQuery();
         ValueSource vs = fp.parseValueSource();
-        BoostedQuery bq = new BoostedQuery(q, vs);
-        return new QueryValueSource(bq, 0.0f);
+        return new QueryValueSource(FunctionScoreQuery.boostByValue(q, vs.asDoubleValuesSource()), 0.0f);
       }
     });
     addParser("joindf", new ValueSourceParser() {
@@ -405,7 +411,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
         if (distClass.equalsIgnoreCase("jw")) {
           dist = new JaroWinklerDistance();
         } else if (distClass.equalsIgnoreCase("edit")) {
-          dist = new LevensteinDistance();
+          dist = new LevenshteinDistance();
         } else if (distClass.equalsIgnoreCase("ngram")) {
           int ngram = 2;
           if (fp.hasMoreArguments()) {
@@ -737,8 +743,8 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
           throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "Invalid payload function: " + func);
         }
 
-        FieldType fieldType = fp.getReq().getCore().getLatestSchema().getFieldTypeNoEx(tinfo.field);
-        PayloadDecoder decoder = PayloadUtils.getPayloadDecoder(fieldType);
+        IndexSchema schema = fp.getReq().getCore().getLatestSchema();
+        PayloadDecoder decoder = schema.getPayloadDecoder(tinfo.field);
 
         if (decoder==null) {
           throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "No payload decoder found for field: " + tinfo.field);
@@ -758,14 +764,14 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
     addParser("true", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) {
-        return new BoolConstValueSource(true);
+        return BoolConstValueSource.TRUE;
       }
     });
 
     addParser("false", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) {
-        return new BoolConstValueSource(false);
+        return BoolConstValueSource.FALSE;
       }
     });
 
@@ -922,7 +928,7 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
         ValueSource lhsValSource = fp.parseValueSource();
         ValueSource rhsValSource = fp.parseValueSource();
 
-        return new SolrComparisonBoolFunction(lhsValSource, rhsValSource, "eq", (cmp) -> cmp == 0);
+        return new EqualFunction(lhsValSource, rhsValSource, "eq");
       }
     });
 
@@ -963,6 +969,16 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
       }
     });
 
+    addParser("agg_uniqueBlock", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        if (fp.sp.peek() == QueryParsing.LOCALPARAM_START.charAt(0) ) {
+          return new UniqueBlockQueryAgg(fp.parseNestedQuery());
+        }
+        return new UniqueBlockFieldAgg(fp.parseArg());
+      }
+    });
+
     addParser("agg_hll", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
@@ -973,35 +989,49 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
     addParser("agg_sum", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new SumAgg(fp.parseValueSource());
+        return new SumAgg(fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
       }
     });
 
     addParser("agg_avg", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new AvgAgg(fp.parseValueSource());
+        return new AvgAgg(fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
       }
     });
 
     addParser("agg_sumsq", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new SumsqAgg(fp.parseValueSource());
+        return new SumsqAgg(fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
       }
     });
 
     addParser("agg_variance", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new VarianceAgg(fp.parseValueSource());
+        return new VarianceAgg(fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
       }
     });
     
     addParser("agg_stddev", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new StddevAgg(fp.parseValueSource());
+        return new StddevAgg(fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
+      }
+    });
+
+    addParser("agg_missing", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        return new MissingAgg(fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
+      }
+    });
+
+    addParser("agg_countvals", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        return new CountValsAgg(fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
       }
     });
     
@@ -1017,18 +1047,50 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
     addParser("agg_min", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new MinMaxAgg("min", fp.parseValueSource());
+        return new MinMaxAgg("min", fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
       }
     });
 
     addParser("agg_max", new ValueSourceParser() {
       @Override
       public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-        return new MinMaxAgg("max", fp.parseValueSource());
+        return new MinMaxAgg("max", fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE));
       }
     });
 
-    addParser("agg_percentile", new PercentileAgg.Parser());
+    addParser("agg_percentile", new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        List<Double> percentiles = new ArrayList<>();
+        ValueSource vs = fp.parseValueSource(FunctionQParser.FLAG_DEFAULT | FunctionQParser.FLAG_USE_FIELDNAME_SOURCE);
+        while (fp.hasMoreArguments()) {
+          double val = fp.parseDouble();
+          if (val<0 || val>100) {
+            throw new SyntaxError("requested percentile must be between 0 and 100.  got " + val);
+          }
+          percentiles.add(val);
+        }
+
+        if (percentiles.isEmpty()) {
+          throw new SyntaxError("expected percentile(valsource,percent1[,percent2]*)  EXAMPLE:percentile(myfield,50)");
+        }
+
+        return new PercentileAgg(vs, percentiles);
+      }
+    });
+    
+    addParser("agg_" + RelatednessAgg.NAME, new ValueSourceParser() {
+      @Override
+      public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+        // TODO: (fore & back)-ground should be optional -- use hasMoreArguments
+        // if only one arg, assume it's the foreground
+        // (background is the one that will most commonly just be "*:*")
+        // see notes in RelatednessAgg constructor about why we don't do this yet
+        RelatednessAgg agg = new RelatednessAgg(fp.parseNestedQuery(), fp.parseNestedQuery());
+        agg.setOpts(fp);
+        return agg;
+      }
+    });
     
     addParser("childfield", new ChildFieldValueSourceParser());
   }
@@ -1122,430 +1184,435 @@ public abstract class ValueSourceParser implements NamedListInitializedPlugin {
     BytesRefBuilder indexedBytes;
   }
 
-}
-
-
-class DateValueSourceParser extends ValueSourceParser {
-  @Override
-  public void init(NamedList args) {
-  }
-
-  public Date getDate(FunctionQParser fp, String arg) {
-    if (arg == null) return null;
-    // check character index 1 to be a digit.  Index 0 might be a +/-.
-    if (arg.startsWith("NOW") || (arg.length() > 1 && Character.isDigit(arg.charAt(1)))) {
-      Date now = null;//TODO pull from params?
-      return DateMathParser.parseMath(now, arg);
-    }
-    return null;
-  }
-
-  public ValueSource getValueSource(FunctionQParser fp, String arg) {
-    if (arg == null) return null;
-    SchemaField f = fp.req.getSchema().getField(arg);
-    return f.getType().getValueSource(f, fp);
-  }
-
-  @Override
-  public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-    String first = fp.parseArg();
-    String second = fp.parseArg();
-    if (first == null) first = "NOW";
-
-    Date d1 = getDate(fp, first);
-    ValueSource v1 = d1 == null ? getValueSource(fp, first) : null;
-
-    Date d2 = getDate(fp, second);
-    ValueSource v2 = d2 == null ? getValueSource(fp, second) : null;
-
-    // d     constant
-    // v     field
-    // dd    constant
-    // dv    subtract field from constant
-    // vd    subtract constant from field
-    // vv    subtract fields
-
-    final long ms1 = (d1 == null) ? 0 : d1.getTime();
-    final long ms2 = (d2 == null) ? 0 : d2.getTime();
-
-    // "d,dd" handle both constant cases
-
-    if (d1 != null && v2 == null) {
-      return new LongConstValueSource(ms1 - ms2);
+  static class DateValueSourceParser extends ValueSourceParser {
+    @Override
+    public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
     }
 
-    // "v" just the date field
-    if (v1 != null && v2 == null && d2 == null) {
-      return v1;
+    public Date getDate(FunctionQParser fp, String arg) {
+      if (arg == null) return null;
+      // check character index 1 to be a digit.  Index 0 might be a +/-.
+      if (arg.startsWith("NOW") || (arg.length() > 1 && Character.isDigit(arg.charAt(1)))) {
+        Date now = null;//TODO pull from params?
+        return DateMathParser.parseMath(now, arg);
+      }
+      return null;
     }
 
-
-    // "dv"
-    if (d1 != null && v2 != null)
-      return new DualFloatFunction(new LongConstValueSource(ms1), v2) {
-        @Override
-        protected String name() {
-          return "ms";
-        }
-
-        @Override
-        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
-          return ms1 - bVals.longVal(doc);
-        }
-      };
-
-    // "vd"
-    if (v1 != null && d2 != null)
-      return new DualFloatFunction(v1, new LongConstValueSource(ms2)) {
-        @Override
-        protected String name() {
-          return "ms";
-        }
-
-        @Override
-        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
-          return aVals.longVal(doc) - ms2;
-        }
-      };
-
-    // "vv"
-    if (v1 != null && v2 != null)
-      return new DualFloatFunction(v1, v2) {
-        @Override
-        protected String name() {
-          return "ms";
-        }
-
-        @Override
-        protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
-          return aVals.longVal(doc) - bVals.longVal(doc);
-        }
-      };
-
-    return null; // shouldn't happen
-  }
-
-}
-
-
-// Private for now - we need to revisit how to handle typing in function queries
-class LongConstValueSource extends ConstNumberSource {
-  final long constant;
-  final double dv;
-  final float fv;
-
-  public LongConstValueSource(long constant) {
-    this.constant = constant;
-    this.dv = constant;
-    this.fv = constant;
-  }
-
-  @Override
-  public String description() {
-    return "const(" + constant + ")";
-  }
-
-  @Override
-  public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
-    return new LongDocValues(this) {
-      @Override
-      public float floatVal(int doc) {
-        return fv;
-      }
-
-      @Override
-      public int intVal(int doc) {
-        return (int) constant;
-      }
-
-      @Override
-      public long longVal(int doc) {
-        return constant;
-      }
-
-      @Override
-      public double doubleVal(int doc) {
-        return dv;
-      }
-
-      @Override
-      public String toString(int doc) {
-        return description();
-      }
-    };
-  }
-
-  @Override
-  public int hashCode() {
-    return (int) constant + (int) (constant >>> 32);
-  }
-
-  @Override
-  public boolean equals(Object o) {
-    if (LongConstValueSource.class != o.getClass()) return false;
-    LongConstValueSource other = (LongConstValueSource) o;
-    return this.constant == other.constant;
-  }
-
-  @Override
-  public int getInt() {
-    return (int)constant;
-  }
-
-  @Override
-  public long getLong() {
-    return constant;
-  }
-
-  @Override
-  public float getFloat() {
-    return fv;
-  }
-
-  @Override
-  public double getDouble() {
-    return dv;
-  }
-
-  @Override
-  public Number getNumber() {
-    return constant;
-  }
-
-  @Override
-  public boolean getBool() {
-    return constant != 0;
-  }
-}
-
-
-abstract class NamedParser extends ValueSourceParser {
-  private final String name;
-  public NamedParser(String name) {
-    this.name = name;
-  }
-  public String name() {
-    return name;
-  }
-}
-
-
-abstract class DoubleParser extends NamedParser {
-  public DoubleParser(String name) {
-    super(name);
-  }
-
-  public abstract double func(int doc, FunctionValues vals) throws IOException;
-
-  @Override
-  public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-    return new Function(fp.parseValueSource());
-  }
-
-  class Function extends SingleFunction {
-    public Function(ValueSource source) {
-      super(source);
+    public ValueSource getValueSource(FunctionQParser fp, String arg) {
+      if (arg == null) return null;
+      SchemaField f = fp.req.getSchema().getField(arg);
+      return f.getType().getValueSource(f, fp);
     }
 
     @Override
-    public String name() {
-      return DoubleParser.this.name();
+    public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+      String first = fp.parseArg();
+      String second = fp.parseArg();
+      if (first == null) first = "NOW";
+
+      Date d1 = getDate(fp, first);
+      ValueSource v1 = d1 == null ? getValueSource(fp, first) : null;
+
+      Date d2 = getDate(fp, second);
+      ValueSource v2 = d2 == null ? getValueSource(fp, second) : null;
+
+      // d     constant
+      // v     field
+      // dd    constant
+      // dv    subtract field from constant
+      // vd    subtract constant from field
+      // vv    subtract fields
+
+      final long ms1 = (d1 == null) ? 0 : d1.getTime();
+      final long ms2 = (d2 == null) ? 0 : d2.getTime();
+
+      // "d,dd" handle both constant cases
+
+      if (d1 != null && v2 == null) {
+        return new LongConstValueSource(ms1 - ms2);
+      }
+
+      // "v" just the date field
+      if (v1 != null && v2 == null && d2 == null) {
+        return v1;
+      }
+
+
+      // "dv"
+      if (d1 != null && v2 != null)
+        return new DualFloatFunction(new LongConstValueSource(ms1), v2) {
+          @Override
+          protected String name() {
+            return "ms";
+          }
+
+          @Override
+          protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
+            return ms1 - bVals.longVal(doc);
+          }
+        };
+
+      // "vd"
+      if (v1 != null && d2 != null)
+        return new DualFloatFunction(v1, new LongConstValueSource(ms2)) {
+          @Override
+          protected String name() {
+            return "ms";
+          }
+
+          @Override
+          protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
+            return aVals.longVal(doc) - ms2;
+          }
+        };
+
+      // "vv"
+      if (v1 != null && v2 != null)
+        return new DualFloatFunction(v1, v2) {
+          @Override
+          protected String name() {
+            return "ms";
+          }
+
+          @Override
+          protected float func(int doc, FunctionValues aVals, FunctionValues bVals) throws IOException {
+            return aVals.longVal(doc) - bVals.longVal(doc);
+          }
+        };
+
+      return null; // shouldn't happen
     }
 
-    @Override
-    public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
-      final FunctionValues vals =  source.getValues(context, readerContext);
-      return new DoubleDocValues(this) {
-        @Override
-        public double doubleVal(int doc) throws IOException {
-          return func(doc, vals);
-        }
-        @Override
-        public String toString(int doc) throws IOException {
-          return name() + '(' + vals.toString(doc) + ')';
-        }
-      };
-    }
-  }
-}
-
-
-abstract class Double2Parser extends NamedParser {
-  public Double2Parser(String name) {
-    super(name);
   }
 
-  public abstract double func(int doc, FunctionValues a, FunctionValues b) throws IOException;
+  // Private for now - we need to revisit how to handle typing in function queries
+  static class LongConstValueSource extends ConstNumberSource {
+    final long constant;
+    final double dv;
+    final float fv;
 
-  @Override
-  public ValueSource parse(FunctionQParser fp) throws SyntaxError {
-    return new Function(fp.parseValueSource(), fp.parseValueSource());
-  }
-
-  class Function extends ValueSource {
-    private final ValueSource a;
-    private final ValueSource b;
-
-   /**
-     * @param   a  the base.
-     * @param   b  the exponent.
-     */
-    public Function(ValueSource a, ValueSource b) {
-      this.a = a;
-      this.b = b;
+    public LongConstValueSource(long constant) {
+      this.constant = constant;
+      this.dv = constant;
+      this.fv = constant;
     }
 
     @Override
     public String description() {
-      return name() + "(" + a.description() + "," + b.description() + ")";
+      return "const(" + constant + ")";
     }
 
     @Override
-    public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
-      final FunctionValues aVals =  a.getValues(context, readerContext);
-      final FunctionValues bVals =  b.getValues(context, readerContext);
-      return new DoubleDocValues(this) {
+    public FunctionValues getValues(@SuppressWarnings({"rawtypes"})Map context
+            , LeafReaderContext readerContext) throws IOException {
+      return new LongDocValues(this) {
         @Override
-        public double doubleVal(int doc) throws IOException {
-          return func(doc, aVals, bVals);
+        public float floatVal(int doc) {
+          return fv;
         }
+
         @Override
-        public String toString(int doc) throws IOException {
-          return name() + '(' + aVals.toString(doc) + ',' + bVals.toString(doc) + ')';
+        public int intVal(int doc) {
+          return (int) constant;
+        }
+
+        @Override
+        public long longVal(int doc) {
+          return constant;
+        }
+
+        @Override
+        public double doubleVal(int doc) {
+          return dv;
+        }
+
+        @Override
+        public String toString(int doc) {
+          return description();
         }
       };
     }
 
     @Override
-    public void createWeight(Map context, IndexSearcher searcher) throws IOException {
-    }
-
-    @Override
     public int hashCode() {
-      int h = a.hashCode();
-      h ^= (h << 13) | (h >>> 20);
-      h += b.hashCode();
-      h ^= (h << 23) | (h >>> 10);
-      h += name().hashCode();
-      return h;
+      return (int) constant + (int) (constant >>> 32);
     }
 
     @Override
     public boolean equals(Object o) {
-      if (this.getClass() != o.getClass()) return false;
-      Function other = (Function)o;
-      return this.a.equals(other.a)
-          && this.b.equals(other.b);
+      if (LongConstValueSource.class != o.getClass()) return false;
+      LongConstValueSource other = (LongConstValueSource) o;
+      return this.constant == other.constant;
+    }
+
+    @Override
+    public int getInt() {
+      return (int)constant;
+    }
+
+    @Override
+    public long getLong() {
+      return constant;
+    }
+
+    @Override
+    public float getFloat() {
+      return fv;
+    }
+
+    @Override
+    public double getDouble() {
+      return dv;
+    }
+
+    @Override
+    public Number getNumber() {
+      return constant;
+    }
+
+    @Override
+    public boolean getBool() {
+      return constant != 0;
     }
   }
 
-}
-
-
-class BoolConstValueSource extends ConstNumberSource {
-  final boolean constant;
-
-  public BoolConstValueSource(boolean constant) {
-    this.constant = constant;
+  abstract static class NamedParser extends ValueSourceParser {
+    private final String name;
+    public NamedParser(String name) {
+      this.name = name;
+    }
+    public String name() {
+      return name;
+    }
   }
 
-  @Override
-  public String description() {
-    return "const(" + constant + ")";
-  }
+  abstract static class DoubleParser extends NamedParser {
+    public DoubleParser(String name) {
+      super(name);
+    }
 
-  @Override
-  public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
-    return new BoolDocValues(this) {
-      @Override
-      public boolean boolVal(int doc) {
-        return constant;
+    public abstract double func(int doc, FunctionValues vals) throws IOException;
+
+    @Override
+    public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+      return new Function(fp.parseValueSource());
+    }
+
+    class Function extends SingleFunction {
+      public Function(ValueSource source) {
+        super(source);
       }
-    };
-  }
 
-  @Override
-  public int hashCode() {
-    return constant ? 0x12345678 : 0x87654321;
-  }
+      @Override
+      public String name() {
+        return DoubleParser.this.name();
+      }
 
-  @Override
-  public boolean equals(Object o) {
-    if (BoolConstValueSource.class != o.getClass()) return false;
-    BoolConstValueSource other = (BoolConstValueSource) o;
-    return this.constant == other.constant;
-  }
-
-  @Override
-  public int getInt() {
-    return constant ? 1 : 0;
-  }
-
-  @Override
-  public long getLong() {
-    return constant ? 1 : 0;
-  }
-
-  @Override
-  public float getFloat() {
-    return constant ? 1 : 0;
-  }
-
-  @Override
-  public double getDouble() {
-    return constant ? 1 : 0;
-  }
-
-  @Override
-  public Number getNumber() {
-    return constant ? 1 : 0;
-  }
-
-  @Override
-  public boolean getBool() {
-    return constant;
-  }
-}
-
-
-class TestValueSource extends ValueSource {
-  ValueSource source;
-  
-  public TestValueSource(ValueSource source) {
-    this.source = source;
-  }
-  
-  @Override
-  public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
-    if (context.get(this) == null) {
-      SolrRequestInfo requestInfo = SolrRequestInfo.getRequestInfo();
-      throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "testfunc: unweighted value source detected.  delegate="+source + " request=" + (requestInfo==null ? "null" : requestInfo.getReq()));
+      @Override
+      public FunctionValues getValues(@SuppressWarnings({"rawtypes"})Map context, LeafReaderContext readerContext) throws IOException {
+        @SuppressWarnings({"unchecked"})
+        final FunctionValues vals =  source.getValues(context, readerContext);
+        return new DoubleDocValues(this) {
+          @Override
+          public double doubleVal(int doc) throws IOException {
+            return func(doc, vals);
+          }
+          @Override
+          public String toString(int doc) throws IOException {
+            return name() + '(' + vals.toString(doc) + ')';
+          }
+        };
+      }
     }
-    return source.getValues(context, readerContext);
   }
 
-  @Override
-  public boolean equals(Object o) {
-    return o instanceof TestValueSource && source.equals(((TestValueSource)o).source);
+  abstract static class Double2Parser extends NamedParser {
+    public Double2Parser(String name) {
+      super(name);
+    }
+
+    public abstract double func(int doc, FunctionValues a, FunctionValues b) throws IOException;
+
+    @Override
+    public ValueSource parse(FunctionQParser fp) throws SyntaxError {
+      return new Function(fp.parseValueSource(), fp.parseValueSource());
+    }
+
+    class Function extends ValueSource {
+      private final ValueSource a;
+      private final ValueSource b;
+
+     /**
+       * @param   a  the base.
+       * @param   b  the exponent.
+       */
+      public Function(ValueSource a, ValueSource b) {
+        this.a = a;
+        this.b = b;
+      }
+
+      @Override
+      public String description() {
+        return name() + "(" + a.description() + "," + b.description() + ")";
+      }
+
+      @Override
+      public FunctionValues getValues(@SuppressWarnings({"rawtypes"})Map context, LeafReaderContext readerContext) throws IOException {
+        @SuppressWarnings({"unchecked"})
+        final FunctionValues aVals =  a.getValues(context, readerContext);
+        @SuppressWarnings({"unchecked"})
+        final FunctionValues bVals =  b.getValues(context, readerContext);
+        return new DoubleDocValues(this) {
+          @Override
+          public double doubleVal(int doc) throws IOException {
+            return func(doc, aVals, bVals);
+          }
+          @Override
+          public String toString(int doc) throws IOException {
+            return name() + '(' + aVals.toString(doc) + ',' + bVals.toString(doc) + ')';
+          }
+        };
+      }
+
+      @Override
+      public void createWeight(@SuppressWarnings({"rawtypes"})Map context, IndexSearcher searcher) throws IOException {
+      }
+
+      @Override
+      public int hashCode() {
+        int h = a.hashCode();
+        h ^= (h << 13) | (h >>> 20);
+        h += b.hashCode();
+        h ^= (h << 23) | (h >>> 10);
+        h += name().hashCode();
+        return h;
+      }
+
+      @Override
+      public boolean equals(Object o) {
+        if (this.getClass() != o.getClass()) return false;
+        Function other = (Function)o;
+        return this.a.equals(other.a)
+            && this.b.equals(other.b);
+      }
+    }
+
   }
 
-  @Override
-  public int hashCode() {
-    return source.hashCode() + TestValueSource.class.hashCode();
+  static class BoolConstValueSource extends ConstNumberSource {
+    public static final BoolConstValueSource TRUE = new BoolConstValueSource(true);
+    public static final BoolConstValueSource FALSE = new BoolConstValueSource(false);
+
+    final boolean constant;
+
+    private BoolConstValueSource(boolean constant) {
+      this.constant = constant;
+    }
+
+    @Override
+    public String description() {
+      return "const(" + constant + ")";
+    }
+
+    @Override
+    public FunctionValues getValues(@SuppressWarnings({"rawtypes"})Map context,
+                                    LeafReaderContext readerContext) throws IOException {
+      return new BoolDocValues(this) {
+        @Override
+        public boolean boolVal(int doc) {
+          return constant;
+        }
+      };
+    }
+
+    @Override
+    public int hashCode() {
+      return constant ? 0x12345678 : 0x87654321;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (BoolConstValueSource.class != o.getClass()) return false;
+      BoolConstValueSource other = (BoolConstValueSource) o;
+      return this.constant == other.constant;
+    }
+
+    @Override
+    public int getInt() {
+      return constant ? 1 : 0;
+    }
+
+    @Override
+    public long getLong() {
+      return constant ? 1 : 0;
+    }
+
+    @Override
+    public float getFloat() {
+      return constant ? 1 : 0;
+    }
+
+    @Override
+    public double getDouble() {
+      return constant ? 1 : 0;
+    }
+
+    @Override
+    public Number getNumber() {
+      return constant ? 1 : 0;
+    }
+
+    @Override
+    public boolean getBool() {
+      return constant;
+    }
   }
 
-  @Override
-  public String description() {
-    return "testfunc(" + source.description() + ')';
-  }
+  static class TestValueSource extends ValueSource {
+    ValueSource source;
 
-  @Override
-  public void createWeight(Map context, IndexSearcher searcher) throws IOException {
-    context.put(this, this);
-  }
+    public TestValueSource(ValueSource source) {
+      this.source = source;
+    }
 
-  @Override
-  public SortField getSortField(boolean reverse) {
-    return super.getSortField(reverse);
+    @Override
+    @SuppressWarnings({"unchecked"})
+    public FunctionValues getValues(@SuppressWarnings({"rawtypes"})Map context
+            , LeafReaderContext readerContext) throws IOException {
+      if (context.get(this) == null) {
+        SolrRequestInfo requestInfo = SolrRequestInfo.getRequestInfo();
+        throw new SolrException(SolrException.ErrorCode.BAD_REQUEST, "testfunc: unweighted value source detected.  delegate="+source + " request=" + (requestInfo==null ? "null" : requestInfo.getReq()));
+      }
+      return source.getValues(context, readerContext);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      return o instanceof TestValueSource && source.equals(((TestValueSource)o).source);
+    }
+
+    @Override
+    public int hashCode() {
+      return source.hashCode() + TestValueSource.class.hashCode();
+    }
+
+    @Override
+    public String description() {
+      return "testfunc(" + source.description() + ')';
+    }
+
+    @Override
+    @SuppressWarnings({"unchecked"})
+    public void createWeight(@SuppressWarnings({"rawtypes"})Map context, IndexSearcher searcher) throws IOException {
+      context.put(this, this);
+    }
+
+    @Override
+    public SortField getSortField(boolean reverse) {
+      return super.getSortField(reverse);
+    }
   }
 }
+
+

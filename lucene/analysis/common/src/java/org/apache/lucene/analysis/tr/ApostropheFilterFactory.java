@@ -18,7 +18,7 @@ package org.apache.lucene.analysis.tr;
 
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 import java.util.Map;
 
@@ -32,14 +32,24 @@ import java.util.Map;
  *     &lt;filter class="solr.TurkishLowerCaseFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 4.8.0
+ * @lucene.spi {@value #NAME}
  */
 public class ApostropheFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "apostrophe";
 
   public ApostropheFilterFactory(Map<String, String> args) {
     super(args);
     if (!args.isEmpty()) {
       throw new IllegalArgumentException("Unknown parameter(s): " + args);
     }
+  }
+
+  /** Default ctor for compatibility with SPI */
+  public ApostropheFilterFactory() {
+    throw defaultCtorException();
   }
 
   @Override

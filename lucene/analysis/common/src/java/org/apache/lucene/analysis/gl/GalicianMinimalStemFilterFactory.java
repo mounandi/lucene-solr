@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.gl;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.gl.GalicianMinimalStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link GalicianMinimalStemFilter}. 
@@ -33,8 +32,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.GalicianMinimalStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.6.0
+ * @lucene.spi {@value #NAME}
  */
 public class GalicianMinimalStemFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "galicianMinimalStem";
   
   /** Creates a new GalicianMinimalStemFilterFactory */
   public GalicianMinimalStemFilterFactory(Map<String,String> args) {
@@ -44,6 +48,11 @@ public class GalicianMinimalStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public GalicianMinimalStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new GalicianMinimalStemFilter(input);

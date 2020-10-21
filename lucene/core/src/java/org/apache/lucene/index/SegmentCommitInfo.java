@@ -18,6 +18,7 @@ package org.apache.lucene.index;
 
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -25,6 +26,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+
+import org.apache.lucene.util.StringHelper;
 
 /** Embeds a [read-only] SegmentInfo and adds per-commit
  *  fields.
@@ -35,8 +38,14 @@ public class SegmentCommitInfo {
   /** The {@link SegmentInfo} that we wrap. */
   public final SegmentInfo info;
 
+  /** Id that uniquely identifies this segment commit. */
+  private byte[] id;
+
   // How many deleted docs in the segment:
   private int delCount;
+
+  // How many soft-deleted docs in the segment that are not also hard-deleted:
+  private int softDelCount;
 
   // Generation number of the live docs file (-1 if there
   // are no deletes yet):
@@ -73,10 +82,9 @@ public class SegmentCommitInfo {
   // NOTE: only used in-RAM by IW to track buffered deletes;
   // this is never written to/read from the Directory
   private long bufferedDeletesGen = -1;
-  
+
   /**
    * Sole constructor.
-   * 
    * @param info
    *          {@link SegmentInfo} that we wrap
    * @param delCount
@@ -87,16 +95,22 @@ public class SegmentCommitInfo {
    *          FieldInfos generation number (used to name field-infos files)
    * @param docValuesGen
    *          DocValues generation number (used to name doc-values updates files)
+   * @param id Id that uniquely identifies this segment commit. This id must be 16 bytes long. See {@link StringHelper#randomId()}
    */
-  public SegmentCommitInfo(SegmentInfo info, int delCount, long delGen, long fieldInfosGen, long docValuesGen) {
+  public SegmentCommitInfo(SegmentInfo info, int delCount, int softDelCount, long delGen, long fieldInfosGen, long docValuesGen, byte[] id) {
     this.info = info;
     this.delCount = delCount;
+    this.softDelCount = softDelCount;
     this.delGen = delGen;
     this.nextWriteDelGen = delGen == -1 ? 1 : delGen + 1;
     this.fieldInfosGen = fieldInfosGen;
     this.nextWriteFieldInfosGen = fieldInfosGen == -1 ? 1 : fieldInfosGen + 1;
     this.docValuesGen = docValuesGen;
     this.nextWriteDocValuesGen = docValuesGen == -1 ? 1 : docValuesGen + 1;
+    this.id = id;
+    if (id != null && id.length != StringHelper.ID_LENGTH) {
+      throw new IllegalArgumentException("invalid id: " + Arrays.toString(id));
+    }
   }
   
   /** Returns the per-field DocValues updates files. */
@@ -134,7 +148,7 @@ public class SegmentCommitInfo {
   void advanceDelGen() {
     delGen = nextWriteDelGen;
     nextWriteDelGen = delGen+1;
-    sizeInBytes = -1;
+    generationAdvanced();
   }
 
   /** Called if there was an exception while writing
@@ -158,7 +172,7 @@ public class SegmentCommitInfo {
   void advanceFieldInfosGen() {
     fieldInfosGen = nextWriteFieldInfosGen;
     nextWriteFieldInfosGen = fieldInfosGen + 1;
-    sizeInBytes = -1;
+    generationAdvanced();
   }
   
   /**
@@ -183,7 +197,7 @@ public class SegmentCommitInfo {
   void advanceDocValuesGen() {
     docValuesGen = nextWriteDocValuesGen;
     nextWriteDocValuesGen = docValuesGen + 1;
-    sizeInBytes = -1;
+    generationAdvanced();
   }
   
   /**
@@ -247,7 +261,7 @@ public class SegmentCommitInfo {
   void setBufferedDeletesGen(long v) {
     if (bufferedDeletesGen == -1) {
       bufferedDeletesGen = v;
-      sizeInBytes =  -1;
+      generationAdvanced();
     } else {
       throw new IllegalStateException("buffered deletes gen should only be set once");
     }
@@ -313,11 +327,27 @@ public class SegmentCommitInfo {
     return delCount;
   }
 
+  /**
+   * Returns the number of only soft-deleted docs.
+   */
+  public int getSoftDelCount() {
+    return softDelCount;
+  }
+
   void setDelCount(int delCount) {
     if (delCount < 0 || delCount > info.maxDoc()) {
       throw new IllegalArgumentException("invalid delCount=" + delCount + " (maxDoc=" + info.maxDoc() + ")");
     }
+    assert softDelCount + delCount <= info.maxDoc() : "maxDoc=" + info.maxDoc() + ",delCount=" + delCount + ",softDelCount=" + softDelCount;
     this.delCount = delCount;
+  }
+
+  void setSoftDelCount(int softDelCount) {
+    if (softDelCount < 0 || softDelCount > info.maxDoc()) {
+      throw new IllegalArgumentException("invalid softDelCount=" + softDelCount + " (maxDoc=" + info.maxDoc() + ")");
+    }
+    assert softDelCount + delCount <= info.maxDoc() : "maxDoc=" + info.maxDoc() + ",delCount=" + delCount + ",softDelCount=" + softDelCount;
+    this.softDelCount = softDelCount;
   }
 
   /** Returns a description of this segment. */
@@ -332,6 +362,13 @@ public class SegmentCommitInfo {
     if (docValuesGen != -1) {
       s += ":dvGen=" + docValuesGen;
     }
+    if (softDelCount > 0) {
+      s += " :softDel=" + softDelCount;
+    }
+    if (this.id != null) {
+      s += " :id=" + StringHelper.idToString(id);
+    }
+
     return s;
   }
 
@@ -342,7 +379,7 @@ public class SegmentCommitInfo {
 
   @Override
   public SegmentCommitInfo clone() {
-    SegmentCommitInfo other = new SegmentCommitInfo(info, delCount, delGen, fieldInfosGen, docValuesGen);
+    SegmentCommitInfo other = new SegmentCommitInfo(info, delCount, softDelCount, delGen, fieldInfosGen, docValuesGen, getId());
     // Not clear that we need to carry over nextWriteDelGen
     // (i.e. do we ever clone after a failed write and
     // before the next successful write?), but just do it to
@@ -359,5 +396,22 @@ public class SegmentCommitInfo {
     other.fieldInfosFiles.addAll(fieldInfosFiles);
     
     return other;
+  }
+
+  final int getDelCount(boolean includeSoftDeletes) {
+    return includeSoftDeletes ? getDelCount() + getSoftDelCount() : getDelCount();
+  }
+
+  private void generationAdvanced() {
+    sizeInBytes = -1;
+    id = StringHelper.randomId();
+  }
+
+  /**
+   * Returns and Id that uniquely identifies this segment commit or <code>null</code> if there is no ID assigned.
+   * This ID changes each time the the segment changes due to a delete, doc-value or field update.
+   */
+  public byte[] getId() {
+    return id == null ? null : id.clone();
   }
 }

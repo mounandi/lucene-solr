@@ -16,10 +16,8 @@
  */
 package org.apache.solr.analytics.function.mapping;
 
-import java.text.DateFormat;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
-import java.util.Locale;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.function.LongConsumer;
 
 import org.apache.solr.analytics.ExpressionFactory.CreatorFunction;
@@ -59,152 +57,155 @@ public class DateParseFunction {
       return new StringStreamToDateParseFunction((StringValueStream)params[0]);
     }
     else {
-      throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires a string or long parameter. " + 
+      throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires a string or long parameter. " +
           "Incorrect parameter: "+params[0].getExpressionStr());
     }
   });
-}
-class LongToDateParseFunction extends AbstractDateValue {
-  private final LongValue param;
-  public static final String name = DateParseFunction.name;
-  private final String exprStr;
-  private final ExpressionType funcType;
-  
-  public LongToDateParseFunction(LongValue param) throws SolrException {
-    this.param = param;
-    this.exprStr = AnalyticsValueStream.createExpressionString(name,param);
-    this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,param);
-  }
 
-  @Override
-  public long getLong() {
-    return param.getLong();
-  }
-  @Override
-  public boolean exists() {
-    return param.exists();
-  }
+  static class LongToDateParseFunction extends AbstractDateValue {
+    private final LongValue param;
+    public static final String name = DateParseFunction.name;
+    private final String exprStr;
+    private final ExpressionType funcType;
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return funcType;
-  }
-}
-class LongStreamToDateParseFunction extends AbstractDateValueStream {
-  private final LongValueStream param;
-  public static final String name = DateParseFunction.name;
-  private final String exprStr;
-  private final ExpressionType funcType;
-  public static final DateFormat formatter = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss.SSS", Locale.ROOT);
-  
-  public LongStreamToDateParseFunction(LongValueStream param) throws SolrException {
-    this.param = param;
-    this.exprStr = AnalyticsValueStream.createExpressionString(name,param);
-    this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,param);
-  }
-
-  @Override
-  public void streamLongs(LongConsumer cons) {
-    param.streamLongs(cons);
-  }
-
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return funcType;
-  }
-}
-class StringToDateParseFunction extends AbstractDateValue {
-  private final StringValue param;
-  public static final String name = DateParseFunction.name;
-  private final String exprStr;
-  private final ExpressionType funcType;
-  public static final DateFormat formatter = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss.SSS", Locale.ROOT);
-  
-  public StringToDateParseFunction(StringValue param) throws SolrException {
-    this.param = param;
-    this.exprStr = AnalyticsValueStream.createExpressionString(name,param);
-    this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,param);
-  }
-
-  private boolean exists = false;
-  @Override
-  public long getLong() {
-    long value = 0;
-    try {
-      value = formatter.parse(param.toString()).getTime();
-      exists = param.exists();
-    } catch (ParseException e) {
-      exists = false;
+    public LongToDateParseFunction(LongValue param) throws SolrException {
+      this.param = param;
+      this.exprStr = AnalyticsValueStream.createExpressionString(name,param);
+      this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,param);
     }
-    return value;
-  }
-  @Override
-  public boolean exists() {
-    return exists;
+
+    @Override
+    public long getLong() {
+      return param.getLong();
+    }
+    @Override
+    public boolean exists() {
+      return param.exists();
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return funcType;
+    }
   }
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return funcType;
-  }
-}
-class StringStreamToDateParseFunction extends AbstractDateValueStream {
-  private final StringValueStream param;
-  public static final String name = DateParseFunction.name;
-  private final String exprStr;
-  private final ExpressionType funcType;
-  public static final DateFormat formatter = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss.SSS", Locale.ROOT);
-  
-  public StringStreamToDateParseFunction(StringValueStream param) throws SolrException {
-    this.param = param;
-    this.exprStr = AnalyticsValueStream.createExpressionString(name,param);
-    this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,param);
+  static class LongStreamToDateParseFunction extends AbstractDateValueStream {
+    private final LongValueStream param;
+    public static final String name = DateParseFunction.name;
+    private final String exprStr;
+    private final ExpressionType funcType;
+
+    public LongStreamToDateParseFunction(LongValueStream param) throws SolrException {
+      this.param = param;
+      this.exprStr = AnalyticsValueStream.createExpressionString(name,param);
+      this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,param);
+    }
+
+    @Override
+    public void streamLongs(LongConsumer cons) {
+      param.streamLongs(cons);
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return funcType;
+    }
   }
 
-  @Override
-  public void streamLongs(LongConsumer cons) {
-    param.streamStrings(value -> {
+  static class StringToDateParseFunction extends AbstractDateValue {
+    private final StringValue param;
+    public static final String name = DateParseFunction.name;
+    private final String exprStr;
+    private final ExpressionType funcType;
+
+    public StringToDateParseFunction(StringValue param) throws SolrException {
+      this.param = param;
+      this.exprStr = AnalyticsValueStream.createExpressionString(name,param);
+      this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,param);
+    }
+
+    private boolean exists = false;
+    @Override
+    public long getLong() {
+      long value = 0;
       try {
-        cons.accept(formatter.parse(value).getTime());
-      } catch (ParseException e) {
+        String paramStr = param.getString();
+        exists = param.exists();
+        if (exists) {
+          value = Instant.parse(paramStr).toEpochMilli();
+        }
+      } catch (DateTimeParseException e) {
+        exists = false;
       }
-    });
+      return value;
+    }
+    @Override
+    public boolean exists() {
+      return exists;
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return funcType;
+    }
   }
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return funcType;
+  static class StringStreamToDateParseFunction extends AbstractDateValueStream {
+    private final StringValueStream param;
+    public static final String name = DateParseFunction.name;
+    private final String exprStr;
+    private final ExpressionType funcType;
+
+    public StringStreamToDateParseFunction(StringValueStream param) throws SolrException {
+      this.param = param;
+      this.exprStr = AnalyticsValueStream.createExpressionString(name,param);
+      this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,param);
+    }
+
+    @Override
+    public void streamLongs(LongConsumer cons) {
+      param.streamStrings(value -> {
+        try {
+          cons.accept(Instant.parse(value).toEpochMilli());
+        } catch (DateTimeParseException e) {}
+      });
+    }
+
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return funcType;
+    }
   }
 }
+

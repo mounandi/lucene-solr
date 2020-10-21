@@ -41,7 +41,7 @@ import org.apache.solr.analytics.value.FloatValue.AbstractFloatValue;
 import org.apache.solr.analytics.value.IntValue.AbstractIntValue;
 import org.apache.solr.analytics.value.LongValue.AbstractLongValue;
 import org.apache.solr.analytics.value.StringValue.AbstractStringValue;
-import org.apache.solr.analytics.value.constant.ConstantIntValue;
+import org.apache.solr.analytics.value.constant.ConstantValue;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 
@@ -56,7 +56,7 @@ public class OrdinalFunction {
     }
     AnalyticsValueStream percValue = params[0];
     int ord = 0;
-    if (params[0] instanceof ConstantIntValue) {
+    if (params[0] instanceof IntValue && params[0] instanceof ConstantValue) {
       ord = ((IntValue)percValue).getInt();
       if (ord == 0) {
         throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires the ordinal to be >= 1 or <= -1, 0 is not accepted.");
@@ -77,310 +77,291 @@ public class OrdinalFunction {
       return new DoubleOrdinalFunction((DoubleValueStream)param, ord);
     } else if (param instanceof StringValueStream) {
       return new StringOrdinalFunction((StringValueStream)param, ord);
-    } 
+    }
     throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires a comparable parameter.");
   });
-  
-  protected static String createOrdinalExpressionString(AnalyticsValueStream param, double perc) {
+
+  protected static String createOrdinalExpressionString(AnalyticsValueStream param, double ord) {
     return String.format(Locale.ROOT, "%s(%s,%s)",
                          name,
-                         (int)(perc*100),
+                         ord,
                          param.getExpressionStr());
   }
-}
-class IntOrdinalFunction extends AbstractIntValue implements ReductionFunction {
-  private SortedIntListCollector collector;
-  private int ordinal;
-  public static final String name = OrdinalFunction.name;
-  private final String exprStr;
-  
-  public IntOrdinalFunction(IntValueStream param, int ordinal) {
-    this.collector = new SortedIntListCollector(param);
-    this.ordinal = ordinal;
-    this.exprStr = OrdinalFunction.createOrdinalExpressionString(param, ordinal);
-  }
 
-  @Override
-  public int getInt() {
-    int size = collector.size();
-    if (ordinal > 0) {
-      return ordinal <= size ? collector.get(ordinal - 1) : 0;
-    } else {
-      return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+  static class IntOrdinalFunction extends AbstractIntValue implements ReductionFunction {
+    private SortedIntListCollector collector;
+    private int ordinal;
+    public static final String name = OrdinalFunction.name;
+    private final String exprStr;
+
+    public IntOrdinalFunction(IntValueStream param, int ordinal) {
+      this.collector = new SortedIntListCollector(param);
+      this.ordinal = ordinal;
+      this.exprStr = createOrdinalExpressionString(param, ordinal);
     }
-    
-  }
-  @Override
-  public boolean exists() {
-    return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
-  }
 
-  @Override
-  public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
-    collector = (SortedIntListCollector)sync.apply(collector);
-    if (ordinal > 0) {
+    @Override
+    public int getInt() {
+      int size = collector.size();
+      if (ordinal > 0) {
+        return ordinal <= size ? collector.get(ordinal - 1) : 0;
+      } else {
+        return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+      }
+    }
+    @Override
+    public boolean exists() {
+      return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
+    }
+
+    @Override
+    public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
+      collector = (SortedIntListCollector)sync.apply(collector);
       collector.calcOrdinal(ordinal);
-    } else {
-      collector.calcReverseOrdinal(ordinal*-1);
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return ExpressionType.REDUCTION;
     }
   }
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return ExpressionType.REDUCTION;
-  }
-}
-class LongOrdinalFunction extends AbstractLongValue implements ReductionFunction {
-  private SortedLongListCollector collector;
-  private int ordinal;
-  public static final String name = OrdinalFunction.name;
-  private final String exprStr;
-  
-  public LongOrdinalFunction(LongValueStream param, int ordinal) {
-    this.collector = new SortedLongListCollector(param);
-    this.ordinal = ordinal;
-    this.exprStr = OrdinalFunction.createOrdinalExpressionString(param, ordinal);
-  }
+  static class LongOrdinalFunction extends AbstractLongValue implements ReductionFunction {
+    private SortedLongListCollector collector;
+    private int ordinal;
+    public static final String name = OrdinalFunction.name;
+    private final String exprStr;
 
-  @Override
-  public long getLong() {
-    int size = collector.size();
-    if (ordinal > 0) {
-      return ordinal <= size ? collector.get(ordinal - 1) : 0;
-    } else {
-      return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+    public LongOrdinalFunction(LongValueStream param, int ordinal) {
+      this.collector = new SortedLongListCollector(param);
+      this.ordinal = ordinal;
+      this.exprStr = createOrdinalExpressionString(param, ordinal);
     }
-    
-  }
-  @Override
-  public boolean exists() {
-    return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
-  }
 
-  @Override
-  public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
-    collector = (SortedLongListCollector)sync.apply(collector);
-    if (ordinal > 0) {
+    @Override
+    public long getLong() {
+      int size = collector.size();
+      if (ordinal > 0) {
+        return ordinal <= size ? collector.get(ordinal - 1) : 0;
+      } else {
+        return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+      }
+    }
+    @Override
+    public boolean exists() {
+      return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
+    }
+
+    @Override
+    public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
+      collector = (SortedLongListCollector)sync.apply(collector);
       collector.calcOrdinal(ordinal);
-    } else {
-      collector.calcReverseOrdinal(ordinal*-1);
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return ExpressionType.REDUCTION;
     }
   }
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return ExpressionType.REDUCTION;
-  }
-}
-class FloatOrdinalFunction extends AbstractFloatValue implements ReductionFunction {
-  private SortedFloatListCollector collector;
-  private int ordinal;
-  public static final String name = OrdinalFunction.name;
-  private final String exprStr;
-  
-  public FloatOrdinalFunction(FloatValueStream param, int ordinal) {
-    this.collector = new SortedFloatListCollector(param);
-    this.ordinal = ordinal;
-    this.exprStr = OrdinalFunction.createOrdinalExpressionString(param, ordinal);
-  }
+  static class FloatOrdinalFunction extends AbstractFloatValue implements ReductionFunction {
+    private SortedFloatListCollector collector;
+    private int ordinal;
+    public static final String name = OrdinalFunction.name;
+    private final String exprStr;
 
-  @Override
-  public float getFloat() {
-    int size = collector.size();
-    if (ordinal > 0) {
-      return ordinal <= size ? collector.get(ordinal - 1) : 0;
-    } else {
-      return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+    public FloatOrdinalFunction(FloatValueStream param, int ordinal) {
+      this.collector = new SortedFloatListCollector(param);
+      this.ordinal = ordinal;
+      this.exprStr = createOrdinalExpressionString(param, ordinal);
     }
-    
-  }
-  @Override
-  public boolean exists() {
-    return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
-  }
 
-  @Override
-  public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
-    collector = (SortedFloatListCollector)sync.apply(collector);
-    if (ordinal > 0) {
+    @Override
+    public float getFloat() {
+      int size = collector.size();
+      if (ordinal > 0) {
+        return ordinal <= size ? collector.get(ordinal - 1) : 0;
+      } else {
+        return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+      }
+    }
+    @Override
+    public boolean exists() {
+      return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
+    }
+
+    @Override
+    public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
+      collector = (SortedFloatListCollector)sync.apply(collector);
       collector.calcOrdinal(ordinal);
-    } else {
-      collector.calcReverseOrdinal(ordinal*-1);
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return ExpressionType.REDUCTION;
     }
   }
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return ExpressionType.REDUCTION;
-  }
-}
-class DoubleOrdinalFunction extends AbstractDoubleValue implements ReductionFunction {
-  private SortedDoubleListCollector collector;
-  private int ordinal;
-  public static final String name = OrdinalFunction.name;
-  private final String exprStr;
-  
-  public DoubleOrdinalFunction(DoubleValueStream param, int ordinal) {
-    this.collector = new SortedDoubleListCollector(param);
-    this.ordinal = ordinal;
-    this.exprStr = OrdinalFunction.createOrdinalExpressionString(param, ordinal);
-  }
+  static class DoubleOrdinalFunction extends AbstractDoubleValue implements ReductionFunction {
+    private SortedDoubleListCollector collector;
+    private int ordinal;
+    public static final String name = OrdinalFunction.name;
+    private final String exprStr;
 
-  @Override
-  public double getDouble() {
-    int size = collector.size();
-    if (ordinal > 0) {
-      return ordinal <= size ? collector.get(ordinal - 1) : 0;
-    } else {
-      return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+    public DoubleOrdinalFunction(DoubleValueStream param, int ordinal) {
+      this.collector = new SortedDoubleListCollector(param);
+      this.ordinal = ordinal;
+      this.exprStr = createOrdinalExpressionString(param, ordinal);
     }
-    
-  }
-  @Override
-  public boolean exists() {
-    return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
-  }
 
-  @Override
-  public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
-    collector = (SortedDoubleListCollector)sync.apply(collector);
-    if (ordinal > 0) {
+    @Override
+    public double getDouble() {
+      int size = collector.size();
+      if (ordinal > 0) {
+        return ordinal <= size ? collector.get(ordinal - 1) : 0;
+      } else {
+        return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+      }
+    }
+    @Override
+    public boolean exists() {
+      return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
+    }
+
+    @Override
+    public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
+      collector = (SortedDoubleListCollector)sync.apply(collector);
       collector.calcOrdinal(ordinal);
-    } else {
-      collector.calcReverseOrdinal(ordinal*-1);
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return ExpressionType.REDUCTION;
     }
   }
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return ExpressionType.REDUCTION;
-  }
-}
-class DateOrdinalFunction extends AbstractDateValue implements ReductionFunction {
-  private SortedLongListCollector collector;
-  private int ordinal;
-  public static final String name = OrdinalFunction.name;
-  private final String exprStr;
-  
-  public DateOrdinalFunction(LongValueStream param, int ordinal) {
-    this.collector = new SortedLongListCollector(param);
-    this.ordinal = ordinal;
-    this.exprStr = OrdinalFunction.createOrdinalExpressionString(param, ordinal);
-  }
+  static class DateOrdinalFunction extends AbstractDateValue implements ReductionFunction {
+    private SortedLongListCollector collector;
+    private int ordinal;
+    public static final String name = OrdinalFunction.name;
+    private final String exprStr;
 
-  @Override
-  public long getLong() {
-    int size = collector.size();
-    if (ordinal > 0) {
-      return ordinal <= size ? collector.get(ordinal - 1) : 0;
-    } else {
-      return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+    public DateOrdinalFunction(LongValueStream param, int ordinal) {
+      this.collector = new SortedLongListCollector(param);
+      this.ordinal = ordinal;
+      this.exprStr = createOrdinalExpressionString(param, ordinal);
     }
-    
-  }
-  @Override
-  public boolean exists() {
-    return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
-  }
 
-  @Override
-  public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
-    collector = (SortedLongListCollector)sync.apply(collector);
-    collector.calcOrdinal(ordinal);
-  }
-
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return ExpressionType.REDUCTION;
-  }
-}
-class StringOrdinalFunction extends AbstractStringValue implements ReductionFunction {
-  private SortedStringListCollector collector;
-  private int ordinal;
-  public static final String name = OrdinalFunction.name;
-  private final String exprStr;
-  
-  public StringOrdinalFunction(StringValueStream param, int ordinal) {
-    this.collector = new SortedStringListCollector(param);
-    this.ordinal = ordinal;
-    this.exprStr = OrdinalFunction.createOrdinalExpressionString(param, ordinal);
-  }
-
-  @Override
-  public String getString() {
-    int size = collector.size();
-    if (ordinal > 0) {
-      return ordinal <= size ? collector.get(ordinal - 1) : null;
-    } else {
-      return (ordinal * -1) <= size ? collector.get(size + ordinal) : null;
+    @Override
+    public long getLong() {
+      int size = collector.size();
+      if (ordinal > 0) {
+        return ordinal <= size ? collector.get(ordinal - 1) : 0;
+      } else {
+        return (ordinal * -1) <= size ? collector.get(size + ordinal) : 0;
+      }
     }
-    
-  }
-  @Override
-  public boolean exists() {
-    return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
-  }
+    @Override
+    public boolean exists() {
+      return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
+    }
 
-  @Override
-  public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
-    collector = (SortedStringListCollector)sync.apply(collector);
-    if (ordinal > 0) {
+    @Override
+    public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
+      collector = (SortedLongListCollector)sync.apply(collector);
       collector.calcOrdinal(ordinal);
-    } else {
-      collector.calcReverseOrdinal(ordinal*-1);
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return ExpressionType.REDUCTION;
     }
   }
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return ExpressionType.REDUCTION;
+  static class StringOrdinalFunction extends AbstractStringValue implements ReductionFunction {
+    private SortedStringListCollector collector;
+    private int ordinal;
+    public static final String name = OrdinalFunction.name;
+    private final String exprStr;
+
+    public StringOrdinalFunction(StringValueStream param, int ordinal) {
+      this.collector = new SortedStringListCollector(param);
+      this.ordinal = ordinal;
+      this.exprStr = createOrdinalExpressionString(param, ordinal);
+    }
+
+    @Override
+    public String getString() {
+      int size = collector.size();
+      if (ordinal > 0) {
+        return ordinal <= size ? collector.get(ordinal - 1) : null;
+      } else {
+        return (ordinal * -1) <= size ? collector.get(size + ordinal) : null;
+      }
+    }
+    @Override
+    public boolean exists() {
+      return (ordinal > 0 ? ordinal : (ordinal * -1)) <= collector.size();
+    }
+
+    @Override
+    public void synchronizeDataCollectors(UnaryOperator<ReductionDataCollector<?>> sync) {
+      collector = (SortedStringListCollector)sync.apply(collector);
+      collector.calcOrdinal(ordinal);
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return ExpressionType.REDUCTION;
+    }
   }
 }
+

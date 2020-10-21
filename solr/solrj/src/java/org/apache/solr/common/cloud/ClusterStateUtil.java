@@ -217,8 +217,8 @@ public class ClusterStateUtil {
   }
   
   public static int getLiveAndActiveReplicaCount(ZkStateReader zkStateReader, String collection) {
-    Collection<Slice> slices;
-    slices = zkStateReader.getClusterState().getCollection(collection).getActiveSlices();
+    Slice[] slices;
+    slices = zkStateReader.getClusterState().getCollection(collection).getActiveSlicesArr();
     int liveAndActive = 0;
     for (Slice slice : slices) {
       for (Replica replica : slice.getReplicas()) {
@@ -253,16 +253,5 @@ public class ClusterStateUtil {
     
     return success;
   }
-  
-  public static boolean isAutoAddReplicas(ZkStateReader reader, String collection) {
-    ClusterState clusterState = reader.getClusterState();
-    if (clusterState != null) {
-      DocCollection docCollection = clusterState.getCollectionOrNull(collection);
-      if (docCollection != null) {
-        return docCollection.getAutoAddReplicas();
-      }
-    }
-    return false;
-  }
-  
+
 }

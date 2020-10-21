@@ -43,6 +43,7 @@ import static org.apache.solr.update.processor.FieldValueMutatingUpdateProcessor
  *   &lt;str name="typeClass"&gt;solr.StrField&lt;/str&gt;
  *   &lt;int name="maxLength"&gt;100&lt;/int&gt;
  * &lt;/processor&gt;</pre>
+ * @since 4.0.0
  */
 public final class TruncateFieldUpdateProcessorFactory 
   extends FieldMutatingUpdateProcessorFactory {
@@ -53,7 +54,7 @@ public final class TruncateFieldUpdateProcessorFactory
 
   @SuppressWarnings("unchecked")
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
 
     Object lengthParam = args.remove(MAX_LENGTH_PARAM);
     if (null == lengthParam) {

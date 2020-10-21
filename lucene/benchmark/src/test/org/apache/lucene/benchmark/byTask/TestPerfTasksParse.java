@@ -34,13 +34,10 @@ import org.apache.lucene.benchmark.byTask.tasks.TaskSequence;
 import org.apache.lucene.benchmark.byTask.utils.Algorithm;
 import org.apache.lucene.benchmark.byTask.utils.Config;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.store.RAMDirectory;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.LuceneTestCase.SuppressSysoutChecks;
 
-import conf.ConfLoader;
-
-/** Test very simply that perf tasks are parses as expected. */
+/** Test very simply that perf tasks are parsed as expected. */
 @SuppressSysoutChecks(bugUrl = "very noisy")
 public class TestPerfTasksParse extends LuceneTestCase {
 
@@ -49,7 +46,7 @@ public class TestPerfTasksParse extends LuceneTestCase {
 
   // properties in effect in all tests here
   static final String propPart = 
-    INDENT + "directory=RAMDirectory" + NEW_LINE +
+    INDENT + "directory=ByteBuffersDirectory" + NEW_LINE +
     INDENT + "print.props=false" + NEW_LINE;
 
   /** Test the repetiotion parsing for parallel tasks */
@@ -114,7 +111,7 @@ public class TestPerfTasksParse extends LuceneTestCase {
   public void testParseExamples() throws Exception {
     // hackedy-hack-hack
     boolean foundFiles = false;
-    final Path examplesDir = Paths.get(ConfLoader.class.getResource(".").toURI());
+    final Path examplesDir = Paths.get(getClass().getResource("/conf").toURI());
     try (DirectoryStream<Path> stream = Files.newDirectoryStream(examplesDir, "*.alg")) {
       for (Path path : stream) {
         Config config = new Config(Files.newBufferedReader(path, StandardCharsets.UTF_8));
@@ -124,7 +121,7 @@ public class TestPerfTasksParse extends LuceneTestCase {
         config.set("content.source", MockContentSource.class.getName());
         String dir = config.get("content.source", null);
         if (dir != null) { Class.forName(dir); }
-        config.set("directory", RAMDirectory.class.getName());
+        config.set("directory", "ByteBuffersDirectory");
         if (config.get("line.file.out", null) != null) {
           config.set("line.file.out", createTempFile("linefile", ".txt").toAbsolutePath().toString());
         }

@@ -148,6 +148,11 @@ public abstract class PointsWriter implements Closeable {
               }
 
               @Override
+              public int getNumIndexDimensions() {
+                throw new UnsupportedOperationException();
+              }
+
+              @Override
               public int getBytesPerDimension() {
                 throw new UnsupportedOperationException();
               }

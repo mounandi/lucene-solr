@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.br;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.br.BrazilianStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link BrazilianStemFilter}.
@@ -33,8 +32,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.BrazilianStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class BrazilianStemFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "brazilianStem";
   
   /** Creates a new BrazilianStemFilterFactory */
   public BrazilianStemFilterFactory(Map<String,String> args) {
@@ -44,6 +49,11 @@ public class BrazilianStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public BrazilianStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public BrazilianStemFilter create(TokenStream in) {
     return new BrazilianStemFilter(in);

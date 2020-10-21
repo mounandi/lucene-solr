@@ -48,10 +48,10 @@ public class TFValueSource extends TermFreqValueSource {
   }
 
   @Override
-  public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
+  public FunctionValues getValues(Map<Object, Object> context, LeafReaderContext readerContext) throws IOException {
     final Terms terms = readerContext.reader().terms(indexedField);
     IndexSearcher searcher = (IndexSearcher)context.get("searcher");
-    final TFIDFSimilarity similarity = IDFValueSource.asTFIDF(searcher.getSimilarity(true), indexedField);
+    final TFIDFSimilarity similarity = IDFValueSource.asTFIDF(searcher.getSimilarity(), indexedField);
     if (similarity == null) {
       throw new UnsupportedOperationException("requires a TFIDFSimilarity (such as ClassicSimilarity)");
     }

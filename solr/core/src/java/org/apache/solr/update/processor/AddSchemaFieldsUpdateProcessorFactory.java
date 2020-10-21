@@ -129,6 +129,7 @@ import static org.apache.solr.core.ConfigSetProperties.IMMUTABLE_CONFIGSET_ARG;
  *     &lt;str name="fieldType"&gt;pdoubles&lt;/str&gt;
  *   &lt;/lst&gt;
  * &lt;/updateProcessor&gt;</pre>
+ * @since 4.4.0
  */
 public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcessorFactory
     implements SolrCoreAware, UpdateRequestProcessorFactory.RunAlways {
@@ -157,7 +158,7 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
   }
 
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
     inclusions = FieldMutatingUpdateProcessorFactory.parseSelectorParams(args);
     validateSelectorParams(inclusions);
     inclusions.fieldNameMatchesSchemaField = false;  // Explicitly (non-configurably) require unknown field names
@@ -191,8 +192,9 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
     }
   }
 
-  private static List<TypeMapping> parseTypeMappings(NamedList args) {
+  private static List<TypeMapping> parseTypeMappings(@SuppressWarnings({"rawtypes"})NamedList args) {
     List<TypeMapping> typeMappings = new ArrayList<>();
+    @SuppressWarnings({"unchecked"})
     List<Object> typeMappingsParams = args.getAll(TYPE_MAPPING_PARAM);
     for (Object typeMappingObj : typeMappingsParams) {
       if (null == typeMappingObj) {
@@ -201,6 +203,7 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
       if ( ! (typeMappingObj instanceof NamedList) ) {
         throw new SolrException(SERVER_ERROR, "'" + TYPE_MAPPING_PARAM + "' init param must be a <lst>");
       }
+      @SuppressWarnings({"rawtypes"})
       NamedList typeMappingNamedList = (NamedList)typeMappingObj;
 
       Object fieldTypeObj = typeMappingNamedList.remove(FIELD_TYPE_PARAM);
@@ -217,6 +220,7 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
       }
       String fieldType = fieldTypeObj.toString();
 
+      @SuppressWarnings({"unchecked"})
       Collection<String> valueClasses
           = typeMappingNamedList.removeConfigArgs(VALUE_CLASS_PARAM);
       if (valueClasses.isEmpty()) {
@@ -244,6 +248,7 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
         if ( ! (copyFieldObj instanceof NamedList)) {
           throw new SolrException(SERVER_ERROR, "'" + COPY_FIELD_PARAM + "' init param must be a <lst>");
         }
+        @SuppressWarnings({"rawtypes"})
         NamedList copyFieldNamedList = (NamedList)copyFieldObj;
         // dest
         Object destObj = copyFieldNamedList.remove(DEST_PARAM);
@@ -423,11 +428,12 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
           builder.append("]");
           builder.append("\nCopyFields to be added to the schema: [");
           isFirst = true;
-          for (String fieldName : newCopyFields.keySet()) {
+          for (Map.Entry<String, Map<Integer, List<CopyFieldDef>>> entry : newCopyFields.entrySet()) {
+            String fieldName = entry.getKey();
             builder.append(isFirst ? "" : ",");
             isFirst = false;
             builder.append("source=").append(fieldName).append("{");
-            for (List<CopyFieldDef> copyFieldDefList : newCopyFields.get(fieldName).values()) {
+            for (List<CopyFieldDef> copyFieldDefList : entry.getValue().values()) {
               for (CopyFieldDef copyFieldDef : copyFieldDefList) {
                 builder.append("{dest=").append(copyFieldDef.getDest(fieldName));
                 builder.append(", maxChars=").append(copyFieldDef.getMaxChars()).append("}");
@@ -436,7 +442,7 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
             builder.append("}");
           }
           builder.append("]");
-          log.debug(builder.toString());
+          log.debug("{}", builder);
         }
         // Need to hold the lock during the entire attempt to ensure that
         // the schema on the request is the latest
@@ -444,10 +450,11 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
           try {
             IndexSchema newSchema = oldSchema.addFields(newFields, Collections.emptyMap(), false);
             // Add copyFields
-            for (String srcField : newCopyFields.keySet()) {
-              for (Integer maxChars : newCopyFields.get(srcField).keySet()) {
-                newSchema = newSchema.addCopyFields(srcField, 
-                  newCopyFields.get(srcField).get(maxChars).stream().map(f -> f.getDest(srcField)).collect(Collectors.toList()), 
+            for (Map.Entry<String, Map<Integer, List<CopyFieldDef>>> entry : newCopyFields.entrySet()) {
+              String srcField = entry.getKey();
+              for (Integer maxChars : entry.getValue().keySet()) {
+                newSchema = newSchema.addCopyFields(srcField,
+                    entry.getValue().get(maxChars).stream().map(f -> f.getDest(srcField)).collect(Collectors.toList()),
                   maxChars);
               }
             }
@@ -480,13 +487,18 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
     private void getUnknownFields
     (FieldNameSelector selector, SolrInputDocument doc, Map<String,List<SolrInputField>> unknownFields) {
       for (final String fieldName : doc.getFieldNames()) {
-        if (selector.shouldMutate(fieldName)) { // returns false if the field already exists in the current schema
-          List<SolrInputField> solrInputFields = unknownFields.get(fieldName);
-          if (null == solrInputFields) {
-            solrInputFields = new ArrayList<>();
-            unknownFields.put(fieldName, solrInputFields);
+        //We do a assert and a null check because even after SOLR-12710 is addressed
+        //older SolrJ versions can send null values causing an NPE
+        assert fieldName != null;
+        if (fieldName != null) {
+          if (selector.shouldMutate(fieldName)) { // returns false if the field already exists in the current schema
+            List<SolrInputField> solrInputFields = unknownFields.get(fieldName);
+            if (null == solrInputFields) {
+              solrInputFields = new ArrayList<>();
+              unknownFields.put(fieldName, solrInputFields);
+            }
+            solrInputFields.add(doc.getField(fieldName));
           }
-          solrInputFields.add(doc.getField(fieldName));
         }
       }
       List<SolrInputDocument> childDocs = doc.getChildDocuments();
@@ -505,15 +517,20 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
     private TypeMapping mapValueClassesToFieldType(List<SolrInputField> fields) {
       NEXT_TYPE_MAPPING: for (TypeMapping typeMapping : typeMappings) {
         for (SolrInputField field : fields) {
-          NEXT_FIELD_VALUE: for (Object fieldValue : field.getValues()) {
-            for (Class<?> valueClass : typeMapping.valueClasses) {
-              if (valueClass.isInstance(fieldValue)) {
-                continue NEXT_FIELD_VALUE;
+          //We do a assert and a null check because even after SOLR-12710 is addressed
+          //older SolrJ versions can send null values causing an NPE
+          assert field.getValues() != null;
+          if (field.getValues() != null) {
+            NEXT_FIELD_VALUE: for (Object fieldValue : field.getValues()) {
+              for (Class<?> valueClass : typeMapping.valueClasses) {
+                if (valueClass.isInstance(fieldValue)) {
+                  continue NEXT_FIELD_VALUE;
+                }
               }
+              // This fieldValue is not an instance of any of the mapped valueClass-s,
+              // so mapping fails - go try the next type mapping.
+              continue NEXT_TYPE_MAPPING;
             }
-            // This fieldValue is not an instance of any of the mapped valueClass-s,
-            // so mapping fails - go try the next type mapping.
-            continue NEXT_TYPE_MAPPING;
           }
         }
         // Success! Each of this field's values is an instance of a mapped valueClass
@@ -543,6 +560,7 @@ public class AddSchemaFieldsUpdateProcessorFactory extends UpdateRequestProcesso
     }
 
     private boolean isImmutableConfigSet(SolrCore core) {
+      @SuppressWarnings({"rawtypes"})
       NamedList args = core.getConfigSetProperties();
       Object immutable = args != null ? args.get(IMMUTABLE_CONFIGSET_ARG) : null;
       return immutable != null ? Boolean.parseBoolean(immutable.toString()) : false;

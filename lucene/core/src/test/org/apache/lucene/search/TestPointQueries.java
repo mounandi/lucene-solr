@@ -38,8 +38,8 @@ import org.apache.lucene.codecs.FilterCodec;
 import org.apache.lucene.codecs.PointsFormat;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.codecs.PointsWriter;
-import org.apache.lucene.codecs.lucene60.Lucene60PointsReader;
-import org.apache.lucene.codecs.lucene60.Lucene60PointsWriter;
+import org.apache.lucene.codecs.lucene86.Lucene86PointsReader;
+import org.apache.lucene.codecs.lucene86.Lucene86PointsWriter;
 import org.apache.lucene.document.BinaryPoint;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DoublePoint;
@@ -67,11 +67,11 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.NumericUtils;
-import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.TestUtil;
-import org.apache.lucene.util.bkd.BKDWriter;
+import org.apache.lucene.util.bkd.BKDConfig;
 import org.junit.BeforeClass;
 
+@LuceneTestCase.SuppressCodecs("SimpleText")
 public class TestPointQueries extends LuceneTestCase {
 
   // Controls what range of values we randomly generate, so we sometimes test narrow ranges:
@@ -332,7 +332,7 @@ public class TestPointQueries extends LuceneTestCase {
   }
 
   public void testAllEqual() throws Exception {
-    int numValues = atLeast(10000);
+    int numValues = atLeast(1000);
     long value = randomValue();
     long[] values = new long[numValues];
 
@@ -350,12 +350,7 @@ public class TestPointQueries extends LuceneTestCase {
   }
 
   public void testRandomLongsMedium() throws Exception {
-    doTestRandomLongs(10000);
-  }
-
-  @Nightly
-  public void testRandomLongsBig() throws Exception {
-    doTestRandomLongs(100000);
+    doTestRandomLongs(1000);
   }
 
   private void doTestRandomLongs(int count) throws Exception {
@@ -431,9 +426,8 @@ public class TestPointQueries extends LuceneTestCase {
     Document doc = null;
     int lastID = -1;
 
-    RandomIndexWriter w = new RandomIndexWriter(random(), dir, iwc);
-    for(int ord=0;ord<values.length;ord++) {
-
+    IndexWriter w = new IndexWriter(dir, iwc);
+    for (int ord = 0; ord < values.length; ord++) {
       int id;
       if (ids == null) {
         id = ord;
@@ -482,7 +476,7 @@ public class TestPointQueries extends LuceneTestCase {
       }
       w.forceMerge(1);
     }
-    final IndexReader r = w.getReader();
+    final IndexReader r = DirectoryReader.open(w);
     w.close();
 
     IndexSearcher s = newSearcher(r, false);
@@ -559,8 +553,8 @@ public class TestPointQueries extends LuceneTestCase {
                   private int docBase;
 
                   @Override
-                  public boolean needsScores() {
-                    return false;
+                  public ScoreMode scoreMode() {
+                    return ScoreMode.COMPLETE_NO_SCORES;
                   }
 
                   @Override
@@ -608,18 +602,13 @@ public class TestPointQueries extends LuceneTestCase {
   }
 
   public void testRandomBinaryMedium() throws Exception {
-    doTestRandomBinary(10000);
-  }
-
-  @Nightly
-  public void testRandomBinaryBig() throws Exception {
-    doTestRandomBinary(100000);
+    doTestRandomBinary(1000);
   }
 
   private void doTestRandomBinary(int count) throws Exception {
     int numValues = TestUtil.nextInt(random(), count, count*2);
     int numBytesPerDim = TestUtil.nextInt(random(), 2, PointValues.MAX_NUM_BYTES);
-    int numDims = TestUtil.nextInt(random(), 1, PointValues.MAX_DIMENSIONS);
+    int numDims = TestUtil.nextInt(random(), 1, PointValues.MAX_INDEX_DIMENSIONS);
 
     int sameValuePct = random().nextInt(100);
     if (VERBOSE) {
@@ -632,7 +621,10 @@ public class TestPointQueries extends LuceneTestCase {
     int[] ids = new int[numValues];
 
     int id = 0;
-    for(int ord=0;ord<numValues;ord++) {
+    if (VERBOSE) {
+      System.out.println("Picking values: " + numValues);
+    }
+    for (int ord = 0; ord < numValues; ord++) {
       if (ord > 0 && random().nextInt(100) < sameValuePct) {
         // Identical to old value
         docValues[ord] = docValues[random().nextInt(ord)];
@@ -675,7 +667,7 @@ public class TestPointQueries extends LuceneTestCase {
       dir = newDirectory();
     }
 
-    RandomIndexWriter w = new RandomIndexWriter(random(), dir, iwc);
+    IndexWriter w = new IndexWriter(dir, iwc);
 
     int numValues = docValues.length;
     if (VERBOSE) {
@@ -695,7 +687,12 @@ public class TestPointQueries extends LuceneTestCase {
     Document doc = null;
     int lastID = -1;
 
-    for(int ord=0;ord<numValues;ord++) {
+    for (int ord = 0; ord < numValues; ord++) {
+      if (ord % 1000 == 0) {
+        if (VERBOSE) {
+          System.out.println("Adding docs: " + ord);
+        }
+      }
       int id = ids[ord];
       if (id != lastID) {
         if (random().nextInt(100) < missingPct) {
@@ -742,7 +739,7 @@ public class TestPointQueries extends LuceneTestCase {
       }
       w.forceMerge(1);
     }
-    final IndexReader r = w.getReader();
+    final IndexReader r = DirectoryReader.open(w);
     w.close();
 
     IndexSearcher s = newSearcher(r, false);
@@ -759,7 +756,7 @@ public class TestPointQueries extends LuceneTestCase {
     final CountDownLatch startingGun = new CountDownLatch(1);
     final AtomicBoolean failed = new AtomicBoolean();
 
-    for(int i=0;i<numThreads;i++) {
+    for (int i = 0; i < numThreads; i++) {
       Thread thread = new Thread() {
           @Override
           public void run() {
@@ -785,7 +782,7 @@ public class TestPointQueries extends LuceneTestCase {
                 upper[dim] = new byte[bytesPerDim];
                 random().nextBytes(upper[dim]);
 
-                if (StringHelper.compare(bytesPerDim, lower[dim], 0, upper[dim], 0) > 0) {
+                if (Arrays.compareUnsigned(lower[dim], 0, bytesPerDim, upper[dim], 0, bytesPerDim) > 0) {
                   byte[] x = lower[dim];
                   lower[dim] = upper[dim];
                   upper[dim] = x;
@@ -814,8 +811,8 @@ public class TestPointQueries extends LuceneTestCase {
                   private int docBase;
 
                   @Override
-                  public boolean needsScores() {
-                    return false;
+                  public ScoreMode scoreMode() {
+                    return ScoreMode.COMPLETE_NO_SCORES;
                   }
 
                   @Override
@@ -834,7 +831,7 @@ public class TestPointQueries extends LuceneTestCase {
               }
 
               BitSet expected = new BitSet();
-              for(int ord=0;ord<numValues;ord++) {
+              for (int ord = 0; ord < numValues; ord++) {
                 int id = ids[ord];
                 if (missing.get(id) == false && deleted.get(id) == false && matches(bytesPerDim, lower, upper, docValues[ord])) {
                   expected.set(id);
@@ -865,10 +862,12 @@ public class TestPointQueries extends LuceneTestCase {
       thread.start();
       threads.add(thread);
     }
+
     startingGun.countDown();
-    for(Thread thread : threads) {
+    for (Thread thread : threads) {
       thread.join();
     }
+
     IOUtils.close(r, dir);
   }
 
@@ -883,12 +882,12 @@ public class TestPointQueries extends LuceneTestCase {
     int numDims = lower.length;
     for(int dim=0;dim<numDims;dim++) {
 
-      if (StringHelper.compare(bytesPerDim, value[dim], 0, lower[dim], 0) < 0) {
+      if (Arrays.compareUnsigned(value[dim], 0, bytesPerDim, lower[dim], 0, bytesPerDim) < 0) {
         // Value is below the lower bound, on this dim
         return false;
       }
 
-      if (StringHelper.compare(bytesPerDim, value[dim], 0, upper[dim], 0) > 0) {
+      if (Arrays.compareUnsigned(value[dim], 0, bytesPerDim, upper[dim], 0, bytesPerDim) > 0) {
         // Value is above the upper bound, on this dim
         return false;
       }
@@ -1095,7 +1094,7 @@ public class TestPointQueries extends LuceneTestCase {
     IllegalArgumentException expected = expectThrows(IllegalArgumentException.class, () -> {
       s.count(BinaryPoint.newRangeQuery("value", point, point));
     });
-    assertEquals("field=\"value\" was indexed with numDims=1 but this query has numDims=2", expected.getMessage());
+    assertEquals("field=\"value\" was indexed with numIndexDimensions=1 but this query has numDims=2", expected.getMessage());
 
     IOUtils.close(r, w, dir);
   }
@@ -1161,25 +1160,25 @@ public class TestPointQueries extends LuceneTestCase {
   }
 
   private static Codec getCodec() {
-    if (Codec.getDefault().getName().equals("Lucene70")) {
+    if (Codec.getDefault().getName().equals("Lucene84")) {
       int maxPointsInLeafNode = TestUtil.nextInt(random(), 16, 2048);
       double maxMBSortInHeap = 5.0 + (3*random().nextDouble());
       if (VERBOSE) {
         System.out.println("TEST: using Lucene60PointsFormat with maxPointsInLeafNode=" + maxPointsInLeafNode + " and maxMBSortInHeap=" + maxMBSortInHeap);
       }
 
-      return new FilterCodec("Lucene70", Codec.getDefault()) {
+      return new FilterCodec("Lucene84", Codec.getDefault()) {
         @Override
         public PointsFormat pointsFormat() {
           return new PointsFormat() {
             @Override
             public PointsWriter fieldsWriter(SegmentWriteState writeState) throws IOException {
-              return new Lucene60PointsWriter(writeState, maxPointsInLeafNode, maxMBSortInHeap);
+              return new Lucene86PointsWriter(writeState, maxPointsInLeafNode, maxMBSortInHeap);
             }
 
             @Override
             public PointsReader fieldsReader(SegmentReadState readState) throws IOException {
-              return new Lucene60PointsReader(readState);
+              return new Lucene86PointsReader(readState);
             }
           };
         }
@@ -1418,7 +1417,7 @@ public class TestPointQueries extends LuceneTestCase {
                 new Comparator<byte[]>() {
                   @Override
                   public int compare(byte[] a, byte[] b) {
-                    return StringHelper.compare(a.length, a, 0, b, 0);
+                    return Arrays.compareUnsigned(a, 0, a.length, b, 0, a.length);
                   }
                 });
 
@@ -1762,6 +1761,65 @@ public class TestPointQueries extends LuceneTestCase {
     dir.close();
   }
 
+  public void testPointRangeQueryManyEqualValues() throws Exception {
+    Directory dir = newDirectory();
+    IndexWriterConfig iwc = newIndexWriterConfig();
+    iwc.setCodec(getCodec());
+    IndexWriter w = new IndexWriter(dir, iwc);
+
+    int cardinality = TestUtil.nextInt(random(), 2, 20);
+
+    int zeroCount = 0;
+    int oneCount = 0;
+    for(int i=0;i<10000;i++) {
+      int x = random().nextInt(cardinality);
+      if (x == 0) {
+        zeroCount++;
+      } else if (x == 1) {
+        oneCount++;
+      }
+      Document doc = new Document();
+      doc.add(new IntPoint("int", x));
+      doc.add(new LongPoint("long", (long) x));
+      doc.add(new FloatPoint("float", (float) x));
+      doc.add(new DoublePoint("double", (double) x));
+      doc.add(new BinaryPoint("bytes", new byte[] {(byte) x}));
+      w.addDocument(doc);
+    }
+
+    IndexReader r = DirectoryReader.open(w);
+    IndexSearcher s = newSearcher(r, false);
+
+    assertEquals(zeroCount, s.count(IntPoint.newRangeQuery("int", 0, 0)));
+    assertEquals(oneCount, s.count(IntPoint.newRangeQuery("int", 1, 1)));
+    assertEquals(zeroCount + oneCount, s.count(IntPoint.newRangeQuery("int", 0, 1)));
+    assertEquals(10000 - zeroCount - oneCount, s.count(IntPoint.newRangeQuery("int", 2, cardinality)));
+
+    assertEquals(zeroCount, s.count(LongPoint.newRangeQuery("long", 0, 0)));
+    assertEquals(oneCount, s.count(LongPoint.newRangeQuery("long", 1, 1)));
+    assertEquals(zeroCount + oneCount, s.count(LongPoint.newRangeQuery("long", 0, 1)));
+    assertEquals(10000 - zeroCount - oneCount, s.count(LongPoint.newRangeQuery("long", 2, cardinality)));
+
+    assertEquals(zeroCount, s.count(FloatPoint.newRangeQuery("float", 0, 0)));
+    assertEquals(oneCount, s.count(FloatPoint.newRangeQuery("float", 1, 1)));
+    assertEquals(zeroCount + oneCount, s.count(FloatPoint.newRangeQuery("float", 0, 1)));
+    assertEquals(10000 - zeroCount - oneCount, s.count(FloatPoint.newRangeQuery("float", 2, cardinality)));
+
+    assertEquals(zeroCount, s.count(DoublePoint.newRangeQuery("double", 0, 0)));
+    assertEquals(oneCount, s.count(DoublePoint.newRangeQuery("double", 1, 1)));
+    assertEquals(zeroCount + oneCount, s.count(DoublePoint.newRangeQuery("double", 0, 1)));
+    assertEquals(10000 - zeroCount - oneCount, s.count(DoublePoint.newRangeQuery("double", 2, cardinality)));
+
+    assertEquals(zeroCount, s.count(BinaryPoint.newRangeQuery("bytes", new byte[] {0}, new byte[] {0})));
+    assertEquals(oneCount, s.count(BinaryPoint.newRangeQuery("bytes", new byte[] {1}, new byte[] {1})));
+    assertEquals(zeroCount + oneCount, s.count(BinaryPoint.newRangeQuery("bytes", new byte[] {0}, new byte[] {1})));
+    assertEquals(10000 - zeroCount - oneCount, s.count(BinaryPoint.newRangeQuery("bytes", new byte[] {2}, new byte[] {(byte) cardinality})));
+
+    w.close();
+    r.close();
+    dir.close();
+  }
+
   public void testPointInSetQueryManyEqualValuesWithBigGap() throws Exception {
     Directory dir = newDirectory();
     IndexWriterConfig iwc = newIndexWriterConfig();
@@ -1903,7 +1961,7 @@ public class TestPointQueries extends LuceneTestCase {
       upperBound[i] = value[i] + random().nextInt(1);
     }
     Query query = IntPoint.newRangeQuery("point", lowerBound, upperBound);
-    Weight weight = searcher.createNormalizedWeight(query, false);
+    Weight weight = searcher.createWeight(query, ScoreMode.COMPLETE_NO_SCORES, 1);
     Scorer scorer = weight.scorer(searcher.getIndexReader().leaves().get(0));
     assertEquals(DocIdSetIterator.all(1).getClass(), scorer.iterator().getClass());
 
@@ -1914,7 +1972,7 @@ public class TestPointQueries extends LuceneTestCase {
     reader = w.getReader();
     searcher = new IndexSearcher(reader);
     searcher.setQueryCache(null);
-    weight = searcher.createNormalizedWeight(query, false);
+    weight = searcher.createWeight(query, ScoreMode.COMPLETE_NO_SCORES, 1);
     scorer = weight.scorer(searcher.getIndexReader().leaves().get(0));
     assertFalse(DocIdSetIterator.all(1).getClass().equals(scorer.iterator().getClass()));
 
@@ -1973,11 +2031,25 @@ public class TestPointQueries extends LuceneTestCase {
     assertFalse(q1.equals(IntPoint.newExactQuery("a", 1)));
     assertFalse(q1.equals(IntPoint.newExactQuery("b", 1000)));
 
+    assertTrue(q1 instanceof PointRangeQuery && q2 instanceof PointRangeQuery);
+    PointRangeQuery pq1 = (PointRangeQuery) q1;
+    PointRangeQuery pq2 = (PointRangeQuery) q2;
+
+    assertTrue(Arrays.equals(pq1.getLowerPoint(), pq2.getLowerPoint()));
+    assertTrue(Arrays.equals(pq1.getUpperPoint(), pq2.getUpperPoint()));
+
     q1 = LongPoint.newExactQuery("a", 1000);
     q2 = LongPoint.newExactQuery("a", 1000);
     assertEquals(q1, q2);
     assertEquals(q1.hashCode(), q2.hashCode());
     assertFalse(q1.equals(LongPoint.newExactQuery("a", 1)));
+
+    assertTrue(q1 instanceof PointRangeQuery && q2 instanceof PointRangeQuery);
+    pq1 = (PointRangeQuery) q1;
+    pq2 = (PointRangeQuery) q2;
+
+    assertTrue(Arrays.equals(pq1.getLowerPoint(), pq2.getLowerPoint()));
+    assertTrue(Arrays.equals(pq1.getUpperPoint(), pq2.getUpperPoint()));
 
     q1 = FloatPoint.newExactQuery("a", 1000);
     q2 = FloatPoint.newExactQuery("a", 1000);
@@ -1985,11 +2057,25 @@ public class TestPointQueries extends LuceneTestCase {
     assertEquals(q1.hashCode(), q2.hashCode());
     assertFalse(q1.equals(FloatPoint.newExactQuery("a", 1)));
 
+    assertTrue(q1 instanceof PointRangeQuery && q2 instanceof PointRangeQuery);
+    pq1 = (PointRangeQuery) q1;
+    pq2 = (PointRangeQuery) q2;
+
+    assertTrue(Arrays.equals(pq1.getLowerPoint(), pq2.getLowerPoint()));
+    assertTrue(Arrays.equals(pq1.getUpperPoint(), pq2.getUpperPoint()));
+
     q1 = DoublePoint.newExactQuery("a", 1000);
     q2 = DoublePoint.newExactQuery("a", 1000);
     assertEquals(q1, q2);
     assertEquals(q1.hashCode(), q2.hashCode());
     assertFalse(q1.equals(DoublePoint.newExactQuery("a", 1)));
+
+    assertTrue(q1 instanceof PointRangeQuery && q2 instanceof PointRangeQuery);
+    pq1 = (PointRangeQuery) q1;
+    pq2 = (PointRangeQuery) q2;
+
+    assertTrue(Arrays.equals(pq1.getLowerPoint(), pq2.getLowerPoint()));
+    assertTrue(Arrays.equals(pq1.getUpperPoint(), pq2.getUpperPoint()));
 
     byte[] ones = new byte[5];
     Arrays.fill(ones, (byte) 0xff);
@@ -2000,6 +2086,13 @@ public class TestPointQueries extends LuceneTestCase {
     byte[] other = ones.clone();
     other[2] = (byte) 5;
     assertFalse(q1.equals(BinaryPoint.newExactQuery("a", other)));
+
+    assertTrue(q1 instanceof PointRangeQuery && q2 instanceof PointRangeQuery);
+    pq1 = (PointRangeQuery) q1;
+    pq2 = (PointRangeQuery) q2;
+
+    assertTrue(Arrays.equals(pq1.getLowerPoint(), pq2.getLowerPoint()));
+    assertTrue(Arrays.equals(pq1.getUpperPoint(), pq2.getUpperPoint()));
   }
 
   public void testPointInSetEquals() {
@@ -2082,11 +2175,12 @@ public class TestPointQueries extends LuceneTestCase {
     assertTrue(Float.compare(Float.MAX_VALUE, FloatPoint.nextDown(Float.POSITIVE_INFINITY)) == 0);
   }
 
+  @Nightly
   public void testInversePointRange() throws IOException {
     Directory dir = newDirectory();
     IndexWriter w = new IndexWriter(dir, newIndexWriterConfig());
     final int numDims = TestUtil.nextInt(random(), 1, 3);
-    final int numDocs = atLeast(10 * BKDWriter.DEFAULT_MAX_POINTS_IN_LEAF_NODE); // we need multiple leaves to enable this optimization
+    final int numDocs = atLeast(10 * BKDConfig.DEFAULT_MAX_POINTS_IN_LEAF_NODE); // we need multiple leaves to enable this optimization
     for (int i = 0; i < numDocs; ++i) {
       Document doc = new Document();
       int[] values = new int[numDims];
@@ -2107,9 +2201,9 @@ public class TestPointQueries extends LuceneTestCase {
     assertEquals(high[0] - low[0] + 1, searcher.count(IntPoint.newRangeQuery("f", low, high)));
     Arrays.fill(high, numDocs - 1);
     assertEquals(high[0] - low[0] + 1, searcher.count(IntPoint.newRangeQuery("f", low, high)));
-    Arrays.fill(low, BKDWriter.DEFAULT_MAX_POINTS_IN_LEAF_NODE + 1);
+    Arrays.fill(low, BKDConfig.DEFAULT_MAX_POINTS_IN_LEAF_NODE + 1);
     assertEquals(high[0] - low[0] + 1, searcher.count(IntPoint.newRangeQuery("f", low, high)));
-    Arrays.fill(high, numDocs - BKDWriter.DEFAULT_MAX_POINTS_IN_LEAF_NODE);
+    Arrays.fill(high, numDocs - BKDConfig.DEFAULT_MAX_POINTS_IN_LEAF_NODE);
     assertEquals(high[0] - low[0] + 1, searcher.count(IntPoint.newRangeQuery("f", low, high)));
 
     r.close();

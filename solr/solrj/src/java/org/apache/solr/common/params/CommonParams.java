@@ -16,9 +16,6 @@
  */
 package org.apache.solr.common.params;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 
@@ -162,9 +159,15 @@ public interface CommonParams {
   boolean SEGMENT_TERMINATE_EARLY_DEFAULT = false;
 
   /**
-   * Timeout value in milliseconds.  If not set, or the value is &gt;= 0, there is no timeout.
+   * Timeout value in milliseconds.  If not set, or the value is &gt; 0, there is no timeout.
    */
   String TIME_ALLOWED = "timeAllowed";
+
+  /**
+   * The number of hits that need to be counted accurately. If more than {@link #MIN_EXACT_COUNT} documents
+   * match a query, then the value in "numFound" may be an estimate to speedup search.
+   */
+  String MIN_EXACT_COUNT = "minExactCount";
   
   /** 'true' if the header should include the handler name */
   String HEADER_ECHO_HANDLER = "echoHandler";
@@ -176,31 +179,32 @@ public interface CommonParams {
   String OMIT_HEADER = "omitHeader";
   String CORES_HANDLER_PATH = "/admin/cores";
   String COLLECTIONS_HANDLER_PATH = "/admin/collections";
-  String HEALTH_CHECK_HANDLER_PATH = "/admin/health";
   String INFO_HANDLER_PATH = "/admin/info";
+  String HEALTH_CHECK_HANDLER_PATH = INFO_HANDLER_PATH + "/health";
   String CONFIGSETS_HANDLER_PATH = "/admin/configs";
   String AUTHZ_PATH = "/admin/authorization";
   String AUTHC_PATH = "/admin/authentication";
   String ZK_PATH = "/admin/zookeeper";
+  String ZK_STATUS_PATH = "/admin/zookeeper/status";
+  String SYSTEM_INFO_PATH = "/admin/info/system";
   String METRICS_PATH = "/admin/metrics";
-  String AUTOSCALING_PATH = "/admin/autoscaling";
-  String AUTOSCALING_DIAGNOSTICS_PATH = "/admin/autoscaling/diagnostics";
+  String METRICS_HISTORY_PATH = "/admin/metrics/history";
 
   String STATUS = "status";
 
   String OK = "OK";
   String FAILURE = "FAILURE";
 
-  Set<String> ADMIN_PATHS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+  Set<String> ADMIN_PATHS = Set.of(
       CORES_HANDLER_PATH,
       COLLECTIONS_HANDLER_PATH,
       HEALTH_CHECK_HANDLER_PATH,
       CONFIGSETS_HANDLER_PATH,
+      SYSTEM_INFO_PATH,
       AUTHC_PATH,
       AUTHZ_PATH,
       METRICS_PATH,
-      AUTOSCALING_PATH,
-      AUTOSCALING_DIAGNOSTICS_PATH)));
+      METRICS_HISTORY_PATH);
   String APISPEC_LOCATION = "apispec/";
   String INTROSPECT = "/_introspect";
 
@@ -225,7 +229,7 @@ public interface CommonParams {
       }
       return null;
     }
-  };
+  }
 
   /** which parameters to log (if not supplied all parameters will be logged) **/
   String LOG_PARAMS_LIST = "logParamsList";
@@ -240,6 +244,9 @@ public interface CommonParams {
   String TRUE = Boolean.TRUE.toString();
   String FALSE = Boolean.FALSE.toString();
 
+  /** document type in {@link CollectionAdminParams#SYSTEM_COLL} collection. **/
+  String TYPE = "type";
+
   /** Used as a local parameter on queries.  cache=false means don't check any query or filter caches.
    * cache=true is the default.
    */
@@ -251,9 +258,20 @@ public interface CommonParams {
   String COST = "cost";
 
   /**
-   * Request ID parameter added to the request when using debug=track
+   * Request ID parameter added to all distributed queries (that do not opt out)
+   *
+   * @see #DISABLE_REQUEST_ID
    */
   String REQUEST_ID = "rid";
+
+  /**
+   * An opt-out flag to prevent the addition of {@link #REQUEST_ID} tracing on distributed queries
+   *
+   * Defaults to 'false' if not specified.
+   *
+   * @see #REQUEST_ID
+   */
+  String DISABLE_REQUEST_ID = "disableRequestId";
 
   /**
    * Request Purpose parameter added to each internal shard request when using debug=track
@@ -262,7 +280,9 @@ public interface CommonParams {
 
   /**
    * When querying a node, prefer local node's cores for distributed queries.
+   * @deprecated Use {@code ShardParams.SHARDS_PREFERENCE}
    */
+  @Deprecated // SOLR-14035
   String PREFER_LOCAL_SHARDS = "preferLocalShards";
 
   String JAVABIN = "javabin";
@@ -274,8 +294,23 @@ public interface CommonParams {
   String NAME = "name";
   String VALUE_LONG = "val";
 
+  String SOLR_REQUEST_CONTEXT_PARAM = "Solr-Request-Context";
+
+  String SOLR_REQUEST_TYPE_PARAM = "Solr-Request-Type";
+
   String VERSION_FIELD="_version_";
 
+  String FAIL_ON_VERSION_CONFLICTS ="failOnVersionConflicts";
+
   String ID = "id";
+  String JSON_MIME = "application/json";
+
+  String JAVABIN_MIME = "application/javabin";
+
+  String FILE = "file";
+  String FILES = "files";
+
+  String CHILDDOC = "_childDocuments_";
+
 }
 

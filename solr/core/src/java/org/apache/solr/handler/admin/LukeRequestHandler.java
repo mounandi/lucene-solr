@@ -18,6 +18,7 @@ package org.apache.solr.handler.admin;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandles;
+import java.nio.file.NoSuchFileException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
@@ -30,23 +31,23 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.util.CharFilterFactory;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.analysis.CharFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.index.MultiFields;
+import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.PostingsEnum;
-import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -54,6 +55,7 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.CharsRefBuilder;
@@ -204,6 +206,7 @@ public class LukeRequestHandler extends RequestHandlerBase
     flags.append( (f != null && f.fieldType().tokenized())                   ? FieldFlag.TOKENIZED.getAbbreviation() : '-' );
     flags.append( (f != null && f.fieldType().stored())                      ? FieldFlag.STORED.getAbbreviation() : '-' );
     flags.append( (f != null && f.fieldType().docValuesType() != DocValuesType.NONE)        ? FieldFlag.DOC_VALUES.getAbbreviation() : "-" );
+    flags.append( (false)                                          ? FieldFlag.UNINVERTIBLE.getAbbreviation() : '-' ); // SchemaField Specific
     flags.append( (false)                                          ? FieldFlag.MULTI_VALUED.getAbbreviation() : '-' ); // SchemaField Specific
     flags.append( (f != null && f.fieldType().storeTermVectors())            ? FieldFlag.TERM_VECTOR_STORED.getAbbreviation() : '-' );
     flags.append( (f != null && f.fieldType().storeTermVectorOffsets())   ? FieldFlag.TERM_VECTOR_OFFSET.getAbbreviation() : '-' );
@@ -243,6 +246,7 @@ public class LukeRequestHandler extends RequestHandlerBase
     flags.append( (t != null && t.isTokenized())         ? FieldFlag.TOKENIZED.getAbbreviation() : '-' );
     flags.append( (f != null && f.stored())              ? FieldFlag.STORED.getAbbreviation() : '-' );
     flags.append( (f != null && f.hasDocValues())        ? FieldFlag.DOC_VALUES.getAbbreviation() : "-" );
+    flags.append( (f != null && f.isUninvertible())      ? FieldFlag.UNINVERTIBLE.getAbbreviation() : "-" );
     flags.append( (f != null && f.multiValued())         ? FieldFlag.MULTI_VALUED.getAbbreviation() : '-' );
     flags.append( (f != null && f.storeTermVector() )    ? FieldFlag.TERM_VECTOR_STORED.getAbbreviation() : '-' );
     flags.append( (f != null && f.storeTermOffsets() )   ? FieldFlag.TERM_VECTOR_OFFSET.getAbbreviation() : '-' );
@@ -387,7 +391,7 @@ public class LukeRequestHandler extends RequestHandlerBase
                 fieldMap.add("index", "(unstored field)");
               }
             } catch (Exception ex) {
-              log.warn("error reading field: " + fieldName);
+              log.warn("error reading field: {}", fieldName);
             }
           }
         }
@@ -581,7 +585,7 @@ public class LukeRequestHandler extends RequestHandlerBase
     IndexCommit indexCommit = reader.getIndexCommit();
     String segmentsFileName = indexCommit.getSegmentsFileName();
     indexInfo.add("segmentsFile", segmentsFileName);
-    indexInfo.add("segmentsFileSizeInBytes", getFileLength(indexCommit.getDirectory(), segmentsFileName));
+    indexInfo.add("segmentsFileSizeInBytes", getSegmentsFileLength(indexCommit));
     Map<String,String> userData = indexCommit.getUserData();
     indexInfo.add("userData", userData);
     String s = userData.get(SolrIndexWriter.COMMIT_TIME_MSEC_KEY);
@@ -605,30 +609,45 @@ public class LukeRequestHandler extends RequestHandlerBase
   }
 
 
-
-  private static long getFileLength(Directory dir, String filename) {
+  /**
+   * <p>A helper method that attempts to determine the file length of the the segments file for the 
+   * specified IndexCommit from it's Directory.
+   * </p>
+   * <p>
+   * If any sort of {@link IOException} occurs, this method will return "-1" and swallow the exception since 
+   * this may be normal if the IndexCommit is no longer "on disk".  The specific type of the Exception will 
+   * affect how severely it is logged: {@link NoSuchFileException} is considered more "acceptible" then other 
+   * types of IOException which may indicate an actual problem with the Directory.
+   */
+  private static long getSegmentsFileLength(IndexCommit commit) {
     try {
-      return dir.fileLength(filename);
-    } catch (IOException e) {
-      // Whatever the error is, only log it and return -1.
-      log.warn("Error getting file length for [{}]", filename, e);
-      return -1;
+      return commit.getDirectory().fileLength(commit.getSegmentsFileName());
+    } catch (NoSuchFileException okException) {
+      log.debug("Unable to determine the (optional) fileSize for the current IndexReader's segments file because it is "
+          + "no longer in the Directory, this can happen if there are new commits since the Reader was opened"
+          , okException);
+    } catch (IOException strangeException) {
+      log.warn("Ignoring IOException wile attempting to determine the (optional) fileSize stat for the current IndexReader's segments file",
+               strangeException);
     }
+    return -1;
   }
 
   /** Returns the sum of RAM bytes used by each segment */
   private static long getIndexHeapUsed(DirectoryReader reader) {
-    long indexHeapRamBytesUsed = 0;
-    for(LeafReaderContext leafReaderContext : reader.leaves()) {
-      LeafReader leafReader = leafReaderContext.reader();
-      if (leafReader instanceof SegmentReader) {
-        indexHeapRamBytesUsed += ((SegmentReader) leafReader).ramBytesUsed();
-      } else {
-        // Not supported for any reader that is not a SegmentReader
-        return -1;
-      }
-    }
-    return indexHeapRamBytesUsed;
+    return reader.leaves().stream()
+        .map(LeafReaderContext::reader)
+        .map(FilterLeafReader::unwrap)
+        .map(leafReader -> {
+          if (leafReader instanceof Accountable) {
+            return ((Accountable) leafReader).ramBytesUsed();
+          } else {
+            return -1L; // unsupported
+          }
+        })
+        .mapToLong(Long::longValue)
+        .reduce(0, (left, right) -> left == -1 || right == -1 ? -1 : left + right);
+    // if any leaves are unsupported (-1), we ultimately return -1.
   }
 
   // Get terribly detailed information about a particular field. This is a very expensive call, use it with caution
@@ -644,7 +663,7 @@ public class LukeRequestHandler extends RequestHandlerBase
 
     final CharsRefBuilder spare = new CharsRefBuilder();
 
-    Terms terms = MultiFields.getTerms(req.getSearcher().getIndexReader(), field);
+    Terms terms = MultiTerms.getTerms(req.getSearcher().getIndexReader(), field);
     if (terms == null) {  // field does not exist
       return;
     }
@@ -731,6 +750,7 @@ public class LukeRequestHandler extends RequestHandlerBase
   /**
    * Private internal class that counts up frequent terms
    */
+  @SuppressWarnings("rawtypes")
   private static class TopTermQueue extends PriorityQueue
   {
     static class TermInfo {

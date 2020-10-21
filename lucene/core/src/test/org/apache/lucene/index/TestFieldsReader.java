@@ -18,6 +18,7 @@ package org.apache.lucene.index;
 
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -44,7 +45,7 @@ public class TestFieldsReader extends LuceneTestCase {
   @BeforeClass
   public static void beforeClass() throws Exception {
     testDoc = new Document();
-    fieldInfos = new FieldInfos.Builder();
+    fieldInfos = new FieldInfos.Builder(new FieldInfos.FieldNumbers(null));
     DocHelper.setupDoc(testDoc);
     for (IndexableField field : testDoc.getFields()) {
       FieldInfo fieldInfo = fieldInfos.getOrAdd(field.name());
@@ -144,10 +145,11 @@ public class TestFieldsReader extends LuceneTestCase {
     }
 
     @Override
-    public void readInternal(byte[] b, int offset, int length) throws IOException {
+    public void readInternal(ByteBuffer b) throws IOException {
       simOutage();
       delegate.seek(getFilePointer());
-      delegate.readBytes(b, offset, length);
+      delegate.readBytes(b.array(), b.position(), b.remaining());
+      b.position(b.limit());
     }
     
     @Override

@@ -25,6 +25,8 @@ import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.lucene.util.SuppressForbidden;
+
 /**
  * Similar to {@link StringBuilder}, but with a more efficient growing strategy.
  * This class uses char array blocks to grow.
@@ -65,6 +67,9 @@ class CharBlockArray implements Appendable, Serializable, CharSequence {
   }
 
   private void addBlock() {
+    if (blockSize * (long) (blocks.size() + 1) > Integer.MAX_VALUE) {
+      throw new IllegalStateException("cannot store more than 2 GB in CharBlockArray");
+    }
     this.current = new Block(this.blockSize);
     this.blocks.add(this.current);
   }
@@ -182,6 +187,7 @@ class CharBlockArray implements Appendable, Serializable, CharSequence {
     return sb.toString();
   }
 
+  @SuppressForbidden(reason = "TODO: don't use java serialization here, inefficient and unnecessary")
   void flush(OutputStream out) throws IOException {
     ObjectOutputStream oos = null;
     try {
@@ -195,6 +201,7 @@ class CharBlockArray implements Appendable, Serializable, CharSequence {
     }
   }
 
+  @SuppressForbidden(reason = "TODO: don't use java serialization here, inefficient and unnecessary")
   public static CharBlockArray open(InputStream in) throws IOException, ClassNotFoundException {
     ObjectInputStream ois = null;
     try {

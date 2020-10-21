@@ -21,10 +21,7 @@ import java.io.Reader;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import org.apache.lucene.analysis.CharFilter;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.CharFilterFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
+import org.apache.lucene.analysis.CharFilterFactory;
 
 /**
  * Factory for {@link PatternReplaceCharFilter}. 
@@ -38,8 +35,13 @@ import org.apache.lucene.analysis.util.MultiTermAwareComponent;
  * &lt;/fieldType&gt;</pre>
  * 
  * @since Solr 3.1
+ * @lucene.spi {@value #NAME}
  */
-public class PatternReplaceCharFilterFactory extends CharFilterFactory implements MultiTermAwareComponent {
+public class PatternReplaceCharFilterFactory extends CharFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "patternReplace";
+
   private final Pattern pattern;
   private final String replacement;
 
@@ -53,13 +55,18 @@ public class PatternReplaceCharFilterFactory extends CharFilterFactory implement
     }
   }
 
+  /** Default ctor for compatibility with SPI */
+  public PatternReplaceCharFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
-  public CharFilter create(Reader input) {
+  public Reader create(Reader input) {
     return new PatternReplaceCharFilter(pattern, replacement, input);
   }
 
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public Reader normalize(Reader input) {
+    return create(input);
   }
 }

@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.de;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.de.GermanLightStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link GermanLightStemFilter}.
@@ -33,8 +32,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.GermanLightStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
 public class GermanLightStemFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "germanLightStem";
   
   /** Creates a new GermanLightStemFilterFactory */
   public GermanLightStemFilterFactory(Map<String,String> args) {
@@ -44,6 +48,11 @@ public class GermanLightStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public GermanLightStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new GermanLightStemFilter(input);

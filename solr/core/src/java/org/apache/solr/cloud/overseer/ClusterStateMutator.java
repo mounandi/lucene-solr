@@ -24,7 +24,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import org.apache.solr.cloud.OverseerCollectionMessageHandler;
+import org.apache.solr.client.solrj.cloud.DistribStateManager;
+import org.apache.solr.client.solrj.cloud.SolrCloudManager;
+import org.apache.solr.cloud.api.collections.OverseerCollectionMessageHandler;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.cloud.ClusterState;
 import org.apache.solr.common.cloud.DocCollection;
@@ -42,15 +44,18 @@ import static org.apache.solr.common.params.CommonParams.NAME;
 public class ClusterStateMutator {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-  protected final ZkStateReader zkStateReader;
+  protected final SolrCloudManager dataProvider;
+  protected final DistribStateManager stateManager;
 
-  public ClusterStateMutator(ZkStateReader zkStateReader) {
-    this.zkStateReader = zkStateReader;
+  public ClusterStateMutator(SolrCloudManager dataProvider) {
+    this.dataProvider = dataProvider;
+    this.stateManager = dataProvider.getDistribStateManager();
   }
 
+  @SuppressWarnings({"unchecked"})
   public ZkWriteCommand createCollection(ClusterState clusterState, ZkNodeProps message) {
     String cName = message.getStr(NAME);
-    log.debug("building a new cName: " + cName);
+    log.debug("building a new cName: {}", cName);
     if (clusterState.hasCollection(cName)) {
       log.warn("Collection {} already exists. exit", cName);
       return ZkStateWriter.NO_OP;
@@ -64,7 +69,7 @@ public class ClusterStateMutator {
 
     Map<String, Slice> slices;
     if (messageShardsObj instanceof Map) { // we are being explicitly told the slice data (e.g. coll restore)
-      slices = Slice.loadAllFromMap((Map<String, Object>)messageShardsObj);
+      slices = Slice.loadAllFromMap(cName, (Map<String, Object>)messageShardsObj);
     } else {
       List<String> shardNames = new ArrayList<>();
 
@@ -85,16 +90,16 @@ public class ClusterStateMutator {
         Map<String, Object> sliceProps = new LinkedHashMap<>(1);
         sliceProps.put(Slice.RANGE, ranges == null ? null : ranges.get(i));
 
-        slices.put(sliceName, new Slice(sliceName, null, sliceProps));
+        slices.put(sliceName, new Slice(sliceName, null, sliceProps,cName));
       }
     }
 
     Map<String, Object> collectionProps = new HashMap<>();
 
-    for (Map.Entry<String, Object> e : OverseerCollectionMessageHandler.COLL_PROPS.entrySet()) {
+    for (Map.Entry<String, Object> e : OverseerCollectionMessageHandler.COLLECTION_PROPS_AND_DEFAULTS.entrySet()) {
       Object val = message.get(e.getKey());
       if (val == null) {
-        val = OverseerCollectionMessageHandler.COLL_PROPS.get(e.getKey());
+        val = OverseerCollectionMessageHandler.COLLECTION_PROPS_AND_DEFAULTS.get(e.getKey());
       }
       if (val != null) collectionProps.put(e.getKey(), val);
     }
@@ -104,12 +109,7 @@ public class ClusterStateMutator {
       collectionProps.put("autoCreated", "true");
     }
 
-    //TODO default to 2; but need to debug why BasicDistributedZk2Test fails early on
-    String znode = message.getInt(DocCollection.STATE_FORMAT, 1) == 1 ? null
-        : ZkStateReader.getCollectionPath(cName);
-
-    DocCollection newCollection = new DocCollection(cName,
-        slices, collectionProps, router, -1, znode);
+    DocCollection newCollection = new DocCollection(cName, slices, collectionProps, router, -1);
 
     return new ZkWriteCommand(cName, newCollection);
   }
@@ -184,17 +184,6 @@ public class ClusterStateMutator {
       }
     }
     return null;
-  }
-
-  public ZkWriteCommand migrateStateFormat(ClusterState clusterState, ZkNodeProps message) {
-    final String collection = message.getStr(ZkStateReader.COLLECTION_PROP);
-    if (!CollectionMutator.checkKeyExistence(message, ZkStateReader.COLLECTION_PROP)) return ZkStateWriter.NO_OP;
-    DocCollection coll = clusterState.getCollectionOrNull(collection);
-    if (coll == null || coll.getStateFormat() == 2) return ZkStateWriter.NO_OP;
-
-    return new ZkWriteCommand(coll.getName(),
-        new DocCollection(coll.getName(), coll.getSlicesMap(), coll.getProperties(), coll.getRouter(), 0,
-            ZkStateReader.getCollectionPath(collection)));
   }
 }
 

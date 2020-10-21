@@ -21,7 +21,7 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /**
  * Factory for {@link PatternCaptureGroupTokenFilter}. 
@@ -34,8 +34,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  * &lt;/fieldType&gt;</pre>
  *
  * @see PatternCaptureGroupTokenFilter
+ * @since 4.4.0
+ * @lucene.spi {@value #NAME}
  */
 public class PatternCaptureGroupFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "patternCaptureGroup";
+
   private Pattern pattern;
   private boolean preserveOriginal = true;
   
@@ -44,6 +50,12 @@ public class PatternCaptureGroupFilterFactory extends TokenFilterFactory {
     pattern = getPattern(args, "pattern");
     preserveOriginal = args.containsKey("preserve_original") ? Boolean.parseBoolean(args.get("preserve_original")) : true;
   }
+  
+  /** Default ctor for compatibility with SPI */
+  public PatternCaptureGroupFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public PatternCaptureGroupTokenFilter create(TokenStream input) {
     return new PatternCaptureGroupTokenFilter(input, preserveOriginal, pattern);

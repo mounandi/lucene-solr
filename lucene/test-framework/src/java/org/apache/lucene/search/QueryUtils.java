@@ -20,9 +20,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Random;
 
-import junit.framework.Assert;
 import org.apache.lucene.index.BinaryDocValues;
-import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.IndexReader;
@@ -37,13 +35,15 @@ import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.index.StoredFieldVisitor;
 import org.apache.lucene.index.Terms;
+import org.apache.lucene.index.VectorValues;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.Version;
+import org.junit.Assert;
 
-import static junit.framework.Assert.assertEquals;
-import static junit.framework.Assert.assertFalse;
-import static junit.framework.Assert.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Utility class for sanity-checking queries.
@@ -66,6 +66,9 @@ public class QueryUtils {
       public String toString(String field) {
         return "My Whacky Query";
       }
+
+      @Override
+      public void visit(QueryVisitor visitor) { }
 
       @Override
       public boolean equals(Object o) {
@@ -108,6 +111,7 @@ public class QueryUtils {
    * @see #checkSkipTo
    * @see #checkExplanations
    * @see #checkEqual
+   * @see CheckHits#checkMatches(Query, IndexSearcher)
    */
   public static void check(Random random, Query q1, IndexSearcher s) {
     check(random, q1, s, true);
@@ -125,6 +129,7 @@ public class QueryUtils {
           check(random, q1, wrapUnderlyingReader(random, s, +1), false);
         }
         checkExplanations(q1,s);
+        CheckHits.checkMatches(q1, s);
       }
     } catch (IOException e) {
       throw new RuntimeException(e);
@@ -161,7 +166,7 @@ public class QueryUtils {
     };
 
     IndexSearcher out = LuceneTestCase.newSearcher(new MultiReader(readers));
-    out.setSimilarity(s.getSimilarity(true));
+    out.setSimilarity(s.getSimilarity());
     return out;
   }
 
@@ -204,8 +209,13 @@ public class QueryUtils {
       }
 
       @Override
+      public VectorValues getVectorValues(String field) throws IOException {
+        return null;
+      }
+
+      @Override
       public FieldInfos getFieldInfos() {
-        return new FieldInfos(new FieldInfo[0]);
+        return FieldInfos.EMPTY;
       }
 
       final Bits liveDocs = new Bits.MatchNoBits(maxDoc);
@@ -293,13 +303,13 @@ public class QueryUtils {
         final LeafReader lastReader[] = {null};
 
         s.search(q, new SimpleCollector() {
-          private Scorer sc;
+          private Scorable sc;
           private Scorer scorer;
           private DocIdSetIterator iterator;
           private int leafPtr;
 
           @Override
-          public void setScorer(Scorer scorer) {
+          public void setScorer(Scorable scorer) {
             this.sc = scorer;
           }
 
@@ -309,7 +319,8 @@ public class QueryUtils {
             lastDoc[0] = doc;
             try {
               if (scorer == null) {
-                Weight w = s.createNormalizedWeight(q, true);
+                Query rewritten = s.rewrite(q);
+                Weight w = s.createWeight(rewritten, ScoreMode.COMPLETE, 1);
                 LeafReaderContext context = readerContextArray.get(leafPtr);
                 scorer = w.scorer(context);
                 iterator = scorer.iterator();
@@ -362,8 +373,8 @@ public class QueryUtils {
           }
 
           @Override
-          public boolean needsScores() {
-            return true;
+          public ScoreMode scoreMode() {
+            return ScoreMode.COMPLETE;
           }
 
           @Override
@@ -373,8 +384,9 @@ public class QueryUtils {
             if (lastReader[0] != null) {
               final LeafReader previousReader = lastReader[0];
               IndexSearcher indexSearcher = LuceneTestCase.newSearcher(previousReader, false);
-              indexSearcher.setSimilarity(s.getSimilarity(true));
-              Weight w = indexSearcher.createNormalizedWeight(q, true);
+              indexSearcher.setSimilarity(s.getSimilarity());
+              Query rewritten = indexSearcher.rewrite(q);
+              Weight w = indexSearcher.createWeight(rewritten, ScoreMode.COMPLETE, 1);
               LeafReaderContext ctx = (LeafReaderContext)indexSearcher.getTopReaderContext();
               Scorer scorer = w.scorer(ctx);
               if (scorer != null) {
@@ -403,8 +415,9 @@ public class QueryUtils {
           // previous reader, hits NO_MORE_DOCS
           final LeafReader previousReader = lastReader[0];
           IndexSearcher indexSearcher = LuceneTestCase.newSearcher(previousReader, false);
-          indexSearcher.setSimilarity(s.getSimilarity(true));
-          Weight w = indexSearcher.createNormalizedWeight(q, true);
+          indexSearcher.setSimilarity(s.getSimilarity());
+          Query rewritten = indexSearcher.rewrite(q);
+          Weight w = indexSearcher.createWeight(rewritten, ScoreMode.COMPLETE, 1);
           LeafReaderContext ctx = previousReader.getContext();
           Scorer scorer = w.scorer(ctx);
           if (scorer != null) {
@@ -417,7 +430,7 @@ public class QueryUtils {
                 break;
               }
             }
-            Assert.assertFalse("query's last doc was "+ lastDoc[0] +" but advance("+(lastDoc[0]+1)+") got to "+scorer.docID(),more);
+            assertFalse("query's last doc was "+ lastDoc[0] +" but advance("+(lastDoc[0]+1)+") got to "+scorer.docID(),more);
           }
         }
       }
@@ -430,11 +443,12 @@ public class QueryUtils {
     final int lastDoc[] = {-1};
     final LeafReader lastReader[] = {null};
     final List<LeafReaderContext> context = s.getTopReaderContext().leaves();
+    Query rewritten = s.rewrite(q);
     s.search(q,new SimpleCollector() {
-      private Scorer scorer;
+      private Scorable scorer;
       private int leafPtr;
       @Override
-      public void setScorer(Scorer scorer) {
+      public void setScorer(Scorable scorer) {
         this.scorer = scorer;
       }
       @Override
@@ -443,13 +457,13 @@ public class QueryUtils {
         try {
           long startMS = System.currentTimeMillis();
           for (int i=lastDoc[0]+1; i<=doc; i++) {
-            Weight w = s.createNormalizedWeight(q, true);
+            Weight w = s.createWeight(rewritten, ScoreMode.COMPLETE, 1);
             Scorer scorer = w.scorer(context.get(leafPtr));
-            Assert.assertTrue("query collected "+doc+" but advance("+i+") says no more docs!",scorer.iterator().advance(i) != DocIdSetIterator.NO_MORE_DOCS);
-            Assert.assertEquals("query collected "+doc+" but advance("+i+") got to "+scorer.docID(),doc,scorer.docID());
+            assertTrue("query collected "+doc+" but advance("+i+") says no more docs!",scorer.iterator().advance(i) != DocIdSetIterator.NO_MORE_DOCS);
+            assertEquals("query collected "+doc+" but advance("+i+") got to "+scorer.docID(),doc,scorer.docID());
             float advanceScore = scorer.score();
-            Assert.assertEquals("unstable advance("+i+") score!",advanceScore,scorer.score(),maxDiff);
-            Assert.assertEquals("query assigned doc "+doc+" a score of <"+score+"> but advance("+i+") has <"+advanceScore+">!",score,advanceScore,maxDiff);
+            assertEquals("unstable advance("+i+") score!",advanceScore,scorer.score(),maxDiff);
+            assertEquals("query assigned doc "+doc+" a score of <"+score+"> but advance("+i+") has <"+advanceScore+">!",score,advanceScore,maxDiff);
 
             // Hurry things along if they are going slow (eg
             // if you got SimpleText codec this will kick in):
@@ -464,8 +478,8 @@ public class QueryUtils {
       }
 
       @Override
-      public boolean needsScores() {
-        return true;
+      public ScoreMode scoreMode() {
+        return ScoreMode.COMPLETE;
       }
 
       @Override
@@ -475,8 +489,8 @@ public class QueryUtils {
         if (lastReader[0] != null) {
           final LeafReader previousReader = lastReader[0];
           IndexSearcher indexSearcher = LuceneTestCase.newSearcher(previousReader, false);
-          indexSearcher.setSimilarity(s.getSimilarity(true));
-          Weight w = indexSearcher.createNormalizedWeight(q, true);
+          indexSearcher.setSimilarity(s.getSimilarity());
+          Weight w = indexSearcher.createWeight(rewritten, ScoreMode.COMPLETE, 1);
           Scorer scorer = w.scorer((LeafReaderContext)indexSearcher.getTopReaderContext());
           if (scorer != null) {
             DocIdSetIterator iterator = scorer.iterator();
@@ -488,7 +502,7 @@ public class QueryUtils {
                 break;
               }
             }
-            Assert.assertFalse("query's last doc was "+ lastDoc[0] +" but advance("+(lastDoc[0]+1)+") got to "+scorer.docID(),more);
+            assertFalse("query's last doc was "+ lastDoc[0] +" but advance("+(lastDoc[0]+1)+") got to "+scorer.docID(),more);
           }
           leafPtr++;
         }
@@ -503,8 +517,8 @@ public class QueryUtils {
       // previous reader, hits NO_MORE_DOCS
       final LeafReader previousReader = lastReader[0];
       IndexSearcher indexSearcher = LuceneTestCase.newSearcher(previousReader, false);
-      indexSearcher.setSimilarity(s.getSimilarity(true));
-      Weight w = indexSearcher.createNormalizedWeight(q, true);
+      indexSearcher.setSimilarity(s.getSimilarity());
+      Weight w = indexSearcher.createWeight(rewritten, ScoreMode.COMPLETE, 1);
       Scorer scorer = w.scorer((LeafReaderContext)indexSearcher.getTopReaderContext());
       if (scorer != null) {
         DocIdSetIterator iterator = scorer.iterator();
@@ -516,14 +530,15 @@ public class QueryUtils {
             break;
           }
         }
-        Assert.assertFalse("query's last doc was "+ lastDoc[0] +" but advance("+(lastDoc[0]+1)+") got to "+scorer.docID(),more);
+        assertFalse("query's last doc was "+ lastDoc[0] +" but advance("+(lastDoc[0]+1)+") got to "+scorer.docID(),more);
       }
     }
   }
 
   /** Check that the scorer and bulk scorer advance consistently. */
   public static void checkBulkScorerSkipTo(Random r, Query query, IndexSearcher searcher) throws IOException {
-    Weight weight = searcher.createNormalizedWeight(query, true);
+    query = searcher.rewrite(query);
+    Weight weight = searcher.createWeight(query, ScoreMode.COMPLETE, 1);
     for (LeafReaderContext context : searcher.getIndexReader().leaves()) {
       final Scorer scorer = weight.scorer(context);
       final BulkScorer bulkScorer = weight.bulkScorer(context);
@@ -543,17 +558,17 @@ public class QueryUtils {
           iterator.advance(min);
         }
         final int next = bulkScorer.score(new LeafCollector() {
-          Scorer scorer2;
+          Scorable scorer2;
           @Override
-          public void setScorer(Scorer scorer) throws IOException {
+          public void setScorer(Scorable scorer) throws IOException {
             this.scorer2 = scorer;
           }
           @Override
           public void collect(int doc) throws IOException {
             assert doc >= min;
             assert doc < max;
-            Assert.assertEquals(scorer.docID(), doc);
-            Assert.assertEquals(scorer.score(), scorer2.score(), 0.01f);
+            assertEquals(scorer.docID(), doc);
+            assertEquals(scorer.score(), scorer2.score(), 0.01f);
             iterator.nextDoc();
           }
         }, null, min, max);
@@ -564,7 +579,7 @@ public class QueryUtils {
         if (scorer.docID() == DocIdSetIterator.NO_MORE_DOCS) {
           bulkScorer.score(new LeafCollector() {
             @Override
-            public void setScorer(Scorer scorer) throws IOException {}
+            public void setScorer(Scorable scorer) throws IOException {}
 
             @Override
             public void collect(int doc) throws IOException {

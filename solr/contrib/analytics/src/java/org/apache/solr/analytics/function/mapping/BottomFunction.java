@@ -141,7 +141,7 @@ public class BottomFunction {
     }
     if (param instanceof StringValueStream) {
       if (params.length == 1) {
-        return LambdaFunction.createStringLambdaFunction(name, (a,b) -> (a.compareTo(b)<=0)? a:b, (StringValueStream)param);
+        return LambdaFunction.createStringLambdaFunction(name, (a,b) -> (a.compareTo(b)<0)? a:b, (StringValueStream)param);
       }
       StringValue[] castedParams = new StringValue[params.length];
       boolean tryNextType = false;
@@ -154,10 +154,10 @@ public class BottomFunction {
         }
       }
       if (!tryNextType) {
-        return LambdaFunction.createStringLambdaFunction(name, (a,b) -> (a.compareTo(b)<=0)? a:b, castedParams, false);
+        return LambdaFunction.createStringLambdaFunction(name, (a,b) -> (a.compareTo(b)<0)? a:b, castedParams, false);
       }
     }
-    throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires a comparable parameter. " + 
+    throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires a comparable parameter. " +
           "Incorrect parameter: "+params[0].getExpressionStr());
   });
 }

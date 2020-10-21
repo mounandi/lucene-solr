@@ -20,8 +20,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
+import java.util.HashSet; 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -104,6 +105,10 @@ public class TestTaxonomyFacetCounts extends FacetTestCase {
     TaxonomyReader taxoReader = new DirectoryTaxonomyReader(taxoWriter);
 
     Facets facets = getAllFacets(FacetsConfig.DEFAULT_INDEX_FIELD_NAME, searcher, taxoReader, config);
+
+    // Publish Date is hierarchical, so we should have loaded all 3 int[]:
+    assertTrue(((TaxonomyFacets) facets).siblingsLoaded());
+    assertTrue(((TaxonomyFacets) facets).childrenLoaded());
 
     // Retrieve & verify results:
     assertEquals("dim=Publish Date path=[] value=5 childCount=3\n  2010 (2)\n  2012 (2)\n  1999 (1)\n", facets.getTopChildren(10, "Publish Date").toString());
@@ -330,6 +335,10 @@ public class TestTaxonomyFacetCounts extends FacetTestCase {
     assertEquals(1, facets.getSpecificValue("dim", "test\u001Fone"));
     assertEquals(1, facets.getSpecificValue("dim", "test\u001Etwo"));
 
+    // no hierarchy
+    assertFalse(((TaxonomyFacets) facets).siblingsLoaded());
+    assertFalse(((TaxonomyFacets) facets).childrenLoaded());
+
     FacetResult result = facets.getTopChildren(10, "dim");
     assertEquals("dim=dim path=[] value=-1 childCount=2\n  test\u001Fone (1)\n  test\u001Etwo (1)\n", result.toString());
     writer.close();
@@ -393,7 +402,7 @@ public class TestTaxonomyFacetCounts extends FacetTestCase {
     FacetsConfig config = new FacetsConfig();
     config.setMultiValued("dim", true);
     
-    int numLabels = TestUtil.nextInt(random(), 40000, 100000);
+    int numLabels = TEST_NIGHTLY ? TestUtil.nextInt(random(), 40000, 100000) : TestUtil.nextInt(random(), 4000, 10000);
     
     Document doc = new Document();
     doc.add(newTextField("field", "text", Field.Store.NO));
@@ -670,13 +679,16 @@ public class TestTaxonomyFacetCounts extends FacetTestCase {
 
       // Slow, yet hopefully bug-free, faceting:
       @SuppressWarnings({"rawtypes","unchecked"}) Map<String,Integer>[] expectedCounts = new HashMap[numDims];
+      List<List<FacetLabel>> expectedLabels = new ArrayList<>();
+
       for(int i=0;i<numDims;i++) {
         expectedCounts[i] = new HashMap<>();
       }
 
-      for(TestDoc doc : testDocs) {
+      for (TestDoc doc : testDocs) {
         if (doc.content.equals(searchToken)) {
-          for(int j=0;j<numDims;j++) {
+          List<FacetLabel> facetLabels = new ArrayList<>();
+          for (int j = 0; j < numDims; j++) {
             if (doc.dims[j] != null) {
               Integer v = expectedCounts[j].get(doc.dims[j]);
               if (v == null) {
@@ -684,8 +696,11 @@ public class TestTaxonomyFacetCounts extends FacetTestCase {
               } else {
                 expectedCounts[j].put(doc.dims[j], v.intValue() + 1);
               }
+              // Add document facet labels
+              facetLabels.add(new FacetLabel("dim" + j, doc.dims[j]));
             }
           }
+          expectedLabels.add(facetLabels);
         }
       }
 
@@ -712,10 +727,49 @@ public class TestTaxonomyFacetCounts extends FacetTestCase {
       sortTies(actual);
 
       assertEquals(expected, actual);
+
+      // Test facet labels for each matching test doc
+      List<List<FacetLabel>> actualLabels = getAllTaxonomyFacetLabels(null, tr, fc);
+      assertEquals(expectedLabels.size(), actualLabels.size());
+      assertTrue(sortedFacetLabels(expectedLabels).equals(sortedFacetLabels(actualLabels)));
+
+      // Test facet labels for each matching test doc, given a specific dimension chosen randomly
+      final String dimension = "dim" + random().nextInt(numDims);
+      expectedLabels.forEach(list -> list.removeIf(f -> f.components[0].equals(dimension) == false));
+
+      actualLabels = getAllTaxonomyFacetLabels(dimension, tr, fc);
+      assertTrue(sortedFacetLabels(expectedLabels).equals(sortedFacetLabels(actualLabels)));
     }
 
     w.close();
     IOUtils.close(tw, searcher.getIndexReader(), tr, indexDir, taxoDir);
+  }
+
+  private static List<List<FacetLabel>> sortedFacetLabels(List<List<FacetLabel>> allFacetLabels) {
+    // Sort each inner list since there is no guaranteed order in which
+    // FacetLabels are expected to be retrieved for each document.
+    for (List<FacetLabel> facetLabels : allFacetLabels) {
+      Collections.sort(facetLabels);
+    }
+
+    Collections.sort(allFacetLabels, (o1, o2) -> {
+      int diff = o1.size() - o2.size();
+      if (diff != 0) {
+        return diff;
+      }
+
+      // the lists are equal in size and sorted
+      for (int i = 0; i < o1.size(); i++) {
+        int comp = o1.get(i).compareTo(o2.get(i));
+        if (comp != 0) {
+          return comp;
+        }
+      }
+      // all elements are equal
+      return 0;
+    });
+
+    return allFacetLabels;
   }
 
   private static Facets getAllFacets(String indexFieldName, IndexSearcher searcher, TaxonomyReader taxoReader, FacetsConfig config) throws IOException {

@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
-import org.apache.solr.analytics.function.reduction.data.ReductionData;
 import org.apache.solr.analytics.stream.reservation.DoubleArrayReservation;
 import org.apache.solr.analytics.stream.reservation.FloatArrayReservation;
 import org.apache.solr.analytics.stream.reservation.IntArrayReservation;
@@ -40,7 +39,7 @@ import org.apache.solr.analytics.value.StringValueStream;
 
 /**
  * Collector of sorted lists.
- * 
+ *
  * Once the sorted list has been collected, it can be reduced by calculating a median, percentiles, or ordinals.
  * All of the above reductions over the same data share one {@link SortedListCollector}.
  * <p>
@@ -59,24 +58,22 @@ import org.apache.solr.analytics.value.StringValueStream;
 public abstract class SortedListCollector<T extends Comparable<T>> extends ReductionDataCollector<SortedListCollector.SortedListData<T>> {
   public static final String name = "sorted";
   private final String exprStr;
-  
+
   protected SortedListCollector(AnalyticsValueStream param, String specificationName) {
     this.exprStr = AnalyticsValueStream.createExpressionString(name + "_" + specificationName,param);
-    
+
     tempList = new ArrayList<>();
-    
+
     calcMedian = false;
     calcPercs = new HashSet<>();
     calcOrds = new HashSet<>();
-    calcRevOrds = new HashSet<>();
   }
-  
+
   private List<T> list;
-  
+
   private boolean calcMedian;
   private Set<Double> calcPercs;
   private Set<Integer> calcOrds;
-  private Set<Integer> calcRevOrds;
 
   public int size() {
     return list.size();
@@ -88,10 +85,10 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
   public void calcMedian() {
     calcMedian = true;
   }
-  
+
   /**
    * Informs the collector that the following percentile needs to be computed.
-   * 
+   *
    * @param percentile requested percentile
    */
   public void calcPercentile(double percentile) {
@@ -100,7 +97,7 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
 
   /**
    * Informs the collector that the following ordinal needs to be computed.
-   * 
+   *
    * @param ordinal requested ordinal
    */
   public void calcOrdinal(int ordinal) {
@@ -108,22 +105,12 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
   }
 
   /**
-   * Informs the collector that the following reverse ordinal needs to be computed.
-   * Reverse ordinals are ordinals that start at the end of the list.
-   * 
-   * @param reverseOrdinal requested reverseOrdinal
-   */
-  public void calcReverseOrdinal(int reverseOrdinal) {
-    calcRevOrds.add(reverseOrdinal);
-  }
-
-  /**
    * Once the data has been set by either {@link #setData} or {@link #setMergedData},
-   * this returns the value at the given sorted index. 
-   * 
-   * Only the indices specified by {@link #calcMedian}, {@link #calcPercentile}, {@link #calcOrdinal}, and {@link #calcReverseOrdinal}
+   * this returns the value at the given sorted index.
+   *
+   * Only the indices specified by {@link #calcMedian}, {@link #calcPercentile}, and {@link #calcOrdinal}
    * will contain valid data. All other indices may return unsorted data.
-   * 
+   *
    * @param index the index of the sorted data to return
    */
   public T get(int index) {
@@ -137,36 +124,36 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
     data.exists = false;
     return data;
   }
-  
-  ArrayList<T> tempList; 
+
+  ArrayList<T> tempList;
   @Override
   protected void apply(SortedListData<T> data) {
     data.list.addAll(tempList);
   }
-  
+
   /**
    * Starts the import of the shard data.
-   * 
+   *
    * @param size the size of the incoming shard list
    */
   protected void startImport(int size) {
     ioData.list.ensureCapacity(ioData.list.size() + size);
   }
-  
+
   /**
    * Merges the current list with the incoming value.
-   * 
+   *
    * @param value the next imported value to add
    */
   protected void importNext(T value) {
     ioData.list.add(value);
   }
-  
+
   Iterator<T> iter;
   /**
    * The list to be exported is unsorted.
    * The lists of all shards will be combined with the {@link #startImport} and {@link #importNext} methods.
-   * 
+   *
    * @return the size of the list being exported.
    */
   public int startExport() {
@@ -175,7 +162,7 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
   }
   /**
    * Return the next value in the list.
-   * 
+   *
    * @return the next sorted value
    */
   public T exportNext() {
@@ -192,7 +179,7 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
 
   /**
    * This is where the given indices are put in their sorted positions.
-   * 
+   *
    * Only the given indices are guaranteed to be in sorted order.
    */
   @SuppressWarnings("unchecked")
@@ -203,15 +190,18 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
     if (size <= 1) {
       return;
     }
-    
+
     // Ordinals start at 0 and end at size-1
     Set<Integer> ordinals = new HashSet<>();
     for (double percentile : calcPercs) {
-      ordinals.add((int) Math.ceil(percentile * size) - 1);
+      ordinals.add((int) Math.round(percentile * size - .5));
     }
-    ordinals.addAll(calcOrds);
-    for (int reverseOrdinal : calcRevOrds) {
-      ordinals.add(size + reverseOrdinal);
+    for (int ordinal : calcOrds) {
+      if (ordinal > 0) {
+        ordinals.add(ordinal - 1);
+      } else if (ordinal < 0){
+        ordinals.add(size + ordinal);
+      }
     }
     if (calcMedian) {
       int mid = list.size() / 2;
@@ -231,14 +221,14 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
   public String getExpressionStr() {
     return exprStr;
   }
-  
+
   public static class SortedListData<D extends Comparable<D>> extends ReductionData {
     ArrayList<D> list;
   }
 
   public static class SortedIntListCollector extends SortedListCollector<Integer> {
     private IntValueStream param;
-    
+
     public SortedIntListCollector(IntValueStream param) {
       super(param, "int");
       this.param = param;
@@ -249,7 +239,7 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
       tempList.clear();
       param.streamInts( val -> tempList.add(val) );
     }
-    
+
     @Override
     public void submitReservations(Consumer<ReductionDataReservation<?,?>> consumer) {
       consumer.accept(new IntArrayReservation(
@@ -260,10 +250,10 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
         ));
     }
   }
-  
+
   public static class SortedLongListCollector extends SortedListCollector<Long> {
     private LongValueStream param;
-    
+
     public SortedLongListCollector(LongValueStream param) {
       super(param, "long");
       this.param = param;
@@ -274,7 +264,7 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
       tempList.clear();
       param.streamLongs( val -> tempList.add(val) );
     }
-    
+
     @Override
     public void submitReservations(Consumer<ReductionDataReservation<?,?>> consumer) {
       consumer.accept(new LongArrayReservation(
@@ -285,10 +275,10 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
         ));
     }
   }
-  
+
   public static class SortedFloatListCollector extends SortedListCollector<Float> {
     private FloatValueStream param;
-    
+
     public SortedFloatListCollector(FloatValueStream param) {
       super(param, "float");
       this.param = param;
@@ -299,7 +289,7 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
       tempList.clear();
       param.streamFloats( val -> tempList.add(val) );
     }
-    
+
     @Override
     public void submitReservations(Consumer<ReductionDataReservation<?,?>> consumer) {
       consumer.accept(new FloatArrayReservation(
@@ -310,10 +300,10 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
         ));
     }
   }
-  
+
   public static class SortedDoubleListCollector extends SortedListCollector<Double> {
     private DoubleValueStream param;
-    
+
     public SortedDoubleListCollector(DoubleValueStream param) {
       super(param, "double");
       this.param = param;
@@ -324,7 +314,7 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
       tempList.clear();
       param.streamDoubles( val -> tempList.add(val) );
     }
-    
+
     @Override
     public void submitReservations(Consumer<ReductionDataReservation<?,?>> consumer) {
       consumer.accept(new DoubleArrayReservation(
@@ -335,10 +325,10 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
         ));
     }
   }
-  
+
   public static class SortedStringListCollector extends SortedListCollector<String> {
     private StringValueStream param;
-    
+
     public SortedStringListCollector(StringValueStream param) {
       super(param, "string");
       this.param = param;
@@ -349,7 +339,7 @@ public abstract class SortedListCollector<T extends Comparable<T>> extends Reduc
       tempList.clear();
       param.streamStrings( val -> tempList.add(val) );
     }
-    
+
     @Override
     public void submitReservations(Consumer<ReductionDataReservation<?,?>> consumer) {
       consumer.accept(new StringArrayReservation(

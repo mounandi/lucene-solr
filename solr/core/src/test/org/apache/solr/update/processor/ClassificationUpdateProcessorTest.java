@@ -61,6 +61,7 @@ public class ClassificationUpdateProcessorTest extends SolrTestCaseJ4 {
 
   @BeforeClass
   public static void beforeClass() throws Exception {
+    assumeWorkingMockito();
     System.setProperty("enable.update.log", "false");
     initCore("solrconfig-classification.xml", "schema-classification.xml");
   }
@@ -72,9 +73,18 @@ public class ClassificationUpdateProcessorTest extends SolrTestCaseJ4 {
 
   @Override
   public void tearDown() throws Exception {
-    reader.close();
-    directory.close();
-    analyzer.close();
+    if (null != reader) {
+      reader.close();
+      reader = null;
+    }
+    if (null != directory) {
+      directory.close();
+      directory = null;
+    }
+    if (null != analyzer) {
+      analyzer.close();
+      analyzer = null;
+    }
     super.tearDown();
   }
 
@@ -226,6 +236,7 @@ public class ClassificationUpdateProcessorTest extends SolrTestCaseJ4 {
     updateProcessorToTest=new ClassificationUpdateProcessor(params,mockProcessor,reader,req().getSchema());
     updateProcessorToTest.processAdd(update);
 
+    @SuppressWarnings({"unchecked"})
     ArrayList<Object> assignedClasses = (ArrayList)unseenDocument1.getFieldValues(TRAINING_CLASS);
     assertThat(assignedClasses.get(0),is("class2"));
     assertThat(assignedClasses.get(1),is("class1"));
@@ -249,6 +260,7 @@ public class ClassificationUpdateProcessorTest extends SolrTestCaseJ4 {
     updateProcessorToTest=new ClassificationUpdateProcessor(params,mockProcessor,reader,req().getSchema());
     updateProcessorToTest.processAdd(update);
 
+    @SuppressWarnings({"unchecked"})
     ArrayList<Object> assignedClasses = (ArrayList)unseenDocument1.getFieldValues(TRAINING_CLASS);
     assertThat(assignedClasses.size(),is(2));
     assertThat(assignedClasses.get(0),is("class2"));
@@ -273,6 +285,7 @@ public class ClassificationUpdateProcessorTest extends SolrTestCaseJ4 {
     updateProcessorToTest=new ClassificationUpdateProcessor(params,mockProcessor,reader,req().getSchema());
     updateProcessorToTest.processAdd(update);
 
+    @SuppressWarnings({"unchecked"})
     ArrayList<Object> assignedClasses = (ArrayList)unseenDocument1.getFieldValues(TRAINING_CLASS);
     assertThat(assignedClasses.size(),is(2));
     assertThat(assignedClasses.get(0),is("class2"));
@@ -299,6 +312,7 @@ public class ClassificationUpdateProcessorTest extends SolrTestCaseJ4 {
 
     updateProcessorToTest.processAdd(update);
 
+    @SuppressWarnings({"unchecked"})
     ArrayList<Object> assignedClasses = (ArrayList)unseenDocument1.getFieldValues(TRAINING_CLASS);
     assertThat(assignedClasses.size(),is(2));
     assertThat(assignedClasses.get(0),is("class4"));
@@ -325,6 +339,7 @@ public class ClassificationUpdateProcessorTest extends SolrTestCaseJ4 {
 
     updateProcessorToTest.processAdd(update);
 
+    @SuppressWarnings({"unchecked"})
     ArrayList<Object> assignedClasses = (ArrayList)unseenDocument1.getFieldValues(TRAINING_CLASS);
     assertThat(assignedClasses.size(),is(2));
     assertThat(assignedClasses.get(0),is("class4"));
@@ -501,6 +516,6 @@ public class ClassificationUpdateProcessorTest extends SolrTestCaseJ4 {
 
   private int addDoc(RandomIndexWriter writer, Document doc) throws IOException {
     writer.addDocument(doc);
-    return writer.numDocs() - 1;
+    return writer.getDocStats().numDocs - 1;
   }
 }

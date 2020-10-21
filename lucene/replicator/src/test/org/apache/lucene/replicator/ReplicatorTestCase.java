@@ -16,6 +16,7 @@
  */
 package org.apache.lucene.replicator;
 
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakLingering;
 import java.util.Random;
 import org.apache.http.conn.HttpClientConnectionManager;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
@@ -28,11 +29,12 @@ import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.SslConnectionFactory;
-import org.eclipse.jetty.server.session.HashSessionIdManager;
+import org.eclipse.jetty.server.session.DefaultSessionIdManager;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.junit.AfterClass;
 
+@ThreadLeakLingering(linger = 80000) // Jetty might ignore interrupt for a minute 
 public abstract class ReplicatorTestCase extends LuceneTestCase {
   
   private static HttpClientConnectionManager clientConnectionManager;
@@ -59,7 +61,7 @@ public abstract class ReplicatorTestCase extends LuceneTestCase {
     // talking to that server, but for the purposes of testing that should 
     // be good enough
     final boolean useSsl = Boolean.getBoolean("tests.jettySsl");
-    final SslContextFactory sslcontext = new SslContextFactory(false);
+    final SslContextFactory.Server sslcontext = new SslContextFactory.Server();
     
     if (useSsl) {
       if (null != System.getProperty("javax.net.ssl.keyStore")) {
@@ -97,10 +99,12 @@ public abstract class ReplicatorTestCase extends LuceneTestCase {
       HttpConfiguration configuration = new HttpConfiguration();
       configuration.setSecureScheme("https");
       configuration.addCustomizer(new SecureRequestCustomizer());
+      @SuppressWarnings("resource")
       ServerConnector c = new ServerConnector(server, new SslConnectionFactory(sslcontext, "http/1.1"),
           new HttpConnectionFactory(configuration));
       connector = c;
     } else {
+      @SuppressWarnings("resource")
       ServerConnector c = new ServerConnector(server, new HttpConnectionFactory());
       connector = c;
     }
@@ -109,7 +113,7 @@ public abstract class ReplicatorTestCase extends LuceneTestCase {
     connector.setHost("127.0.0.1");
 
     server.setConnectors(new Connector[] {connector});
-    server.setSessionIdManager(new HashSessionIdManager(new Random(random().nextLong())));
+    server.setSessionIdManager(new DefaultSessionIdManager(server, new Random(random().nextLong())));
     server.setHandler(handler);
     
     server.start();

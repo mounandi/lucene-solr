@@ -1,7 +1,5 @@
 = Response Writers
-:page-shortname: response-writers
-:page-permalink: response-writers.html
-:page-children: velocity-response-writer
+
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -34,14 +32,17 @@ The `wt` parameter selects the Response Writer to be used. The list below descri
 * <<Python Response Writer,python>>
 * <<Ruby Response Writer,ruby>>
 * <<Smile Response Writer,smile>>
-* <<Velocity Response Writer,velocity>>
 * <<XLSX Response Writer,xlsx>>
 * <<Standard XML Response Writer,xml>>
 * <<XSLT Response Writer,xslt>>
 
 == JSON Response Writer
 
-The default Solr Response Writer is the `JsonResponseWriter`, which formats output in JavaScript Object Notation (JSON), a lightweight data interchange format specified in specified in RFC 4627. If you do not set the `wt` parameter in your request, you will get JSON by default.
+The default Solr Response Writer is the `JsonResponseWriter`, which formats output in JavaScript Object Notation (JSON), a lightweight data interchange format specified in specified in RFC 4627.
+The default response writer is used when:
+
+* the `wt` parameter is not specified in the request, or
+* a non-existent response writer is specified.
 
 Here is a sample response for a simple query like `q=id:VS1GB400C3`:
 
@@ -94,9 +95,6 @@ This parameter controls the output format of NamedLists, where order is more imp
 
 The `json.nl` parameter takes the following values:
 
-
-|json.nl Parameter setting |Example output for `NamedList("a"=1, "bar"="foo", null=3, null=null)` |Description
-
 `flat`::
 The default. NamedList is represented as a flat array, alternating names and values.
 +
@@ -107,17 +105,17 @@ NamedList is represented as a JSON object. Although this is the simplest mapping
 +
 With input of `NamedList("a"=1, "bar"="foo", null=3, null=null)`, the output would be `{"a":1, "bar":"foo", "":3, "":null}`.
 
-arrarr::
+`arrarr`::
 NamedList is represented as an array of two element arrays.
 +
 With input of `NamedList("a"=1, "bar"="foo", null=3, null=null)`, the output would be `[["a",1], ["bar","foo"], [null,3], [null,null]]`.
 
-arrmap::
+`arrmap`::
 NamedList is represented as an array of JSON objects.
 +
 With input of `NamedList("a"=1, "bar"="foo", null=3, null=null)`, the output would be `[{"a":1}, {"b":2}, 3, null]`.
 
-arrntv::
+`arrntv`::
 NamedList is represented as an array of Name Type Value JSON objects.
 +
 With input of `NamedList("a"=1, "bar"="foo", null=3, null=null)`, the output would be `[{"name":"a","type":"int","value":1}, {"name":"bar","type":"str","value":"foo"}, {"name":null,"type":"int","value":3}, {"name":null,"type":"null","value":null}]`.
@@ -138,29 +136,26 @@ Note that the XSLT Response Writer can be used to convert the XML produced by th
 
 The behavior of the XML Response Writer can be driven by the following query parameters.
 
-=== The version Parameter
-
+`version`::
 The `version` parameter determines the XML protocol used in the response. Clients are strongly encouraged to _always_ specify the protocol version, so as to ensure that the format of the response they receive does not change unexpectedly if the Solr server is upgraded and a new default format is introduced.
-
++
 The only currently supported version value is `2.2`. The format of the `responseHeader` changed to use the same `<lst>` structure as the rest of the response.
-
++
 The default value is the latest supported.
 
-=== stylesheet Parameter
-
+`stylesheet`::
 The `stylesheet` parameter can be used to direct Solr to include a `<?xml-stylesheet type="text/xsl" href="..."?>` declaration in the XML response it returns.
-
++
 The default behavior is not to return any stylesheet declaration at all.
-
++
 [IMPORTANT]
 ====
 Use of the `stylesheet` parameter is discouraged, as there is currently no way to specify external stylesheets, and no stylesheets are provided in the Solr distributions. This is a legacy parameter, which may be developed further in a future release.
 ====
 
-=== indent Parameter
-
+`indent`::
 If the `indent` parameter is used, and has a non-blank value, then Solr will make some attempts at indenting its XML response to make it more readable by humans.
-
++
 The default behavior is not to indent.
 
 == XSLT Response Writer
@@ -175,7 +170,7 @@ The Content-Type of the response is set according to the `<xsl:output>` statemen
 
 === XSLT Configuration
 
-The example below, from the `sample_techproducts_configs` <<response-writers.adoc#response-writers,config set>> in the Solr distribution, shows how the XSLT Response Writer is configured.
+The example below, from the `sample_techproducts_configs` <<response-writers.adoc#response-writers,configset>> in the Solr distribution, shows how the XSLT Response Writer is configured.
 
 [source,xml]
 ----
@@ -261,7 +256,7 @@ rsp['response']['docs'].each { |doc| puts 'name field = ' + doc['name'\] }
 
 The CSV response writer returns a list of documents in comma-separated values (CSV) format. Other information that would normally be included in a response, such as facet information, is excluded.
 
-The CSV response writer supports multi-valued fields, as well as<<transforming-result-documents.adoc#transforming-result-documents,pseudo-fields>>, and the output of this CSV format is compatible with Solr's https://wiki.apache.org/solr/UpdateCSV[CSV update format].
+The CSV response writer supports multi-valued fields, as well as <<transforming-result-documents.adoc#transforming-result-documents,pseudo-fields>>, and the output of this CSV format is compatible with Solr's <<uploading-data-with-index-handlers.adoc#csv-formatted-index-updates,CSV update format>>.
 
 === CSV Parameters
 
@@ -302,16 +297,9 @@ F8V7067-APL-KIT,"electronics,connector",Belkin Mobile Power Cord for iPod w/ Doc
 MA147LL/A,"electronics,music",Apple 60 GB iPod with Video Playback Black,10,399.0,0.2446348
 ----
 
-[[velocity-writer]]
-== Velocity Response Writer
-
-The `VelocityResponseWriter` processes the Solr response and request context through Apache Velocity templating.
-
-See the <<velocity-response-writer.adoc#velocity-response-writer,Velocity Response Writer>> section for details.
-
 == Smile Response Writer
 
-The Smile format is a JSON-compatible binary format, described in detail here: http://wiki.fasterxml.com/SmileFormat.
+The Smile format is a JSON-compatible binary format, described in detail here: https://en.wikipedia.org/wiki/Smile_%28data_interchange_format%29[https://en.wikipedia.org/wiki/Smile_(data_interchange_format)]
 
 == XLSX Response Writer
 

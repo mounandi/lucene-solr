@@ -37,20 +37,6 @@ import org.junit.Test;
 public class SolrMetricManagerTest extends SolrTestCaseJ4 {
 
   @Test
-  public void testOverridableRegistryName() throws Exception {
-    Random r = random();
-    String originalName = TestUtil.randomSimpleString(r, 1, 10);
-    String targetName = TestUtil.randomSimpleString(r, 1, 10);
-    // no override
-    String result = SolrMetricManager.overridableRegistryName(originalName);
-    assertEquals(SolrMetricManager.REGISTRY_NAME_PREFIX + originalName, result);
-    // with override
-    System.setProperty(SolrMetricManager.REGISTRY_NAME_PREFIX + originalName, targetName);
-    result = SolrMetricManager.overridableRegistryName(originalName);
-    assertEquals(SolrMetricManager.REGISTRY_NAME_PREFIX + targetName, result);
-  }
-
-  @Test
   public void testSwapRegistries() throws Exception {
     Random r = random();
 
@@ -62,10 +48,10 @@ public class SolrMetricManagerTest extends SolrTestCaseJ4 {
     String toName = "to-" + TestUtil.randomSimpleString(r, 1, 10);
     // register test metrics
     for (Map.Entry<String, Counter> entry : metrics1.entrySet()) {
-      metricManager.register(null, fromName, entry.getValue(), false, entry.getKey(), "metrics1");
+      metricManager.registerMetric(null, fromName, entry.getValue(), false, entry.getKey(), "metrics1");
     }
     for (Map.Entry<String, Counter> entry : metrics2.entrySet()) {
-      metricManager.register(null, toName, entry.getValue(), false, entry.getKey(), "metrics2");
+      metricManager.registerMetric(null, toName, entry.getValue(), false, entry.getKey(), "metrics2");
     }
     assertEquals(metrics1.size(), metricManager.registry(fromName).getMetrics().size());
     assertEquals(metrics2.size(), metricManager.registry(toName).getMetrics().size());
@@ -103,16 +89,14 @@ public class SolrMetricManagerTest extends SolrTestCaseJ4 {
 
     String registryName = TestUtil.randomSimpleString(r, 1, 10);
     assertEquals(0, metricManager.registry(registryName).getMetrics().size());
-    metricManager.registerAll(registryName, mr, false);
+    // There is nothing registered so we should be error-free on the first pass
+    metricManager.registerAll(registryName, mr, SolrMetricManager.ResolutionStrategy.ERROR);
     // this should simply skip existing names
-    metricManager.registerAll(registryName, mr, true);
+    metricManager.registerAll(registryName, mr, SolrMetricManager.ResolutionStrategy.IGNORE);
+    // this should re-register everything, and no errors
+    metricManager.registerAll(registryName, mr, SolrMetricManager.ResolutionStrategy.REPLACE);
     // this should produce error
-    try {
-      metricManager.registerAll(registryName, mr, false);
-      fail("registerAll with duplicate metric names should fail");
-    } catch (IllegalArgumentException e) {
-      // expected
-    }
+    expectThrows(IllegalArgumentException.class, () -> metricManager.registerAll(registryName, mr, SolrMetricManager.ResolutionStrategy.ERROR));
   }
 
   @Test
@@ -125,13 +109,13 @@ public class SolrMetricManagerTest extends SolrTestCaseJ4 {
     String registryName = TestUtil.randomSimpleString(r, 1, 10);
 
     for (Map.Entry<String, Counter> entry : metrics.entrySet()) {
-      metricManager.register(null, registryName, entry.getValue(), false, entry.getKey(), "foo", "bar");
+      metricManager.registerMetric(null, registryName, entry.getValue(), false, entry.getKey(), "foo", "bar");
     }
     for (Map.Entry<String, Counter> entry : metrics.entrySet()) {
-      metricManager.register(null, registryName, entry.getValue(), false, entry.getKey(), "foo", "baz");
+      metricManager.registerMetric(null, registryName, entry.getValue(), false, entry.getKey(), "foo", "baz");
     }
     for (Map.Entry<String, Counter> entry : metrics.entrySet()) {
-      metricManager.register(null, registryName, entry.getValue(), false, entry.getKey(), "foo");
+      metricManager.registerMetric(null, registryName, entry.getValue(), false, entry.getKey(), "foo");
     }
 
     assertEquals(metrics.size() * 3, metricManager.registry(registryName).getMetrics().size());
@@ -205,7 +189,7 @@ public class SolrMetricManagerTest extends SolrTestCaseJ4 {
         createPluginInfo("core_foo", "core", null)
     };
     String tag = "xyz";
-    metricManager.loadReporters(plugins, loader, tag, SolrInfoBean.Group.node);
+    metricManager.loadReporters(plugins, loader, null, null, tag, SolrInfoBean.Group.node);
     Map<String, SolrMetricReporter> reporters = metricManager.getReporters(
         SolrMetricManager.getRegistryName(SolrInfoBean.Group.node));
     assertEquals(4, reporters.size());
@@ -214,7 +198,7 @@ public class SolrMetricManagerTest extends SolrTestCaseJ4 {
     assertTrue(reporters.containsKey("node_foo@" + tag));
     assertTrue(reporters.containsKey("multiregistry_foo@" + tag));
 
-    metricManager.loadReporters(plugins, loader, tag, SolrInfoBean.Group.core, "collection1");
+    metricManager.loadReporters(plugins, loader, null, null, tag, SolrInfoBean.Group.core, "collection1");
     reporters = metricManager.getReporters(
         SolrMetricManager.getRegistryName(SolrInfoBean.Group.core, "collection1"));
     assertEquals(5, reporters.size());
@@ -224,7 +208,7 @@ public class SolrMetricManagerTest extends SolrTestCaseJ4 {
     assertTrue(reporters.containsKey("core_foo@" + tag));
     assertTrue(reporters.containsKey("multiregistry_foo@" + tag));
 
-    metricManager.loadReporters(plugins, loader, tag, SolrInfoBean.Group.jvm);
+    metricManager.loadReporters(plugins, loader, null, null, tag, SolrInfoBean.Group.jvm);
     reporters = metricManager.getReporters(
         SolrMetricManager.getRegistryName(SolrInfoBean.Group.jvm));
     assertEquals(2, reporters.size());
@@ -253,6 +237,7 @@ public class SolrMetricManagerTest extends SolrTestCaseJ4 {
     assertEquals(60, SolrMetricManager.DEFAULT_CLOUD_REPORTER_PERIOD);
   }
 
+  @SuppressWarnings({"unchecked"})
   private PluginInfo createPluginInfo(String name, String group, String registry) {
     Map<String,String> attrs = new HashMap<>();
     attrs.put("name", name);
@@ -263,6 +248,7 @@ public class SolrMetricManagerTest extends SolrTestCaseJ4 {
     if (registry != null) {
       attrs.put("registry", registry);
     }
+    @SuppressWarnings({"rawtypes"})
     NamedList initArgs = new NamedList();
     initArgs.add("configurable", "true");
     return new PluginInfo("SolrMetricReporter", attrs, initArgs, null);

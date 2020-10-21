@@ -57,11 +57,11 @@ final class CoveringScorer extends Scorer {
   }
 
   @Override
-  public final Collection<ChildScorer> getChildren() throws IOException {
-    List<ChildScorer> matchingChildren = new ArrayList<>();
+  public final Collection<ChildScorable> getChildren() throws IOException {
+    List<ChildScorable> matchingChildren = new ArrayList<>();
     setTopListAndFreqIfNecessary();
     for (DisiWrapper s = topList; s != null; s = s.next) {
-      matchingChildren.add(new ChildScorer(s.scorer, "SHOULD"));
+      matchingChildren.add(new ChildScorable(s.scorer, "SHOULD"));
     }
     return matchingChildren;
   }
@@ -201,12 +201,6 @@ final class CoveringScorer extends Scorer {
   }
 
   @Override
-  public int freq() throws IOException {
-    setTopListAndFreqIfNecessary();
-    return freq;
-  }
-
-  @Override
   public float score() throws IOException {
     // we need to know about all matches
     setTopListAndFreqIfNecessary();
@@ -215,6 +209,12 @@ final class CoveringScorer extends Scorer {
       score += w.scorer.score();
     }
     return (float) score;
+  }
+
+  @Override
+  public float getMaxScore(int upTo) throws IOException {
+    // TODO: implement but beware of floating-point errors
+    return Float.POSITIVE_INFINITY;
   }
 
   @Override

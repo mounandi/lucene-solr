@@ -29,6 +29,7 @@ public class BadIndexSchemaTest extends AbstractBadConfigTestBase {
     doTest("bad-schema-not-indexed-but-norms.xml", "bad_field");
     doTest("bad-schema-not-indexed-but-tf.xml", "bad_field");
     doTest("bad-schema-not-indexed-but-pos.xml", "bad_field");
+    doTest("bad-schema-not-indexed-but-uninvertible.xml", "bad_field");
     doTest("bad-schema-omit-tf-but-not-pos.xml", "bad_field");
   }
 
@@ -184,5 +185,10 @@ public class BadIndexSchemaTest extends AbstractBadConfigTestBase {
 
   public void testSchemaWithDefaultSearchField() throws Exception {
     doTest("bad-schema-defaultsearchfield.xml", "Setting defaultSearchField in schema not supported since Solr 7");
+  }
+
+  public void testDateRangeFieldWithInvalidOptions() throws Exception {
+    doTest("bad-schema-daterangefield-type-options.xml", "FieldType DateRangeField is incompatible with omitNorms=false");
+    doTest("bad-schema-daterangefield-instance-options.xml", "daterange_field of type DateRangeField is incompatible with omitNorms=false");
   }
 }

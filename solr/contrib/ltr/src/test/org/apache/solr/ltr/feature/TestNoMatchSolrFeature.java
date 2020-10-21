@@ -20,19 +20,19 @@ import java.util.ArrayList;
 import java.util.Map;
 
 import org.apache.solr.client.solrj.SolrQuery;
+import org.apache.solr.common.util.Utils;
 import org.apache.solr.ltr.FeatureLoggerTestUtils;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
 import org.apache.solr.ltr.model.MultipleAdditiveTreesModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
-import org.noggit.ObjectBuilder;
 
 public class TestNoMatchSolrFeature extends TestRerankBase {
 
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1", "description", "w1", "popularity",
@@ -53,33 +53,33 @@ public class TestNoMatchSolrFeature extends TestRerankBase {
         "w1 w1 w1 w2 w2", "popularity", "8"));
     assertU(commit());
 
-    loadFeature("nomatchfeature", SolrFeature.class.getCanonicalName(),
+    loadFeature("nomatchfeature", SolrFeature.class.getName(),
         "{\"q\":\"foobarbat12345\",\"df\":\"title\"}");
-    loadFeature("yesmatchfeature", SolrFeature.class.getCanonicalName(),
+    loadFeature("yesmatchfeature", SolrFeature.class.getName(),
         "{\"q\":\"w1\",\"df\":\"title\"}");
-    loadFeature("nomatchfeature2", SolrFeature.class.getCanonicalName(),
+    loadFeature("nomatchfeature2", SolrFeature.class.getName(),
         "{\"q\":\"foobarbat12345\",\"df\":\"title\"}");
     loadModel(
         "nomatchmodel",
-        LinearModel.class.getCanonicalName(),
+        LinearModel.class.getName(),
         new String[] {"nomatchfeature", "yesmatchfeature", "nomatchfeature2"},
         "{\"weights\":{\"nomatchfeature\":1.0,\"yesmatchfeature\":1.1,\"nomatchfeature2\":1.1}}");
 
-    loadFeature("nomatchfeature3", SolrFeature.class.getCanonicalName(),
+    loadFeature("nomatchfeature3", SolrFeature.class.getName(),
         "{\"q\":\"foobarbat12345\",\"df\":\"title\"}");
-    loadModel("nomatchmodel2", LinearModel.class.getCanonicalName(),
+    loadModel("nomatchmodel2", LinearModel.class.getName(),
         new String[] {"nomatchfeature3"},
         "{\"weights\":{\"nomatchfeature3\":1.0}}");
 
-    loadFeature("nomatchfeature4", SolrFeature.class.getCanonicalName(),
+    loadFeature("nomatchfeature4", SolrFeature.class.getName(),
         "noMatchFeaturesStore", "{\"q\":\"foobarbat12345\",\"df\":\"title\"}");
-    loadModel("nomatchmodel3", LinearModel.class.getCanonicalName(),
+    loadModel("nomatchmodel3", LinearModel.class.getName(),
         new String[] {"nomatchfeature4"}, "noMatchFeaturesStore",
         "{\"weights\":{\"nomatchfeature4\":1.0}}");
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
@@ -100,8 +100,10 @@ public class TestNoMatchSolrFeature extends TestRerankBase {
     String res = restTestHarness.query("/query"
         + yesMatchFeatureQuery.toQueryString());
 
-    final Map<String,Object> jsonParse = (Map<String,Object>) ObjectBuilder
-        .fromJSON(res);
+    @SuppressWarnings({"unchecked"})
+    final Map<String,Object> jsonParse = (Map<String,Object>) Utils
+        .fromJSONString(res);
+    @SuppressWarnings({"unchecked"})
     final Double doc0Score = (Double) ((Map<String,Object>) ((ArrayList<Object>) ((Map<String,Object>) jsonParse
         .get("response")).get("docs")).get(0)).get("score");
 
@@ -165,8 +167,10 @@ public class TestNoMatchSolrFeature extends TestRerankBase {
     String res = restTestHarness.query("/query"
         + yesMatchFeatureQuery.toQueryString());
 
-    final Map<String,Object> jsonParse = (Map<String,Object>) ObjectBuilder
-        .fromJSON(res);
+    @SuppressWarnings({"unchecked"})
+    final Map<String,Object> jsonParse = (Map<String,Object>) Utils
+        .fromJSONString(res);
+    @SuppressWarnings({"unchecked"})
     final Double doc0Score = (Double) ((Map<String,Object>) ((ArrayList<Object>) ((Map<String,Object>) jsonParse
         .get("response")).get("docs")).get(0)).get("score");
 
@@ -239,7 +243,7 @@ public class TestNoMatchSolrFeature extends TestRerankBase {
     //  MultipleAdditiveTrees will return scores even for docs without any feature matches
     loadModel(
         "nomatchmodel4",
-        MultipleAdditiveTreesModel.class.getCanonicalName(),
+        MultipleAdditiveTreesModel.class.getName(),
         new String[] {"nomatchfeature4"},
         "noMatchFeaturesStore",
         "{\"trees\":[{\"weight\":\"1f\", \"root\":{\"feature\": \"matchedTitle\",\"threshold\": \"0.5f\",\"left\":{\"value\" : \"-10\"},\"right\":{\"value\" : \"9\"}}}]}");

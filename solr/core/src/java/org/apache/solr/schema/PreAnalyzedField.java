@@ -34,13 +34,13 @@ import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.queries.function.ValueSource;
 import org.apache.lucene.queries.function.valuesource.SortedSetFieldSource;
 import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.SortedSetSelector;
 import org.apache.lucene.util.AttributeFactory;
 import org.apache.lucene.util.AttributeSource.State;
 import org.apache.lucene.util.AttributeSource;
 import org.apache.solr.analysis.SolrAnalyzer;
 import org.apache.solr.response.TextResponseWriter;
 import org.apache.solr.search.QParser;
-import org.apache.solr.search.Sorting;
 import org.apache.solr.uninverting.UninvertingReader.Type;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,7 +52,7 @@ import static org.apache.solr.common.params.CommonParams.JSON;
  * optionally with an independent stored value of a field.
  */
 public class PreAnalyzedField extends TextField implements HasImplicitIndexAnalyzer {
-  private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
   /** Init argument name. Value is a fully-qualified class name of the parser
    * that implements {@link PreAnalyzedParser}.
@@ -79,12 +79,12 @@ public class PreAnalyzedField extends TextField implements HasImplicitIndexAnaly
         parser = new SimplePreAnalyzedParser();
       } else {
         try {
-          Class<? extends PreAnalyzedParser> implClazz = schema.getResourceLoader().findClass(implName, PreAnalyzedParser.class);
+          Class<? extends PreAnalyzedParser> implClazz = schema.getSolrClassLoader().findClass(implName, PreAnalyzedParser.class);
           Constructor<?> c = implClazz.getConstructor(new Class<?>[0]);
           parser = (PreAnalyzedParser) c.newInstance(new Object[0]);
         } catch (Exception e) {
-          LOG.warn("Can't use the configured PreAnalyzedParser class '" + implName +
-              "', using default " + DEFAULT_IMPL, e);
+          log.warn("Can't use the configured PreAnalyzedParser class '{}', using defualt {}"
+              , implName, DEFAULT_IMPL, e);
           parser = new JsonPreAnalyzedParser();
         }
       }
@@ -124,7 +124,7 @@ public class PreAnalyzedField extends TextField implements HasImplicitIndexAnaly
     try {
       f = fromString(field, String.valueOf(value));
     } catch (Exception e) {
-      LOG.warn("Error parsing pre-analyzed field '" + field.getName() + "'", e);
+      log.warn("Error parsing pre-analyzed field '{}'", field.getName(), e);
       return null;
     }
     return f;
@@ -132,8 +132,8 @@ public class PreAnalyzedField extends TextField implements HasImplicitIndexAnaly
   
   @Override
   public SortField getSortField(SchemaField field, boolean top) {
-    field.checkSortability();
-    return Sorting.getTextSortField(field.getName(), top, field.sortMissingLast(), field.sortMissingFirst());
+    return getSortedSetSortField(field, SortedSetSelector.Type.MIN, top,
+                                 SortField.STRING_FIRST, SortField.STRING_LAST);
   }
   
   @Override
@@ -149,7 +149,7 @@ public class PreAnalyzedField extends TextField implements HasImplicitIndexAnaly
   @Override
   public void write(TextResponseWriter writer, String name, IndexableField f)
           throws IOException {
-    writer.writeStr(name, f.stringValue(), true);
+    writer.writeStr(name, toExternal(f), true);
   }
   
   /** Utility method to convert a field to a string that is parse-able by this
@@ -168,8 +168,7 @@ public class PreAnalyzedField extends TextField implements HasImplicitIndexAnaly
    */
   public static org.apache.lucene.document.FieldType createFieldType(SchemaField field) {
     if (!field.indexed() && !field.stored()) {
-      if (LOG.isTraceEnabled())
-        LOG.trace("Ignoring unindexed/unstored field: " + field);
+      log.trace("Ignoring unindexed/unstored field: {}", field);
       return null;
     }
     org.apache.lucene.document.FieldType newType = new org.apache.lucene.document.FieldType();
@@ -374,18 +373,13 @@ public class PreAnalyzedField extends TextField implements HasImplicitIndexAnaly
     @Override
     protected TokenStreamComponents createComponents(String fieldName) {
       final PreAnalyzedTokenizer tokenizer = new PreAnalyzedTokenizer(parser);
-      return new TokenStreamComponents(tokenizer) {
-        @Override
-        protected void setReader(final Reader reader) {
-          super.setReader(reader);
-          try {
-            tokenizer.decodeInput(reader);
-          } catch (IOException e) {
-            // save this exception for reporting when reset() is called
-            tokenizer.setReaderConsumptionException(e);
-          }
+      return new TokenStreamComponents(r -> {
+        try {
+          tokenizer.decodeInput(r);
+        } catch (IOException e) {
+          tokenizer.setReaderConsumptionException(e);
         }
-      };
+      }, tokenizer);
     }
   }
 }

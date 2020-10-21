@@ -16,6 +16,7 @@
  */
 package org.apache.solr.security;
 
+import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -30,19 +31,15 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ByteArrayEntity;
 import org.apache.http.message.AbstractHttpMessage;
 import org.apache.http.message.BasicHeader;
-import org.apache.solr.client.solrj.SolrRequest;
+import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.client.solrj.embedded.JettySolrRunner;
 import org.apache.solr.client.solrj.impl.HttpClientUtil;
 import org.apache.solr.client.solrj.impl.HttpSolrClient;
-import org.apache.solr.client.solrj.request.GenericSolrRequest;
-import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.solr.common.params.MapSolrParams;
 import org.apache.solr.common.util.Base64;
-import org.apache.solr.common.util.ContentStreamBase;
 import org.apache.solr.common.util.Utils;
 import org.apache.solr.handler.admin.SecurityConfHandler;
 import org.apache.solr.handler.admin.SecurityConfHandlerLocalForTesting;
-import org.apache.solr.util.AbstractSolrTestCase;
-import org.apache.solr.util.LogLevel;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -50,14 +47,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
-import static org.apache.solr.security.BasicAuthIntegrationTest.NOT_NULL_PREDICATE;
+import static org.apache.solr.cloud.SolrCloudAuthTestCase.NOT_NULL_PREDICATE;
 import static org.apache.solr.security.BasicAuthIntegrationTest.STD_CONF;
 import static org.apache.solr.security.BasicAuthIntegrationTest.verifySecurityStatus;
 
-public class BasicAuthStandaloneTest extends AbstractSolrTestCase {
+public class BasicAuthStandaloneTest extends SolrTestCaseJ4 {
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-  private Path ROOT_DIR = Paths.get(getSolrHome());
+  private Path ROOT_DIR = Paths.get(TEST_HOME());
   private Path CONF_DIR = ROOT_DIR.resolve("configsets").resolve("configset-2").resolve("conf");
 
   SecurityConfHandlerLocalForTesting securityConfHandler;
@@ -71,7 +68,7 @@ public class BasicAuthStandaloneTest extends AbstractSolrTestCase {
     super.setUp();
     instance = new SolrInstance("inst", null);
     instance.setUp();
-    jetty = createJetty(instance);
+    jetty = createAndStartJetty(instance);
     securityConfHandler = new SecurityConfHandlerLocalForTesting(jetty.getCoreContainer());
     HttpClientUtil.clearRequestInterceptors(); // Clear out any old Authorization headers
   }
@@ -79,15 +76,18 @@ public class BasicAuthStandaloneTest extends AbstractSolrTestCase {
   @Override
   @After
   public void tearDown() throws Exception {
-    jetty.stop();
+    if (null != jetty) {
+      jetty.stop();
+      jetty = null;
+    }
     super.tearDown();
   }
 
   @Test
-  @LogLevel("org.apache.solr=DEBUG")
   public void testBasicAuth() throws Exception {
 
     String authcPrefix = "/admin/authentication";
+    String authzPrefix = "/admin/authorization";
 
     HttpClient cl = null;
     HttpSolrClient httpSolrClient = null;
@@ -108,40 +108,56 @@ public class BasicAuthStandaloneTest extends AbstractSolrTestCase {
           "'set-user': {'harry':'HarryIsCool'}\n" +
           "}";
 
-      GenericSolrRequest genericReq = new GenericSolrRequest(SolrRequest.METHOD.POST, authcPrefix, new ModifiableSolrParams());
-      genericReq.setContentStreams(Collections.singletonList(new ContentStreamBase.ByteArrayStream(command.getBytes(UTF_8), "")));
-
-      HttpSolrClient finalHttpSolrClient = httpSolrClient;
-      HttpSolrClient.RemoteSolrException exp = expectThrows(HttpSolrClient.RemoteSolrException.class, () -> {
-        finalHttpSolrClient.request(genericReq);
-      });
-      assertEquals(401, exp.code());
+      doHttpPost(cl, baseUrl + authcPrefix, command, null, null, 401);
+      verifySecurityStatus(cl, baseUrl + authcPrefix, "authentication.enabled", "true", 20);
 
       command = "{\n" +
           "'set-user': {'harry':'HarryIsUberCool'}\n" +
           "}";
 
-      HttpPost httpPost = new HttpPost(baseUrl + authcPrefix);
-      setBasicAuthHeader(httpPost, "solr", "SolrRocks");
-      httpPost.setEntity(new ByteArrayEntity(command.getBytes(UTF_8)));
-      httpPost.addHeader("Content-Type", "application/json; charset=UTF-8");
-      verifySecurityStatus(cl, baseUrl + authcPrefix, "authentication.enabled", "true", 20);
-      HttpResponse r = cl.execute(httpPost);
-      int statusCode = r.getStatusLine().getStatusCode();
-      Utils.consumeFully(r.getEntity());
-      assertEquals("proper_cred sent, but access denied", 200, statusCode);
 
+      doHttpPost(cl, baseUrl + authcPrefix, command, "solr", "SolrRocks");
       verifySecurityStatus(cl, baseUrl + authcPrefix, "authentication/credentials/harry", NOT_NULL_PREDICATE, 20);
 
       // Read file from SOLR_HOME and verify that it contains our new user
       assertTrue(new String(Utils.toJSON(securityConfHandler.getSecurityConfig(false).getData()), 
           Charset.forName("UTF-8")).contains("harry"));
+
+      // Edit authorization
+      verifySecurityStatus(cl, baseUrl + authzPrefix, "authorization/permissions[1]/role", null, 20);
+      doHttpPost(cl, baseUrl + authzPrefix, "{'set-permission': {'name': 'update', 'role':'updaterole'}}", "solr", "SolrRocks");
+      command = "{\n" +
+          "'set-permission': {'name': 'read', 'role':'solr'}\n" +
+          "}";
+      doHttpPost(cl, baseUrl + authzPrefix, command, "solr", "SolrRocks");
+      try {
+        httpSolrClient.query("collection1", new MapSolrParams(Collections.singletonMap("q", "foo")));
+        fail("Should return a 401 response");
+      } catch (Exception e) {
+        // Test that the second doPost request to /security/authorization went through
+        verifySecurityStatus(cl, baseUrl + authzPrefix, "authorization/permissions[2]/role", "solr", 20);
+      }
     } finally {
       if (cl != null) {
         HttpClientUtil.close(cl);
         httpSolrClient.close();
       }
     }
+  }
+
+  private void doHttpPost(HttpClient cl, String url, String jsonCommand, String basicUser, String basicPass) throws IOException {
+    doHttpPost(cl, url, jsonCommand, basicUser, basicPass, 200);
+  }
+
+  private void doHttpPost(HttpClient cl, String url, String jsonCommand, String basicUser, String basicPass, int expectStatusCode) throws IOException {
+    HttpPost httpPost = new HttpPost(url);
+    setBasicAuthHeader(httpPost, basicUser, basicPass);
+    httpPost.setEntity(new ByteArrayEntity(jsonCommand.replaceAll("'", "\"").getBytes(UTF_8)));
+    httpPost.addHeader("Content-Type", "application/json; charset=UTF-8");
+    HttpResponse r = cl.execute(httpPost);
+    int statusCode = r.getStatusLine().getStatusCode();
+    Utils.consumeFully(r.getEntity());
+    assertEquals("proper_cred sent, but access denied", expectStatusCode, statusCode);
   }
 
   public static void setBasicAuthHeader(AbstractHttpMessage httpMsg, String user, String pwd) {
@@ -151,7 +167,7 @@ public class BasicAuthStandaloneTest extends AbstractSolrTestCase {
     log.info("Added Basic Auth security Header {}",encoded );
   }
 
-  private JettySolrRunner createJetty(SolrInstance instance) throws Exception {
+  private JettySolrRunner createAndStartJetty(SolrInstance instance) throws Exception {
     Properties nodeProperties = new Properties();
     nodeProperties.setProperty("solr.data.dir", instance.getDataDir().toString());
     JettySolrRunner jetty = new JettySolrRunner(instance.getHomeDir().toString(), nodeProperties, buildJettyConfig("/solr"));
@@ -168,7 +184,7 @@ public class BasicAuthStandaloneTest extends AbstractSolrTestCase {
     Path dataDir;
     
     /**
-     * if masterPort is null, this instance is a master -- otherwise this instance is a slave, and assumes the master is
+     * if leaderPort is null, this instance is a leader -- otherwise this instance is a follower, and assumes the leader is
      * on localhost at the specified port.
      */
     public SolrInstance(String name, Integer port) {

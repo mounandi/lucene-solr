@@ -37,7 +37,7 @@ import org.apache.lucene.index.Terms;
  * <p>
  * Warning: the input {@linkplain MergeState} instance will be updated when calling {@link #apply(Collection)}.
  * <p>
- * It should be called within a {@code try &#123;...&#125; finally &#123;...&#125;} block to make sure that the mergeState instance is
+ * It should be called within a {@code try {...} finally {...}} block to make sure that the mergeState instance is
  * restored to its original state:
  * <pre>
  * PerFieldMergeState pfMergeState = new PerFieldMergeState(mergeState);
@@ -125,7 +125,7 @@ final class PerFieldMergeState {
       this.filteredNames = new HashSet<>(filterFields);
       this.filtered = new ArrayList<>(filterFields.size());
       for (FieldInfo fi : src) {
-        if (filterFields.contains(fi.name)) {
+        if (this.filteredNames.contains(fi.name)) {
           this.filtered.add(fi);
           hasVectors |= fi.hasVectors();
           hasProx |= fi.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS) >= 0;

@@ -29,6 +29,7 @@ import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionLengthAttribute;
+import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.TestUtil;
 
 import com.carrotsearch.randomizedtesting.generators.RandomStrings;
@@ -112,14 +113,14 @@ public class NGramTokenizerTest extends BaseTokenStreamTestCase {
           return new TokenStreamComponents(tokenizer, tokenizer);
         }    
       };
-      checkRandomData(random(), a, 200*RANDOM_MULTIPLIER, 20);
+      checkRandomData(random(), a, 200 * RANDOM_MULTIPLIER, 20);
       checkRandomData(random(), a, 10*RANDOM_MULTIPLIER, 1027);
       a.close();
     }
   }
 
   private static void testNGrams(int minGram, int maxGram, int length, final String nonTokenChars) throws IOException {
-    final String s = RandomStrings.randomAsciiOfLength(random(), length);
+    final String s = RandomStrings.randomAsciiLettersOfLengthBetween(random(), length, length);
     testNGrams(minGram, maxGram, s, nonTokenChars);
   }
 
@@ -179,7 +180,7 @@ public class NGramTokenizerTest extends BaseTokenStreamTestCase {
           }
         }
         assertTrue(grams.incrementToken());
-        assertArrayEquals(Arrays.copyOfRange(codePoints, start, end), toCodePoints(termAtt));
+        assertArrayEquals(ArrayUtil.copyOfSubArray(codePoints, start, end), toCodePoints(termAtt));
         assertEquals(1, posIncAtt.getPositionIncrement());
         assertEquals(1, posLenAtt.getPositionLength());
         assertEquals(offsets[start], offsetAtt.startOffset());

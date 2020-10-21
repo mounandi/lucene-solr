@@ -19,7 +19,7 @@ package org.apache.lucene.classification;
 import org.apache.lucene.analysis.MockAnalyzer;
 import org.apache.lucene.classification.utils.ConfusionMatrixGenerator;
 import org.apache.lucene.index.LeafReader;
-import org.apache.lucene.index.MultiFields;
+import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -67,23 +67,18 @@ public class KNearestFuzzyClassifierTest extends ClassificationTestBase<BytesRef
   @Test
   public void testPerformance() throws Exception {
     MockAnalyzer analyzer = new MockAnalyzer(random());
-    LeafReader leafReader = getRandomIndex(analyzer, 100);
+    int numDocs = atLeast(10);
+    LeafReader leafReader = getRandomIndex(analyzer, numDocs);
     try {
-      long trainStart = System.currentTimeMillis();
       Classifier<BytesRef> classifier = new KNearestFuzzyClassifier(leafReader, null, analyzer, null, 3, categoryFieldName, textFieldName);
-      long trainEnd = System.currentTimeMillis();
-      long trainTime = trainEnd - trainStart;
-      assertTrue("training took more than 10s: " + trainTime / 1000 + "s", trainTime < 10000);
 
-      long evaluationStart = System.currentTimeMillis();
       ConfusionMatrixGenerator.ConfusionMatrix confusionMatrix = ConfusionMatrixGenerator.getConfusionMatrix(leafReader,
           classifier, categoryFieldName, textFieldName, -1);
       assertNotNull(confusionMatrix);
-      long evaluationEnd = System.currentTimeMillis();
-      long evaluationTime = evaluationEnd - evaluationStart;
-      assertTrue("evaluation took more than 2m: " + evaluationTime / 1000 + "s", evaluationTime < 120000);
+
       double avgClassificationTime = confusionMatrix.getAvgClassificationTime();
-      assertTrue(5000 > avgClassificationTime);
+      assertTrue(avgClassificationTime >= 0);
+
       double accuracy = confusionMatrix.getAccuracy();
       assertTrue(accuracy >= 0d);
       assertTrue(accuracy <= 1d);
@@ -96,7 +91,7 @@ public class KNearestFuzzyClassifierTest extends ClassificationTestBase<BytesRef
       assertTrue(precision >= 0d);
       assertTrue(precision <= 1d);
 
-      Terms terms = MultiFields.getTerms(leafReader, categoryFieldName);
+      Terms terms = MultiTerms.getTerms(leafReader, categoryFieldName);
       TermsEnum iterator = terms.iterator();
       BytesRef term;
       while ((term = iterator.next()) != null) {

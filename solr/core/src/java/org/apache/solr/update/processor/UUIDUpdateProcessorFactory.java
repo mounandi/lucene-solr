@@ -19,7 +19,7 @@ package org.apache.solr.update.processor;
 import java.util.UUID;
 import java.util.Locale;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.solr.common.util.NamedList;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.response.SolrQueryResponse;
@@ -65,6 +65,7 @@ import org.apache.solr.schema.SchemaField;
  *
  *
  * @see UUID
+ * @since 4.0.0
  */
 public class UUIDUpdateProcessorFactory extends UpdateRequestProcessorFactory {
 
@@ -76,7 +77,7 @@ public class UUIDUpdateProcessorFactory extends UpdateRequestProcessorFactory {
   protected String fieldName = null;
 
   @SuppressWarnings("unchecked")
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
 
     Object obj = args.remove(FIELD_PARAM);
     if (null != obj) {

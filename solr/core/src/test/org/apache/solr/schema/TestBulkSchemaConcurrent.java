@@ -16,13 +16,10 @@
  */
 package org.apache.solr.schema;
 
-import static org.apache.solr.rest.schema.TestBulkSchemaAPI.getSourceCopyFields;
-import static org.apache.solr.rest.schema.TestBulkSchemaAPI.getObj;
-
-import java.io.StringReader;
 import java.lang.invoke.MethodHandles;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -30,22 +27,20 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.solr.SolrTestCaseJ4;
-import org.apache.solr.client.solrj.SolrClient;
-import org.apache.solr.client.solrj.impl.HttpSolrClient;
 import org.apache.solr.cloud.AbstractFullDistribZkTestBase;
 import org.apache.solr.common.util.StrUtils;
 import org.apache.solr.common.util.Utils;
 import org.apache.solr.util.RestTestHarness;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.noggit.JSONParser;
-import org.noggit.ObjectBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.solr.rest.schema.TestBulkSchemaAPI.getObj;
+import static org.apache.solr.rest.schema.TestBulkSchemaAPI.getSourceCopyFields;
+
 public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-  private List<RestTestHarness> restTestHarnesses = new ArrayList<>();
 
   @BeforeClass
   public static void initSysProperties() {
@@ -57,34 +52,22 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
     return "solrconfig-managed-schema.xml";
   }
 
-  private void setupHarnesses() {
-    for (final SolrClient client : clients) {
-      RestTestHarness harness = new RestTestHarness(() -> ((HttpSolrClient)client).getBaseURL());
-      restTestHarnesses.add(harness);
-    }
-  }
-
-  @Override
-  public void distribTearDown() throws Exception {
-    super.distribTearDown();
-    for (RestTestHarness r : restTestHarnesses) {
-      r.close();
-    }
-  }
-
   @Test
+  @SuppressWarnings({"unchecked"})
   public void test() throws Exception {
 
     final int threadCount = 5;
-    setupHarnesses();
+    setupRestTestHarnesses();
     Thread[] threads = new Thread[threadCount];
-    final List<List> collectErrors = new ArrayList<>();
+    @SuppressWarnings({"rawtypes"})
+    final List<List> collectErrors = Collections.synchronizedList(new ArrayList<>());
 
     for (int i = 0 ; i < threadCount ; i++) {
       final int finalI = i;
       threads[i] = new Thread(){
         @Override
         public void run() {
+          @SuppressWarnings({"rawtypes"})
           ArrayList errs = new ArrayList();
           collectErrors.add(errs);
           try {
@@ -104,16 +87,17 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
 
     boolean success = true;
 
-    for (List e : collectErrors) {
+    for (@SuppressWarnings({"rawtypes"})List e : collectErrors) {
       if (e != null &&  !e.isEmpty()) {
         success = false;
-        log.error(e.toString());
+        log.error("{}", e);
       }
     }
 
     assertTrue(collectErrors.toString(), success);
   }
 
+  @SuppressWarnings({"unchecked"})
   private void invokeBulkAddCall(int seed, ArrayList<String> errs) throws Exception {
     String payload = "{\n" +
         "          'add-field' : {\n" +
@@ -148,9 +132,10 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
     payload = payload.replace("replaceDynamicCopyFieldDest", dynamicCopyFldDest);
     payload = payload.replace("myNewFieldTypeName", newFieldTypeName);
 
-    RestTestHarness publisher = restTestHarnesses.get(r.nextInt(restTestHarnesses.size()));
+    RestTestHarness publisher = randomRestTestHarness(r);
     String response = publisher.post("/schema", SolrTestCaseJ4.json(payload));
-    Map map = (Map) ObjectBuilder.getVal(new JSONParser(new StringReader(response)));
+    @SuppressWarnings({"rawtypes"})
+    Map map = (Map) Utils.fromJSONString(response);
     Object errors = map.get("errors");
     if (errors != null) {
       errs.add(new String(Utils.toJSON(errors), StandardCharsets.UTF_8));
@@ -159,18 +144,20 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
 
     //get another node
     Set<String> errmessages = new HashSet<>();
-    RestTestHarness harness = restTestHarnesses.get(r.nextInt(restTestHarnesses.size()));
+    RestTestHarness harness = randomRestTestHarness(r);
     try {
       long startTime = System.nanoTime();
       long maxTimeoutMillis = 100000;
       while (TimeUnit.MILLISECONDS.convert(System.nanoTime() - startTime, TimeUnit.NANOSECONDS) < maxTimeoutMillis) {
         errmessages.clear();
+        @SuppressWarnings({"rawtypes"})
         Map m = getObj(harness, aField, "fields");
         if (m == null) errmessages.add(StrUtils.formatString("field {0} not created", aField));
         
         m = getObj(harness, dynamicFldName, "dynamicFields");
         if (m == null) errmessages.add(StrUtils.formatString("dynamic field {0} not created", dynamicFldName));
 
+        @SuppressWarnings({"rawtypes"})
         List l = getSourceCopyFields(harness, aField);
         if (!checkCopyField(l, aField, dynamicCopyFldDest))
           errmessages.add(StrUtils.formatString("CopyField source={0},dest={1} not created", aField, dynamicCopyFldDest));
@@ -190,6 +177,7 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
     }
   }
 
+  @SuppressWarnings({"unchecked"})
   private void invokeBulkReplaceCall(int seed, ArrayList<String> errs) throws Exception {
     String payload = "{\n" +
         "          'replace-field' : {\n" +
@@ -218,9 +206,10 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
     payload = payload.replace("replaceDynamicField", dynamicFldName);
     payload = payload.replace("myNewFieldTypeName", newFieldTypeName);
 
-    RestTestHarness publisher = restTestHarnesses.get(r.nextInt(restTestHarnesses.size()));
+    RestTestHarness publisher = randomRestTestHarness(r);
     String response = publisher.post("/schema", SolrTestCaseJ4.json(payload));
-    Map map = (Map) ObjectBuilder.getVal(new JSONParser(new StringReader(response)));
+    @SuppressWarnings({"rawtypes"})
+    Map map = (Map) Utils.fromJSONString(response);
     Object errors = map.get("errors");
     if (errors != null) {
       errs.add(new String(Utils.toJSON(errors), StandardCharsets.UTF_8));
@@ -229,18 +218,20 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
 
     //get another node
     Set<String> errmessages = new HashSet<>();
-    RestTestHarness harness = restTestHarnesses.get(r.nextInt(restTestHarnesses.size()));
+    RestTestHarness harness = randomRestTestHarness(r);
     try {
       long startTime = System.nanoTime();
       long maxTimeoutMillis = 100000;
       while (TimeUnit.MILLISECONDS.convert(System.nanoTime() - startTime, TimeUnit.NANOSECONDS) < maxTimeoutMillis) {
         errmessages.clear();
+        @SuppressWarnings({"rawtypes"})
         Map m = getObj(harness, aField, "fields");
         if (m == null) errmessages.add(StrUtils.formatString("field {0} no longer present", aField));
 
         m = getObj(harness, dynamicFldName, "dynamicFields");
         if (m == null) errmessages.add(StrUtils.formatString("dynamic field {0} no longer present", dynamicFldName));
 
+        @SuppressWarnings({"rawtypes"})
         List l = getSourceCopyFields(harness, aField);
         if (!checkCopyField(l, aField, dynamicCopyFldDest))
           errmessages.add(StrUtils.formatString("CopyField source={0},dest={1} no longer present", aField, dynamicCopyFldDest));
@@ -260,6 +251,7 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
     }
   }
 
+  @SuppressWarnings({"unchecked"})
   private void invokeBulkDeleteCall(int seed, ArrayList<String> errs) throws Exception {
     String payload = "{\n" +
         "          'delete-copy-field' : {\n" +
@@ -280,9 +272,10 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
     payload = payload.replace("replaceDynamicCopyFieldDest",dynamicCopyFldDest);
     payload = payload.replace("myNewFieldTypeName", newFieldTypeName);
 
-    RestTestHarness publisher = restTestHarnesses.get(r.nextInt(restTestHarnesses.size()));
+    RestTestHarness publisher = randomRestTestHarness(r);
     String response = publisher.post("/schema", SolrTestCaseJ4.json(payload));
-    Map map = (Map) ObjectBuilder.getVal(new JSONParser(new StringReader(response)));
+    @SuppressWarnings({"rawtypes"})
+    Map map = (Map) Utils.fromJSONString(response);
     Object errors = map.get("errors");
     if (errors != null) {
       errs.add(new String(Utils.toJSON(errors), StandardCharsets.UTF_8));
@@ -291,18 +284,20 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
 
     //get another node
     Set<String> errmessages = new HashSet<>();
-    RestTestHarness harness = restTestHarnesses.get(r.nextInt(restTestHarnesses.size()));
+    RestTestHarness harness = randomRestTestHarness(r);
     try {
       long startTime = System.nanoTime();
       long maxTimeoutMillis = 100000;
       while (TimeUnit.MILLISECONDS.convert(System.nanoTime() - startTime, TimeUnit.NANOSECONDS) < maxTimeoutMillis) {
         errmessages.clear();
+        @SuppressWarnings({"rawtypes"})
         Map m = getObj(harness, aField, "fields");
         if (m != null) errmessages.add(StrUtils.formatString("field {0} still exists", aField));
 
         m = getObj(harness, dynamicFldName, "dynamicFields");
         if (m != null) errmessages.add(StrUtils.formatString("dynamic field {0} still exists", dynamicFldName));
 
+        @SuppressWarnings({"rawtypes"})
         List l = getSourceCopyFields(harness, aField);
         if (checkCopyField(l, aField, dynamicCopyFldDest))
           errmessages.add(StrUtils.formatString("CopyField source={0},dest={1} still exists", aField, dynamicCopyFldDest));
@@ -322,9 +317,9 @@ public class TestBulkSchemaConcurrent  extends AbstractFullDistribZkTestBase {
     }
   }
 
-  private boolean checkCopyField(List<Map> l, String src, String dest) {
+  private boolean checkCopyField(@SuppressWarnings({"rawtypes"})List<Map> l, String src, String dest) {
     if (l == null) return false;
-    for (Map map : l) {
+    for (@SuppressWarnings({"rawtypes"})Map map : l) {
       if (src.equals(map.get("source")) && dest.equals(map.get("dest"))) 
         return true;
     }

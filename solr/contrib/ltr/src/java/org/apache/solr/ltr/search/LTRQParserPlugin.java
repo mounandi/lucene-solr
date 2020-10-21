@@ -21,8 +21,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
-import org.apache.lucene.analysis.util.ResourceLoader;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.Query;
 import org.apache.solr.common.SolrException;
@@ -79,6 +79,7 @@ public class LTRQParserPlugin extends QParserPlugin implements ResourceLoaderAwa
   public static final String RERANK_DOCS = "reRankDocs";
 
   @Override
+  @SuppressWarnings({"unchecked"})
   public void init(@SuppressWarnings("rawtypes") NamedList args) {
     super.init(args);
     threadManager = LTRThreadModule.getInstance(args);
@@ -162,7 +163,9 @@ public class LTRQParserPlugin extends QParserPlugin implements ResourceLoaderAwa
       final String fvStoreName = SolrQueryRequestContextUtils.getFvStoreName(req);
       // Check if features are requested and if the model feature store and feature-transform feature store are the same
       final boolean featuresRequestedFromSameStore = (modelFeatureStoreName.equals(fvStoreName) || fvStoreName == null) ? extractFeatures:false;
-
+      if (threadManager != null) {
+        threadManager.setExecutor(req.getCore().getCoreContainer().getUpdateShardHandler().getUpdateExecutor());
+      }
       final LTRScoringQuery scoringQuery = new LTRScoringQuery(ltrScoringModel,
           extractEFIParams(localParams),
           featuresRequestedFromSameStore, threadManager);

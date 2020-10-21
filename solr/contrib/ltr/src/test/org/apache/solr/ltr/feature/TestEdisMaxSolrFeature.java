@@ -19,14 +19,14 @@ package org.apache.solr.ltr.feature;
 import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.ltr.TestRerankBase;
 import org.apache.solr.ltr.model.LinearModel;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 public class TestEdisMaxSolrFeature extends TestRerankBase {
 
-  @BeforeClass
-  public static void before() throws Exception {
+  @Before
+  public void before() throws Exception {
     setuptest(false);
 
     assertU(adoc("id", "1", "title", "w1", "description", "w1", "popularity",
@@ -48,8 +48,8 @@ public class TestEdisMaxSolrFeature extends TestRerankBase {
     assertU(commit());
   }
 
-  @AfterClass
-  public static void after() throws Exception {
+  @After
+  public void after() throws Exception {
     aftertest();
   }
 
@@ -57,10 +57,10 @@ public class TestEdisMaxSolrFeature extends TestRerankBase {
   public void testEdisMaxSolrFeature() throws Exception {
     loadFeature(
         "SomeEdisMax",
-        SolrFeature.class.getCanonicalName(),
+        SolrFeature.class.getName(),
         "{\"q\":\"{!edismax qf='title description' pf='description' mm=100% boost='pow(popularity, 0.1)' v='w1' tie=0.1}\"}");
 
-    loadModel("EdisMax-model", LinearModel.class.getCanonicalName(),
+    loadModel("EdisMax-model", LinearModel.class.getName(),
         new String[] {"SomeEdisMax"}, "{\"weights\":{\"SomeEdisMax\":1.0}}");
 
     final SolrQuery query = new SolrQuery();

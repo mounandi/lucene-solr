@@ -17,6 +17,7 @@
 package org.apache.lucene.index;
 
 
+import java.io.Closeable;
 import java.io.EOFException;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -27,7 +28,9 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.lucene.codecs.Codec;
+import org.apache.lucene.codecs.CompoundDirectory;
 import org.apache.lucene.codecs.FieldsProducer;
+import org.apache.lucene.codecs.VectorReader;
 import org.apache.lucene.codecs.NormsProducer;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.codecs.PostingsFormat;
@@ -59,7 +62,8 @@ final class SegmentCoreReaders {
   final StoredFieldsReader fieldsReaderOrig;
   final TermVectorsReader termVectorsReaderOrig;
   final PointsReader pointsReader;
-  final Directory cfsReader;
+  final VectorReader vectorReader;
+  final CompoundDirectory cfsReader;
   final String segment;
   /** 
    * fieldinfos for this core: means gen=-1.
@@ -135,6 +139,13 @@ final class SegmentCoreReaders {
       } else {
         pointsReader = null;
       }
+
+      if (coreFieldInfos.hasVectorValues()) {
+        vectorReader = codec.vectorFormat().fieldsReader(segmentReadState);
+      } else {
+        vectorReader = null;
+      }
+
       success = true;
     } catch (EOFException | FileNotFoundException e) {
       throw new CorruptIndexException("Problem reading index from " + dir, dir.toString(), e);
@@ -161,16 +172,12 @@ final class SegmentCoreReaders {
     throw new AlreadyClosedException("SegmentCoreReaders is already closed");
   }
 
+  @SuppressWarnings("try")
   void decRef() throws IOException {
     if (ref.decrementAndGet() == 0) {
-      Throwable th = null;
-      try {
+      try (Closeable finalizer = this::notifyCoreClosedListeners){
         IOUtils.close(termVectorsLocal, fieldsReaderLocal, fields, termVectorsReaderOrig, fieldsReaderOrig,
-                      cfsReader, normsProducer, pointsReader);
-      } catch (Throwable throwable) {
-        th = throwable;
-      } finally {
-        notifyCoreClosedListeners(th);
+                      cfsReader, normsProducer, pointsReader, vectorReader);
       }
     }
   }
@@ -193,25 +200,9 @@ final class SegmentCoreReaders {
     return cacheHelper;
   }
 
-  private void notifyCoreClosedListeners(Throwable th) throws IOException {
+  private void notifyCoreClosedListeners() throws IOException {
     synchronized(coreClosedListeners) {
-      for (IndexReader.ClosedListener listener : coreClosedListeners) {
-        // SegmentReader uses our instance as its
-        // coreCacheKey:
-        try {
-          listener.onClose(cacheHelper.getKey());
-        } catch (Throwable t) {
-          if (th == null) {
-            th = t;
-          } else {
-            th.addSuppressed(t);
-          }
-        }
-      }
-      
-      if (th != null) {
-        throw IOUtils.rethrowAlways(th);
-      }
+      IOUtils.applyToAll(coreClosedListeners, l -> l.onClose(cacheHelper.getKey()));
     }
   }
 

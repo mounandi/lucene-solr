@@ -20,8 +20,7 @@ package org.apache.lucene.analysis.en;
 import java.util.Map;
 
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.en.EnglishMinimalStemFilter;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link EnglishMinimalStemFilter}.
@@ -33,8 +32,13 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.EnglishMinimalStemFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ * @since 3.1.0
+ * @lucene.spi {@value #NAME}
  */
 public class EnglishMinimalStemFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "englishMinimalStem";
   
   /** Creates a new EnglishMinimalStemFilterFactory */
   public EnglishMinimalStemFilterFactory(Map<String,String> args) {
@@ -44,6 +48,11 @@ public class EnglishMinimalStemFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public EnglishMinimalStemFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TokenStream create(TokenStream input) {
     return new EnglishMinimalStemFilter(input);

@@ -18,14 +18,13 @@ package org.apache.solr.highlight;
 
 import java.io.IOException;
 import java.text.BreakIterator;
-import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
 
-import org.apache.lucene.document.Document;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.Query;
@@ -36,6 +35,7 @@ import org.apache.lucene.search.uhighlight.PassageFormatter;
 import org.apache.lucene.search.uhighlight.PassageScorer;
 import org.apache.lucene.search.uhighlight.UnifiedHighlighter;
 import org.apache.lucene.search.uhighlight.WholeBreakIterator;
+import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.HighlightParams;
 import org.apache.solr.common.params.SolrParams;
@@ -43,12 +43,12 @@ import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.core.PluginInfo;
 import org.apache.solr.request.SolrQueryRequest;
-import org.apache.solr.request.SolrRequestInfo;
 import org.apache.solr.schema.IndexSchema;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.search.DocIterator;
 import org.apache.solr.search.DocList;
 import org.apache.solr.search.SolrIndexSearcher;
+import org.apache.solr.search.SolrReturnFields;
 import org.apache.solr.util.RTimerTree;
 import org.apache.solr.util.plugin.PluginInfoInitialized;
 
@@ -80,6 +80,7 @@ import org.apache.solr.util.plugin.PluginInfoInitialized;
  * &lt;bool name="hl.usePhraseHighlighter"&gt;true&lt;/bool&gt;
  * &lt;int name="hl.cacheFieldValCharsThreshold"&gt;524288&lt;/int&gt;
  * &lt;str name="hl.offsetSource"&gt;&lt;/str&gt;
+ * &lt;bool name="hl.weightMatches"&gt;true&lt;/bool&gt;
  * &lt;/lst&gt;
  * &lt;/requestHandler&gt;
  * </pre>
@@ -109,6 +110,7 @@ import org.apache.solr.util.plugin.PluginInfoInitialized;
  * <li>hl.usePhraseHighlighter (bool) enables phrase highlighting. default is true
  * <li>hl.cacheFieldValCharsThreshold (int) controls how many characters from a field are cached. default is 524288 (1MB in 2 byte chars)
  * <li>hl.offsetSource (string) specifies which offset source to use, prefers postings, but will use what's available if not specified
+ * <li>hl.weightMatches (bool) enables Lucene Weight Matches mode</li>
  * </ul>
  *
  * @lucene.experimental
@@ -208,13 +210,12 @@ public class UnifiedSolrHighlighter extends SolrHighlighter implements PluginInf
     IndexSchema schema = searcher.getSchema();
     SchemaField keyField = schema.getUniqueKeyField();
     if (keyField != null) {
-      Set<String> selector = Collections.singleton(keyField.getName());
+      SolrReturnFields returnFields = new SolrReturnFields(keyField.getName(), null);
       String[] uniqueKeys = new String[docIDs.length];
       for (int i = 0; i < docIDs.length; i++) {
         int docid = docIDs[i];
-        Document doc = searcher.doc(docid, selector);
-        String id = schema.printableUniqueKey(doc);
-        uniqueKeys[i] = id;
+        SolrDocument solrDoc = searcher.getDocFetcher().solrDoc(docid, returnFields);
+        uniqueKeys[i] = schema.printableUniqueKey(solrDoc);
       }
       return uniqueKeys;
     } else {
@@ -241,12 +242,9 @@ public class UnifiedSolrHighlighter extends SolrHighlighter implements PluginInf
       this.setCacheFieldValCharsThreshold(
           params.getInt(HighlightParams.CACHE_FIELD_VAL_CHARS_THRESHOLD, DEFAULT_CACHE_CHARS_THRESHOLD));
 
-      // SolrRequestInfo is a thread-local singleton providing access to the ResponseBuilder to code that
-      //   otherwise can't get it in a nicer way.
-      SolrQueryRequest request = SolrRequestInfo.getRequestInfo().getReq();
       final RTimerTree timerTree;
-      if (request.getRequestTimer() != null) { //It may be null if not used in a search context.
-        timerTree = request.getRequestTimer();
+      if (req.getRequestTimer() != null) { //It may be null if not used in a search context.
+        timerTree = req.getRequestTimer();
       } else {
         timerTree = new RTimerTree(); // since null checks are annoying
       }
@@ -310,21 +308,29 @@ public class UnifiedSolrHighlighter extends SolrHighlighter implements PluginInf
       String type = params.getFieldParam(field, HighlightParams.BS_TYPE);
       if (fragsize == 0 || "WHOLE".equals(type)) { // 0 is special value; no fragmenting
         return new WholeBreakIterator();
-      } else if ("SEPARATOR".equals(type)) {
-        char customSep = parseBiSepChar(params.getFieldParam(field, HighlightParams.BS_SEP));
-        return new CustomSeparatorBreakIterator(customSep);
       }
-      String language = params.getFieldParam(field, HighlightParams.BS_LANGUAGE);
-      String country = params.getFieldParam(field, HighlightParams.BS_COUNTRY);
-      String variant = params.getFieldParam(field, HighlightParams.BS_VARIANT);
-      Locale locale = parseLocale(language, country, variant);
-      BreakIterator baseBI = parseBreakIterator(type, locale);
+
+      BreakIterator baseBI;
+      if ("SEPARATOR".equals(type)) {
+        char customSep = parseBiSepChar(params.getFieldParam(field, HighlightParams.BS_SEP));
+        baseBI = new CustomSeparatorBreakIterator(customSep);
+      } else {
+        String language = params.getFieldParam(field, HighlightParams.BS_LANGUAGE);
+        String country = params.getFieldParam(field, HighlightParams.BS_COUNTRY);
+        String variant = params.getFieldParam(field, HighlightParams.BS_VARIANT);
+        Locale locale = parseLocale(language, country, variant);
+        baseBI = parseBreakIterator(type, locale);
+      }
 
       if (fragsize <= 1) { // no real minimum size
         return baseBI;
       }
-      return LengthGoalBreakIterator.createMinLength(baseBI, fragsize);
-      // TODO option for using createClosestToLength()
+
+      float fragalign = params.getFieldFloat(field, HighlightParams.FRAGALIGNRATIO, 0.5f);
+      if (params.getFieldBool(field, HighlightParams.FRAGSIZEISMINIMUM, true)) {
+        return LengthGoalBreakIterator.createMinLength(baseBI, fragsize, fragalign);
+      }
+      return LengthGoalBreakIterator.createClosestToLength(baseBI, fragsize, fragalign);
     }
 
     /**
@@ -390,20 +396,28 @@ public class UnifiedSolrHighlighter extends SolrHighlighter implements PluginInf
     }
 
     @Override
-    protected boolean shouldHandleMultiTermQuery(String field) {
-      return params.getFieldBool(field, HighlightParams.HIGHLIGHT_MULTI_TERM, true);
-    }
+    protected Set<HighlightFlag> getFlags(String field) {
+      Set<HighlightFlag> flags = EnumSet.noneOf(HighlightFlag.class);
+      if (params.getFieldBool(field, HighlightParams.HIGHLIGHT_MULTI_TERM, true)) {
+        flags.add(HighlightFlag.MULTI_TERM_QUERY);
+      }
+      if (params.getFieldBool(field, HighlightParams.USE_PHRASE_HIGHLIGHTER, true)) {
+        flags.add(HighlightFlag.PHRASES);
+      }
+      flags.add(HighlightFlag.PASSAGE_RELEVANCY_OVER_SPEED);
 
-    @Override
-    protected boolean shouldHighlightPhrasesStrictly(String field) {
-      return params.getFieldBool(field, HighlightParams.USE_PHRASE_HIGHLIGHTER, true);
+      if (params.getFieldBool(field, HighlightParams.WEIGHT_MATCHES, true)
+          && flags.contains(HighlightFlag.PHRASES) && flags.contains(HighlightFlag.MULTI_TERM_QUERY)) {
+        flags.add(HighlightFlag.WEIGHT_MATCHES);
+      }
+      return flags;
     }
 
     @Override
     protected Predicate<String> getFieldMatcher(String field) {
       // TODO define hl.queryFieldPattern as a more advanced alternative to hl.requireFieldMatch.
 
-      // note that the UH & PH at Lucene level default to effectively "true"
+      // note that the UH at Lucene level default to effectively "true"
       if (params.getFieldBool(field, HighlightParams.FIELD_MATCH, false)) {
         return field::equals; // requireFieldMatch
       } else {

@@ -24,9 +24,11 @@ import org.apache.solr.analytics.ExpressionFactory.CreatorFunction;
 import org.apache.solr.analytics.value.AnalyticsValueStream;
 import org.apache.solr.analytics.value.DateValue;
 import org.apache.solr.analytics.value.DateValueStream;
+import org.apache.solr.analytics.value.StringValue;
 import org.apache.solr.analytics.value.DateValue.AbstractDateValue;
 import org.apache.solr.analytics.value.DateValueStream.AbstractDateValueStream;
 import org.apache.solr.analytics.value.constant.ConstantStringValue;
+import org.apache.solr.analytics.value.constant.ConstantValue;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.util.DateMathParser;
@@ -46,8 +48,8 @@ public class DateMathFunction {
     }
     StringBuilder mathParam = new StringBuilder();
     for (int i = 1; i < params.length; ++i) {
-      if (params[i] instanceof ConstantStringValue) {
-        mathParam.append(((ConstantStringValue) params[i]).getString());
+      if (params[i] instanceof StringValue && params[i] instanceof ConstantValue) {
+        mathParam.append(((StringValue) params[i]).getString());
       } else {
         throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires all math parameters to be a constant strings.");
       }
@@ -60,97 +62,100 @@ public class DateMathFunction {
       throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function requires a date as the first parameter.");
     }
   });
-}
-/**
- * DateMath function that supports {@link DateValue}s.
- */
-class DateMathValueFunction extends AbstractDateValue {
-  private final DateValue dateParam;
-  private final String mathParam;
-  DateMathParser parser = new DateMathParser();
-  public static final String name = DateMathFunction.name;
-  private final String exprStr;
-  private final ExpressionType funcType;
-  
-  public DateMathValueFunction(DateValue dateParam, ConstantStringValue mathParam) throws SolrException {
-    this.dateParam = dateParam;
-    this.mathParam = "NOW" + mathParam.getString();
-    this.exprStr = AnalyticsValueStream.createExpressionString(name,dateParam,mathParam);
-    this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,dateParam);
-  }
 
-  private boolean exists = false;
-  
-  @Override
-  public long getLong() {
-    Date date = getDate();
-    return (date == null) ? 0 : date.getTime();
-  }
-  @Override
-  public Date getDate() {
-    Date date = dateParam.getDate();
-    if (dateParam.exists()) {
-      exists = true;
-      return DateMathParser.parseMath(date,mathParam);
-    } else {
-      exists = false;
-      return null;
+  /**
+   * DateMath function that supports {@link DateValue}s.
+   */
+  static class DateMathValueFunction extends AbstractDateValue {
+    private final DateValue dateParam;
+    private final String mathParam;
+    DateMathParser parser = new DateMathParser();
+    public static final String name = DateMathFunction.name;
+    private final String exprStr;
+    private final ExpressionType funcType;
+
+    public DateMathValueFunction(DateValue dateParam, ConstantStringValue mathParam) throws SolrException {
+      this.dateParam = dateParam;
+      this.mathParam = "NOW" + mathParam.getString();
+      this.exprStr = AnalyticsValueStream.createExpressionString(name,dateParam,mathParam);
+      this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,dateParam);
+    }
+
+    private boolean exists = false;
+
+    @Override
+    public long getLong() {
+      Date date = getDate();
+      return (exists) ? date.getTime() : 0;
+    }
+    @Override
+    public Date getDate() {
+      Date date = dateParam.getDate();
+      if (dateParam.exists()) {
+        exists = true;
+        return DateMathParser.parseMath(date,mathParam);
+      } else {
+        exists = false;
+        return null;
+      }
+    }
+    @Override
+    public boolean exists() {
+      return exists;
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return funcType;
     }
   }
-  @Override
-  public boolean exists() {
-    return exists;
-  }
 
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return funcType;
+  /**
+   * DateMath function that supports {@link DateValueStream}s.
+   */
+  static class DateMathStreamFunction extends AbstractDateValueStream {
+    private final DateValueStream dateParam;
+    private final String mathParam;
+    public static final String name = DateMathFunction.name;
+    private final String exprStr;
+    private final ExpressionType funcType;
+
+    public DateMathStreamFunction(DateValueStream dateParam, ConstantStringValue mathParam) throws SolrException {
+      this.dateParam = dateParam;
+      this.mathParam = "NOW" + mathParam.getString();
+      this.exprStr = AnalyticsValueStream.createExpressionString(name,dateParam,mathParam);
+      this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,dateParam);
+    }
+
+    @Override
+    public void streamLongs(LongConsumer cons) {
+      streamDates(value -> cons.accept(value.getTime()));
+    }
+    @Override
+    public void streamDates(Consumer<Date> cons) {
+      dateParam.streamDates(value -> cons.accept(DateMathParser.parseMath(value, mathParam)));
+    }
+
+    @Override
+    public String getName() {
+      return name;
+    }
+    @Override
+    public String getExpressionStr() {
+      return exprStr;
+    }
+    @Override
+    public ExpressionType getExpressionType() {
+      return funcType;
+    }
   }
 }
-/**
- * DateMath function that supports {@link DateValueStream}s.
- */
-class DateMathStreamFunction extends AbstractDateValueStream {
-  private final DateValueStream dateParam;
-  private final String mathParam;
-  public static final String name = DateMathFunction.name;
-  private final String exprStr;
-  private final ExpressionType funcType;
-  
-  public DateMathStreamFunction(DateValueStream dateParam, ConstantStringValue mathParam) throws SolrException {
-    this.dateParam = dateParam;
-    this.mathParam = "NOW" + mathParam.getString();
-    this.exprStr = AnalyticsValueStream.createExpressionString(name,dateParam,mathParam);
-    this.funcType = AnalyticsValueStream.determineMappingPhase(exprStr,dateParam);
-  }
 
-  @Override
-  public void streamLongs(LongConsumer cons) {
-    streamDates(value -> cons.accept(value.getTime()));
-  }
-  @Override
-  public void streamDates(Consumer<Date> cons) {
-    dateParam.streamDates(value -> cons.accept(DateMathParser.parseMath(value, mathParam)));
-  }
-
-  @Override
-  public String getName() {
-    return name;
-  }
-  @Override
-  public String getExpressionStr() {
-    return exprStr;
-  }
-  @Override
-  public ExpressionType getExpressionType() {
-    return funcType;
-  }
-}

@@ -21,6 +21,9 @@ import java.io.IOException;
 import java.util.Map;
 
 import org.apache.lucene.analysis.CharArraySet;
+import org.apache.lucene.util.ResourceLoader;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenFilterFactory;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.fr.FrenchAnalyzer;
 
@@ -35,8 +38,15 @@ import org.apache.lucene.analysis.fr.FrenchAnalyzer;
  *       articles="stopwordarticles.txt" ignoreCase="true"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
-public class ElisionFilterFactory extends TokenFilterFactory implements ResourceLoaderAware, MultiTermAwareComponent {
+public class ElisionFilterFactory extends TokenFilterFactory implements ResourceLoaderAware {
+
+  /** SPI name */
+  public static final String NAME = "elision";
+
   private final String articlesFile;
   private final boolean ignoreCase;
   private CharArraySet articles;
@@ -51,6 +61,11 @@ public class ElisionFilterFactory extends TokenFilterFactory implements Resource
     }
   }
 
+  /** Default ctor for compatibility with SPI */
+  public ElisionFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public void inform(ResourceLoader loader) throws IOException {
     if (articlesFile == null) {
@@ -61,13 +76,13 @@ public class ElisionFilterFactory extends TokenFilterFactory implements Resource
   }
 
   @Override
-  public ElisionFilter create(TokenStream input) {
+  public TokenStream create(TokenStream input) {
     return new ElisionFilter(input, articles);
   }
 
   @Override
-  public AbstractAnalysisFactory getMultiTermComponent() {
-    return this;
+  public TokenStream normalize(TokenStream input) {
+    return create(input);
   }
 }
 

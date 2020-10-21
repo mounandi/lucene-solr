@@ -106,6 +106,7 @@ class GeoJSONWriter extends JSONWriter {
       }
       rsp.removeResponseHeader();
 
+      @SuppressWarnings({"unchecked"})
       NamedList<Object> vals = rsp.getValues();
       Object response = vals.remove("response");
       if(vals.size()==0) {
@@ -163,15 +164,7 @@ class GeoJSONWriter extends JSONWriter {
       indent();
       writeKey(fname, true);
       val = doc.getFieldValue(fname);
-
-      // SolrDocument will now have multiValued fields represented as a Collection,
-      // even if only a single value is returned for this document.
-      if (val instanceof List) {
-        // shortcut this common case instead of going through writeVal again
-        writeArray(name,((Iterable)val).iterator());
-      } else {
-        writeVal(fname, val);
-      }
+      writeVal(fname, val);
     }
 
     // GeoJSON does not really support nested FeatureCollections
@@ -203,6 +196,7 @@ class GeoJSONWriter extends JSONWriter {
   {
     // Support multi-valued geometries
     if(geo instanceof Iterable) {
+      @SuppressWarnings({"rawtypes"})
       Iterator iter = ((Iterable)geo).iterator();
       if(!iter.hasNext()) {
         return; // empty list
@@ -302,9 +296,9 @@ class GeoJSONWriter extends JSONWriter {
 
   @Override
   public void writeStartDocumentList(String name, 
-      long start, int size, long numFound, Float maxScore) throws IOException
+      long start, int size, long numFound, Float maxScore, Boolean numFoundExact) throws IOException
   {
-    writeMapOpener((maxScore==null) ? 3 : 4);
+    writeMapOpener(headerSize(maxScore, numFoundExact));
     incLevel();
     writeKey("type",false);
     writeStr(null, "FeatureCollection", false);
@@ -320,6 +314,13 @@ class GeoJSONWriter extends JSONWriter {
       writeKey("maxScore",false);
       writeFloat(null,maxScore);
     }
+    
+    if (numFoundExact != null) {
+      writeMapSeparator();
+      writeKey("numFoundExact",false);
+      writeBool(null, numFoundExact);
+    }
+    
     writeMapSeparator();
     
     // if can we get bbox of all results, we should write it here

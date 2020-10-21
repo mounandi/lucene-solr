@@ -46,15 +46,17 @@ import java.util.regex.PatternSyntaxException;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import com.carrotsearch.randomizedtesting.generators.RandomNumbers;
+import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.DocValuesFormat;
 import org.apache.lucene.codecs.PostingsFormat;
 import org.apache.lucene.codecs.asserting.AssertingCodec;
 import org.apache.lucene.codecs.blockterms.LuceneFixedGap;
 import org.apache.lucene.codecs.blocktreeords.BlockTreeOrdsPostingsFormat;
-import org.apache.lucene.codecs.lucene50.Lucene50PostingsFormat;
-import org.apache.lucene.codecs.lucene70.Lucene70Codec;
-import org.apache.lucene.codecs.lucene70.Lucene70DocValuesFormat;
+import org.apache.lucene.codecs.lucene80.Lucene80DocValuesFormat;
+import org.apache.lucene.codecs.lucene84.Lucene84PostingsFormat;
+import org.apache.lucene.codecs.lucene90.Lucene90Codec;
 import org.apache.lucene.codecs.perfield.PerFieldDocValuesFormat;
 import org.apache.lucene.codecs.perfield.PerFieldPostingsFormat;
 import org.apache.lucene.document.BinaryDocValuesField;
@@ -79,7 +81,7 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.LogMergePolicy;
 import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.MergeScheduler;
-import org.apache.lucene.index.MultiFields;
+import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.SlowCodecReaderWrapper;
@@ -92,16 +94,14 @@ import org.apache.lucene.mockfile.WindowsFS;
 import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TotalHits;
+import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.FilterDirectory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.NoLockFactory;
-import org.apache.lucene.store.RAMDirectory;
 import org.junit.Assert;
-
-import com.carrotsearch.randomizedtesting.generators.RandomNumbers;
-import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 
 /**
  * General utility methods for Lucene unit tests. 
@@ -281,20 +281,20 @@ public final class TestUtil {
     return checkIndex(dir, true);
   }
 
-  public static CheckIndex.Status checkIndex(Directory dir, boolean crossCheckTermVectors) throws IOException {
-    return checkIndex(dir, crossCheckTermVectors, false, null);
+  public static CheckIndex.Status checkIndex(Directory dir, boolean doSlowChecks) throws IOException {
+    return checkIndex(dir, doSlowChecks, false, null);
   }
 
   /** If failFast is true, then throw the first exception when index corruption is hit, instead of moving on to other fields/segments to
    *  look for any other corruption.  */
-  public static CheckIndex.Status checkIndex(Directory dir, boolean crossCheckTermVectors, boolean failFast, ByteArrayOutputStream output) throws IOException {
+  public static CheckIndex.Status checkIndex(Directory dir, boolean doSlowChecks, boolean failFast, ByteArrayOutputStream output) throws IOException {
     if (output == null) {
       output = new ByteArrayOutputStream(1024);
     }
     // TODO: actually use the dir's locking, unless test uses a special method?
     // some tests e.g. exception tests become much more complicated if they have to close the writer
     try (CheckIndex checker = new CheckIndex(dir, NoLockFactory.INSTANCE.obtainLock(dir, "bogus"))) {
-      checker.setCrossCheckTermVectors(crossCheckTermVectors);
+      checker.setDoSlowChecks(doSlowChecks);
       checker.setFailFast(failFast);
       checker.setInfoStream(new PrintStream(output, false, IOUtils.UTF_8), false);
       CheckIndex.Status indexStatus = checker.checkIndex(null);
@@ -320,7 +320,7 @@ public final class TestUtil {
     }
   }
   
-  public static void checkReader(LeafReader reader, boolean crossCheckTermVectors) throws IOException {
+  public static void checkReader(LeafReader reader, boolean doSlowChecks) throws IOException {
     ByteArrayOutputStream bos = new ByteArrayOutputStream(1024);
     PrintStream infoStream = new PrintStream(bos, false, IOUtils.UTF_8);
 
@@ -334,9 +334,9 @@ public final class TestUtil {
     CheckIndex.testLiveDocs(codecReader, infoStream, true);
     CheckIndex.testFieldInfos(codecReader, infoStream, true);
     CheckIndex.testFieldNorms(codecReader, infoStream, true);
-    CheckIndex.testPostings(codecReader, infoStream, false, true);
+    CheckIndex.testPostings(codecReader, infoStream, false, doSlowChecks, true);
     CheckIndex.testStoredFields(codecReader, infoStream, true);
-    CheckIndex.testTermVectors(codecReader, infoStream, false, crossCheckTermVectors, true);
+    CheckIndex.testTermVectors(codecReader, infoStream, false, doSlowChecks, true);
     CheckIndex.testDocValues(codecReader, infoStream, true);
     CheckIndex.testPoints(codecReader, infoStream, true);
     
@@ -355,6 +355,11 @@ public final class TestUtil {
         throw new IllegalStateException("invalid ramBytesUsed for reader: " + bytesUsed);
       }
       assert Accountables.toString(sr) != null;
+    }
+
+    // FieldInfos should be cached at the reader and always return the same instance
+    if (reader.getFieldInfos() != reader.getFieldInfos()) {
+      throw new RuntimeException("getFieldInfos() returned different instances for class: "+reader.getClass());
     }
   }
   
@@ -434,7 +439,7 @@ public final class TestUtil {
 
   /** start and end are BOTH inclusive */
   public static long nextLong(Random r, long start, long end) {
-    assert end >= start;
+    assert end >= start : "start=" + start + ",end=" + end;
     final BigInteger range = BigInteger.valueOf(end).add(BigInteger.valueOf(1)).subtract(BigInteger.valueOf(start));
     if (range.compareTo(BigInteger.valueOf(Integer.MAX_VALUE)) <= 0) {
       return start + r.nextInt(range.intValue());
@@ -913,14 +918,14 @@ public final class TestUtil {
    * This may be different than {@link Codec#getDefault()} because that is randomized. 
    */
   public static Codec getDefaultCodec() {
-    return new Lucene70Codec();
+    return new Lucene90Codec();
   }
   
   /** 
    * Returns the actual default postings format (e.g. LuceneMNPostingsFormat for this version of Lucene.
    */
   public static PostingsFormat getDefaultPostingsFormat() {
-    return new Lucene50PostingsFormat();
+    return new Lucene84PostingsFormat();
   }
   
   /** 
@@ -928,7 +933,7 @@ public final class TestUtil {
    * @lucene.internal this may disappear at any time
    */
   public static PostingsFormat getDefaultPostingsFormat(int minItemsPerBlock, int maxItemsPerBlock) {
-    return new Lucene50PostingsFormat(minItemsPerBlock, maxItemsPerBlock);
+    return new Lucene84PostingsFormat(minItemsPerBlock, maxItemsPerBlock);
   }
   
   /** Returns a random postings format that supports term ordinals */
@@ -946,7 +951,7 @@ public final class TestUtil {
    * Returns the actual default docvalues format (e.g. LuceneMNDocValuesFormat for this version of Lucene.
    */
   public static DocValuesFormat getDefaultDocValuesFormat() {
-    return new Lucene70DocValuesFormat();
+    return new Lucene80DocValuesFormat();
   }
 
   // TODO: generalize all 'test-checks-for-crazy-codecs' to
@@ -980,7 +985,7 @@ public final class TestUtil {
   // TODO: remove this, push this test to Lucene40/Lucene42 codec tests
   public static boolean fieldSupportsHugeBinaryDocValues(String field) {
     String dvFormat = getDocValuesFormat(field);
-    if (dvFormat.equals("Lucene40") || dvFormat.equals("Lucene42") || dvFormat.equals("Memory")) {
+    if (dvFormat.equals("Lucene40") || dvFormat.equals("Lucene42")) {
       return false;
     }
     return true;
@@ -1040,9 +1045,20 @@ public final class TestUtil {
     Assert.assertEquals("Reflection does not produce same map", reflectedValues, map);
   }
 
-  public static void assertEquals(TopDocs expected, TopDocs actual) {
-    Assert.assertEquals("wrong total hits", expected.totalHits, actual.totalHits);
-    Assert.assertEquals("wrong maxScore", expected.getMaxScore(), actual.getMaxScore(), 0.0);
+  /**
+   * Assert that the given {@link TopDocs} have the same top docs and consistent hit counts.
+   */
+  public static void assertConsistent(TopDocs expected, TopDocs actual) {
+    Assert.assertEquals("wrong total hits", expected.totalHits.value == 0, actual.totalHits.value == 0);
+    if (expected.totalHits.relation == TotalHits.Relation.EQUAL_TO) {
+      if (actual.totalHits.relation == TotalHits.Relation.EQUAL_TO) {
+        Assert.assertEquals("wrong total hits", expected.totalHits.value, actual.totalHits.value);
+      } else {
+        Assert.assertTrue("wrong total hits", expected.totalHits.value >= actual.totalHits.value);
+      }
+    } else if (actual.totalHits.relation == TotalHits.Relation.EQUAL_TO) {
+      Assert.assertTrue("wrong total hits", expected.totalHits.value <= actual.totalHits.value);
+    }
     Assert.assertEquals("wrong hit count", expected.scoreDocs.length, actual.scoreDocs.length);
     for(int hitIDX=0;hitIDX<expected.scoreDocs.length;hitIDX++) {
       final ScoreDoc expectedSD = expected.scoreDocs[hitIDX];
@@ -1103,7 +1119,7 @@ public final class TestUtil {
   // DocsAndFreqsEnum, DocsAndPositionsEnum.  Returns null
   // if field/term doesn't exist:
   public static PostingsEnum docs(Random random, IndexReader r, String field, BytesRef term, PostingsEnum reuse, int flags) throws IOException {
-    final Terms terms = MultiFields.getTerms(r, field);
+    final Terms terms = MultiTerms.getTerms(r, field);
     if (terms == null) {
       return null;
     }
@@ -1286,9 +1302,12 @@ public final class TestUtil {
     }
   }
   
-  /** Returns a copy of directory, entirely in RAM */
-  public static RAMDirectory ramCopyOf(Directory dir) throws IOException {
-    RAMDirectory ram = new RAMDirectory();
+  /**
+   * Returns a copy of the source directory, with file contents stored
+   * in RAM.
+   */
+  public static Directory ramCopyOf(Directory dir) throws IOException {
+    Directory ram = new ByteBuffersDirectory();
     for (String file : dir.listAll()) {
       if (file.startsWith(IndexFileNames.SEGMENTS) || IndexFileNames.CODEC_FILE_PATTERN.matcher(file).matches()) {
         ram.copyFrom(dir, file, file, IOContext.DEFAULT);

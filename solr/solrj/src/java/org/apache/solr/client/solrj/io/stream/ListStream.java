@@ -18,7 +18,6 @@ package org.apache.solr.client.solrj.io.stream;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 
 import org.apache.solr.client.solrj.io.Tuple;
@@ -30,6 +29,9 @@ import org.apache.solr.client.solrj.io.stream.expr.StreamExplanation;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpression;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 
+/**
+ * @since 6.6.0
+ */
 public class ListStream extends TupleStream implements Expressible {
 
   private static final long serialVersionUID = 1;
@@ -105,11 +107,13 @@ public class ListStream extends TupleStream implements Expressible {
       if (currentStream == null) {
         if (streamIndex < streams.length) {
           currentStream = streams[streamIndex];
+          // Set the stream to null in the array of streams once its been set to the current stream.
+          // This will remove the reference to the stream
+          // and should allow it to be garbage collected once it's no longer the current stream.
+          streams[streamIndex] = null;
           currentStream.open();
         } else {
-          HashMap map = new HashMap();
-          map.put("EOF", true);
-          return new Tuple(map);
+          return Tuple.EOF();
         }
       }
 

@@ -31,14 +31,15 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.BaseTokenStreamTestCase;
 import org.apache.lucene.analysis.MockTokenizer;
 import org.apache.lucene.analysis.Tokenizer;
+import org.apache.lucene.analysis.boost.DelimitedBoostTokenFilterFactory;
 import org.apache.lucene.analysis.miscellaneous.DelimitedTermFrequencyTokenFilterFactory;
-import org.apache.lucene.analysis.util.AbstractAnalysisFactory;
-import org.apache.lucene.analysis.util.CharFilterFactory;
-import org.apache.lucene.analysis.util.MultiTermAwareComponent;
-import org.apache.lucene.analysis.util.ResourceLoaderAware;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
-import org.apache.lucene.analysis.util.TokenizerFactory;
+import org.apache.lucene.analysis.AbstractAnalysisFactory;
+import org.apache.lucene.analysis.CharFilterFactory;
+import org.apache.lucene.util.ResourceLoaderAware;
+import org.apache.lucene.analysis.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.util.AttributeFactory;
+import org.apache.lucene.util.LuceneTestCase.Nightly;
 import org.apache.lucene.util.Version;
 
 /**
@@ -49,11 +50,13 @@ import org.apache.lucene.util.Version;
 // TODO: this was copied from the analysis/common module ... find a better way to share it!
 
 // TODO: fix this to use CustomAnalyzer instead of its own FactoryAnalyzer
+@Nightly
 public class TestFactories extends BaseTokenStreamTestCase {
   
   /** Factories that are excluded from testing it with random data */
   private static final Set<Class<? extends AbstractAnalysisFactory>> EXCLUDE_FACTORIES_RANDOM_DATA = new HashSet<>(Arrays.asList(
-      DelimitedTermFrequencyTokenFilterFactory.class
+      DelimitedTermFrequencyTokenFilterFactory.class,
+      DelimitedBoostTokenFilterFactory.class
   ));
   
   public void test() throws IOException {
@@ -75,20 +78,11 @@ public class TestFactories extends BaseTokenStreamTestCase {
     TokenizerFactory factory = (TokenizerFactory) initialize(factoryClazz);
     if (factory != null) {
       // we managed to fully create an instance. check a few more things:
-      
-      // if it implements MultiTermAware, sanity check its impl
-      if (factory instanceof MultiTermAwareComponent) {
-        AbstractAnalysisFactory mtc = ((MultiTermAwareComponent) factory).getMultiTermComponent();
-        assertNotNull(mtc);
-        // it's not ok to return e.g. a charfilter here: but a tokenizer could wrap a filter around it
-        assertFalse(mtc instanceof CharFilterFactory);
-      }
-      
       if (!EXCLUDE_FACTORIES_RANDOM_DATA.contains(factory.getClass())) {
         // beast it just a little, it shouldnt throw exceptions:
         // (it should have thrown them in initialize)
         Analyzer a = new FactoryAnalyzer(factory, null, null);
-        checkRandomData(random(), a, 20, 20, false, false);
+        checkRandomData(random(), a, 3, 20, false, false);
         a.close();
       }
     }
@@ -99,20 +93,11 @@ public class TestFactories extends BaseTokenStreamTestCase {
     TokenFilterFactory factory = (TokenFilterFactory) initialize(factoryClazz);
     if (factory != null) {
       // we managed to fully create an instance. check a few more things:
-      
-      // if it implements MultiTermAware, sanity check its impl
-      if (factory instanceof MultiTermAwareComponent) {
-        AbstractAnalysisFactory mtc = ((MultiTermAwareComponent) factory).getMultiTermComponent();
-        assertNotNull(mtc);
-        // it's not ok to return a charfilter or tokenizer here, this makes no sense
-        assertTrue(mtc instanceof TokenFilterFactory);
-      }
-      
       if (!EXCLUDE_FACTORIES_RANDOM_DATA.contains(factory.getClass())) {
         // beast it just a little, it shouldnt throw exceptions:
         // (it should have thrown them in initialize)
         Analyzer a = new FactoryAnalyzer(assertingTokenizer, factory, null);
-        checkRandomData(random(), a, 20, 20, false, false);
+        checkRandomData(random(), a, 3, 20, false, false);
         a.close();
       }
     }
@@ -123,20 +108,11 @@ public class TestFactories extends BaseTokenStreamTestCase {
     CharFilterFactory factory = (CharFilterFactory) initialize(factoryClazz);
     if (factory != null) {
       // we managed to fully create an instance. check a few more things:
-      
-      // if it implements MultiTermAware, sanity check its impl
-      if (factory instanceof MultiTermAwareComponent) {
-        AbstractAnalysisFactory mtc = ((MultiTermAwareComponent) factory).getMultiTermComponent();
-        assertNotNull(mtc);
-        // it's not ok to return a tokenizer or tokenfilter here, this makes no sense
-        assertTrue(mtc instanceof CharFilterFactory);
-      }
-      
       if (!EXCLUDE_FACTORIES_RANDOM_DATA.contains(factory.getClass())) {
         // beast it just a little, it shouldnt throw exceptions:
         // (it should have thrown them in initialize)
         Analyzer a = new FactoryAnalyzer(assertingTokenizer, null, factory);
-        checkRandomData(random(), a, 20, 20, false, false);
+        checkRandomData(random(), a, 3, 20, false, false);
         a.close();
       }
     }

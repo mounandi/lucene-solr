@@ -55,6 +55,11 @@ public class MultiMapSolrParams extends SolrParams {
 
 
   public MultiMapSolrParams(Map<String,String[]> map) {
+    assert map.entrySet().stream().allMatch(e -> {
+      boolean hasStringKey = e.getKey() == null || e.getKey().getClass() == String.class;
+      boolean hasStringArrayValue = e.getValue() == null || e.getValue().getClass() == String[].class;
+      return hasStringKey && hasStringArrayValue;
+    });
     this.map = map;
   }
 
@@ -72,6 +77,11 @@ public class MultiMapSolrParams extends SolrParams {
   @Override
   public Iterator<String> getParameterNamesIterator() {
     return map.keySet().iterator();
+  }
+
+  @Override
+  public Iterator<Map.Entry<String, String[]>> iterator() {
+    return map.entrySet().iterator();
   }
 
   public Map<String,String[]> getMap() { return map; }
@@ -97,10 +107,8 @@ public class MultiMapSolrParams extends SolrParams {
       return map;
     } else {
       Map<String,String[]> map = new HashMap<>();
-      Iterator<String> iterator = params.getParameterNamesIterator();
-      while (iterator.hasNext()) {
-        String name = iterator.next();
-        map.put(name, params.getParams(name));
+      for (Map.Entry<String, String[]> pair : params) {
+        map.put(pair.getKey(), pair.getValue());
       }
       return map;
     }

@@ -35,7 +35,7 @@ import org.apache.solr.common.SolrException.ErrorCode;
  */
 public class DocCountFunction extends AbstractLongValue implements ReductionFunction {
   private CountCollector collector;
-  public static final String name = "docCount";
+  public static final String name = "doc_count";
   private final String exprStr;
   public static final CreatorFunction creatorFunction = (params -> {
     if (params.length == 0) {
@@ -46,12 +46,12 @@ public class DocCountFunction extends AbstractLongValue implements ReductionFunc
     }
     throw new SolrException(ErrorCode.BAD_REQUEST,"The "+name+" function accepts at most 1 paramater, " + params.length + " given.");
   });
-  
+
   public DocCountFunction() {
     this.collector = new TotalCountCollector();
     this.exprStr = AnalyticsValueStream.createExpressionString(name);
   }
-  
+
   public DocCountFunction(AnalyticsValueStream param) {
     this.collector = new ExpressionCountCollector(param);
     this.exprStr = AnalyticsValueStream.createExpressionString(name,param);

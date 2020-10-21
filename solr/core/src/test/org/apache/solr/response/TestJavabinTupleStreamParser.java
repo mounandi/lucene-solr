@@ -65,21 +65,24 @@ public class TestJavabinTupleStreamParser extends SolrTestCaseJ4 {
         "        \"a_s\":\"hello3\",\n" +
         "        \"a_i\":3,\n" +
         "        \"a_f\":3.0}]}}";
+    @SuppressWarnings({"rawtypes"})
     SimpleOrderedMap nl = convert2OrderedMap((Map) Utils.fromJSONString(payload));
 
     byte[] bytes = serialize(nl);
 
-    JavabinTupleStreamParser parser = new JavabinTupleStreamParser(new ByteArrayInputStream(bytes), true);
-    Map<String, Object> map = parser.next();
-    assertEquals("2", map.get("id"));
-    map = parser.next();
-    assertEquals("3", map.get("id"));
-    System.out.println();
-    map = parser.next();
-    assertNull(map);
+    try (JavabinTupleStreamParser parser = new JavabinTupleStreamParser(new ByteArrayInputStream(bytes), true)) {
+      Map<String, Object> map = parser.next();
+      assertEquals("2", map.get("id"));
+      map = parser.next();
+      assertEquals("3", map.get("id"));
+      System.out.println();
+      map = parser.next();
+      assertNull(map);
+    }
 
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public SimpleOrderedMap convert2OrderedMap(Map m) {
     SimpleOrderedMap result = new SimpleOrderedMap<>();
     m.forEach((k, v) -> {
@@ -92,7 +95,7 @@ public class TestJavabinTupleStreamParser extends SolrTestCaseJ4 {
   }
 
   public void testSimple() throws IOException {
-    List<Map<String, Object>> l = new ArrayList();
+    List<Map<String, Object>> l = new ArrayList<>();
     l.add(Utils.makeMap("id", 1, "f", 1.0f, "s", "Some str 1"));
     l.add(Utils.makeMap("id", 2, "f", 2.0f, "s", "Some str 2"));
     l.add(Utils.makeMap("id", 3, "f", 1.0f, "s", "Some str 3"));
@@ -140,6 +143,7 @@ public class TestJavabinTupleStreamParser extends SolrTestCaseJ4 {
 
     byte[] bytes = serialize(tupleStream);
     JavabinTupleStreamParser parser = new JavabinTupleStreamParser(new ByteArrayInputStream(bytes), true);
+    @SuppressWarnings({"rawtypes"})
     Map m = parser.next();
     assertEquals(1L, m.get("id"));
     assertEquals(1.0, (Double) m.get("f"), 0.01);
@@ -166,6 +170,7 @@ public class TestJavabinTupleStreamParser extends SolrTestCaseJ4 {
     assertEquals(Boolean.TRUE, m.get("EOF"));
   }
 
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public void testSolrDocumentList() throws IOException {
     SolrQueryResponse response = new SolrQueryResponse();
     SolrDocumentList l = constructSolrDocList(response);
@@ -189,6 +194,7 @@ public class TestJavabinTupleStreamParser extends SolrTestCaseJ4 {
     }
 
   }
+  @SuppressWarnings({"unchecked"})
   public static byte[] serialize(Object o) throws IOException {
     SolrQueryResponse response = new SolrQueryResponse();
     response.getValues().add("results", o);

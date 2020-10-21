@@ -18,57 +18,84 @@
 package org.apache.solr.client.solrj.io.eval;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Locale;
+import java.util.stream.Collectors;
+import java.util.List;
 
+import org.apache.commons.math3.distribution.IntegerDistribution;
+import org.apache.commons.math3.distribution.MultivariateRealDistribution;
 import org.apache.commons.math3.distribution.RealDistribution;
-import org.apache.solr.client.solrj.io.Tuple;
-import org.apache.solr.client.solrj.io.stream.expr.Explanation;
-import org.apache.solr.client.solrj.io.stream.expr.Explanation.ExpressionType;
-import org.apache.solr.client.solrj.io.stream.expr.Expressible;
+import org.apache.commons.math3.distribution.MultivariateNormalDistribution;
 import org.apache.solr.client.solrj.io.stream.expr.StreamExpression;
-import org.apache.solr.client.solrj.io.stream.expr.StreamExpressionParameter;
 import org.apache.solr.client.solrj.io.stream.expr.StreamFactory;
 
-import java.util.List;
-import java.util.ArrayList;
-
-public class SampleEvaluator extends ComplexEvaluator implements Expressible {
+public class SampleEvaluator extends RecursiveObjectEvaluator implements ManyValueWorker {
 
   private static final long serialVersionUID = 1;
 
   public SampleEvaluator(StreamExpression expression, StreamFactory factory) throws IOException {
     super(expression, factory);
-
-    if(2 != subEvaluators.size()){
-      throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - expecting two values (regression result and a number) but found %d",expression,subEvaluators.size()));
-    }
   }
-
-  public List<Number> evaluate(Tuple tuple) throws IOException {
-    StreamEvaluator r = subEvaluators.get(0);
-    StreamEvaluator d = subEvaluators.get(1);
-    Number number = (Number)d.evaluate(tuple);
-    RealDistribution rd= (RealDistribution)r.evaluate(tuple);
-    double[] sample = rd.sample(number.intValue());
-    List<Number> list = new ArrayList();
-    for(double n : sample) {
-      list.add(n);
-    }
-    return list;
-  }
-
+  
   @Override
-  public StreamExpressionParameter toExpression(StreamFactory factory) throws IOException {
-    StreamExpression expression = new StreamExpression(factory.getFunctionName(getClass()));
-    return expression;
-  }
+  public Object doWork(Object ... objects) throws IOException{
+    if(objects.length < 1){
+      throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - null found for the first value",toExpression(constructingFactory)));
+    }
 
-  @Override
-  public Explanation toExplanation(StreamFactory factory) throws IOException {
-    return new Explanation(nodeId.toString())
-        .withExpressionType(ExpressionType.EVALUATOR)
-        .withFunctionName(factory.getFunctionName(getClass()))
-        .withImplementingClass(getClass().getName())
-        .withExpression(toExpression(factory).toString());
+    Object first = objects[0];
+
+    if(!(first instanceof MultivariateRealDistribution) && !(first instanceof RealDistribution) && !(first instanceof IntegerDistribution) && !(first instanceof MarkovChainEvaluator.MarkovChain)){
+      throw new IOException(String.format(Locale.ROOT,"Invalid expression %s - found type %s for the first value, expecting a Markov Chain, Real or Integer Distribution",toExpression(constructingFactory), first.getClass().getSimpleName()));
+    }
+
+    Object second = null;
+    if(objects.length > 1) {
+      second = objects[1];
+    }
+
+    if(first instanceof MarkovChainEvaluator.MarkovChain) {
+      MarkovChainEvaluator.MarkovChain markovChain = (MarkovChainEvaluator.MarkovChain)first;
+      if(second != null) {
+        return Arrays.stream(markovChain.sample(((Number) second).intValue())).mapToObj(item -> item).collect(Collectors.toList());
+      } else {
+        return markovChain.sample();
+      }
+    } else if (first instanceof RealDistribution) {
+      RealDistribution realDistribution = (RealDistribution) first;
+      if (second != null) {
+        return Arrays.stream(realDistribution.sample(((Number) second).intValue())).mapToObj(item -> item).collect(Collectors.toList());
+      } else {
+        return realDistribution.sample();
+      }
+    }else if(first instanceof MultivariateNormalDistribution) {
+      if(second != null) {
+        MultivariateNormalDistribution multivariateNormalDistribution = (MultivariateNormalDistribution)first;
+        int size = ((Number)second).intValue();
+        double[][] samples = new double[size][];
+        for(int i=0; i<size; ++i) {
+          samples[i] =  multivariateNormalDistribution.sample();
+        }
+
+        return new Matrix(samples);
+      } else {
+        MultivariateNormalDistribution multivariateNormalDistribution = (MultivariateNormalDistribution)first;
+        double[] sample = multivariateNormalDistribution.sample();
+        List<Number> sampleList = new ArrayList<>(sample.length);
+        for(int i=0; i<sample.length; i++) {
+          sampleList.add(sample[i]);
+        }
+        return sampleList;
+      }
+    } else {
+      IntegerDistribution integerDistribution = (IntegerDistribution) first;
+      if(second != null) {
+        return Arrays.stream(integerDistribution.sample(((Number) second).intValue())).mapToObj(item -> item).collect(Collectors.toList());
+      } else {
+        return integerDistribution.sample();
+      }
+    }
   }
 }

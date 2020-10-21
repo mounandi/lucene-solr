@@ -19,9 +19,8 @@ package org.apache.lucene.analysis.payloads;
 
 import java.util.Map;
 
-import org.apache.lucene.analysis.payloads.TypeAsPayloadTokenFilter;
 import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.util.TokenFilterFactory;
+import org.apache.lucene.analysis.TokenFilterFactory;
 
 /** 
  * Factory for {@link TypeAsPayloadTokenFilter}.
@@ -32,8 +31,14 @@ import org.apache.lucene.analysis.util.TokenFilterFactory;
  *     &lt;filter class="solr.TypeAsPayloadTokenFilterFactory"/&gt;
  *   &lt;/analyzer&gt;
  * &lt;/fieldType&gt;</pre>
+ *
+ * @since 3.1
+ * @lucene.spi {@value #NAME}
  */
 public class TypeAsPayloadTokenFilterFactory extends TokenFilterFactory {
+
+  /** SPI name */
+  public static final String NAME = "typeAsPayload";
   
   /** Creates a new TypeAsPayloadTokenFilterFactory */
   public TypeAsPayloadTokenFilterFactory(Map<String,String> args) {
@@ -43,6 +48,11 @@ public class TypeAsPayloadTokenFilterFactory extends TokenFilterFactory {
     }
   }
   
+  /** Default ctor for compatibility with SPI */
+  public TypeAsPayloadTokenFilterFactory() {
+    throw defaultCtorException();
+  }
+
   @Override
   public TypeAsPayloadTokenFilter create(TokenStream input) {
     return new TypeAsPayloadTokenFilter(input);

@@ -30,11 +30,13 @@ public class SmileResponseWriter extends BinaryResponseWriter {
 
   @Override
   public void write(OutputStream out, SolrQueryRequest request, SolrQueryResponse response) throws IOException {
-    new SmileWriter(out, request, response).writeResponse();
+    try (SmileWriter sw = new SmileWriter(out, request, response)) {
+      sw.writeResponse();
+    }
   }
 
   @Override
-  public void init(NamedList args) {
+  public void init(@SuppressWarnings({"rawtypes"})NamedList args) {
 
   }
   //smile format is an equivalent of JSON format . So we extend JSONWriter and override the relevant methods
@@ -65,7 +67,7 @@ public class SmileResponseWriter extends BinaryResponseWriter {
     }
 
     @Override
-    protected void writeNumber(String name, Number val) throws IOException {
+    public void writeNumber(String name, Number val) throws IOException {
       if (val instanceof Integer) {
         gen.writeNumber(val.intValue());
       } else if (val instanceof Long) {
@@ -154,7 +156,7 @@ public class SmileResponseWriter extends BinaryResponseWriter {
     }
 
     @Override
-    protected void writeKey(String fname, boolean needsEscaping) throws IOException {
+    public void writeKey(String fname, boolean needsEscaping) throws IOException {
       gen.writeFieldName(fname);
     }
 

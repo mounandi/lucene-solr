@@ -57,6 +57,7 @@ import org.apache.solr.search.SolrReturnFields;
  * This streams SolrDocuments from a DocList and applies transformer
  */
 public class DocsStreamer implements Iterator<SolrDocument> {
+  @SuppressWarnings({"rawtypes"})
   public static final Set<Class> KNOWN_TYPES = new HashSet<>();
 
   private final org.apache.solr.response.ResultContext rctx;
@@ -66,9 +67,7 @@ public class DocsStreamer implements Iterator<SolrDocument> {
   private final DocTransformer transformer;
   private final DocIterator docIterator;
 
-  private final Set<String> fnames; // returnFields.getLuceneFieldNames(). Maybe null. Not empty.
-  private final boolean onlyPseudoFields;
-  private final Set<String> dvFieldsToReturn; // maybe null. Not empty.
+  private final SolrReturnFields solrReturnFields;
 
   private int idx = -1;
 
@@ -77,61 +76,10 @@ public class DocsStreamer implements Iterator<SolrDocument> {
     this.docs = rctx.getDocList();
     transformer = rctx.getReturnFields().getTransformer();
     docIterator = this.docs.iterator();
-    fnames = rctx.getReturnFields().getLuceneFieldNames();
-    //TODO move onlyPseudoFields calc to ReturnFields
-    onlyPseudoFields = (fnames == null && !rctx.getReturnFields().wantsAllFields() && !rctx.getReturnFields().hasPatternMatching())
-        || (fnames != null && fnames.size() == 1 && SolrReturnFields.SCORE.equals(fnames.iterator().next()));
-
-    // add non-stored DV fields that may have been requested
     docFetcher = rctx.getSearcher().getDocFetcher();
-    dvFieldsToReturn = calcDocValueFieldsForReturn(docFetcher, rctx.getReturnFields());
+    solrReturnFields = (SolrReturnFields)rctx.getReturnFields();
 
     if (transformer != null) transformer.setContext(rctx);
-  }
-
-  // TODO move to ReturnFields ?  Or SolrDocumentFetcher ?
-  public static Set<String> calcDocValueFieldsForReturn(SolrDocumentFetcher docFetcher, ReturnFields returnFields) {
-    Set<String> result = null;
-    if (returnFields.wantsAllFields()) {
-      // check whether there are no additional fields
-      Set<String> fieldNames = returnFields.getLuceneFieldNames(true);
-      if (fieldNames == null) {
-        result = docFetcher.getNonStoredDVs(true);
-      } else {
-        result = new HashSet<>(docFetcher.getNonStoredDVs(true)); // copy
-        // add all requested fields that may be useDocValuesAsStored=false
-        for (String fl : fieldNames) {
-          if (docFetcher.getNonStoredDVs(false).contains(fl)) {
-            result.add(fl);
-          }
-        }
-      }
-    } else {
-      if (returnFields.hasPatternMatching()) {
-        for (String s : docFetcher.getNonStoredDVs(true)) {
-          if (returnFields.wantsField(s)) {
-            if (null == result) {
-              result = new HashSet<>();
-            }
-            result.add(s);
-          }
-        }
-      } else {
-        Set<String> fnames = returnFields.getLuceneFieldNames();
-        if (fnames == null) {
-          return null;
-        }
-        result = new HashSet<>(fnames); // copy
-        // here we get all non-stored dv fields because even if a user has set
-        // useDocValuesAsStored=false in schema, he may have requested a field
-        // explicitly using the fl parameter
-        result.retainAll(docFetcher.getNonStoredDVs(false));
-      }
-    }
-    if (result != null && result.isEmpty()) {
-      return null;
-    }
-    return result;
   }
 
   public int currentIndex() {
@@ -145,24 +93,7 @@ public class DocsStreamer implements Iterator<SolrDocument> {
   public SolrDocument next() {
     int id = docIterator.nextDoc();
     idx++;
-    SolrDocument sdoc = null;
-
-    if (onlyPseudoFields) {
-      // no need to get stored fields of the document, see SOLR-5968
-      sdoc = new SolrDocument();
-    } else {
-      try {
-        Document doc = docFetcher.doc(id, fnames);
-        sdoc = convertLuceneDocToSolrDoc(doc, rctx.getSearcher().getSchema()); // make sure to use the schema from the searcher and not the request (cross-core)
-
-        // decorate the document with non-stored docValues fields
-        if (dvFieldsToReturn != null) {
-          docFetcher.decorateDocValueFields(sdoc, id, dvFieldsToReturn);
-        }
-      } catch (IOException e) {
-        throw new SolrException(SolrException.ErrorCode.SERVER_ERROR, "Error reading document with docId " + id, e);
-      }
-    }
+    SolrDocument sdoc = docFetcher.solrDoc(id, solrReturnFields);
 
     if (transformer != null) {
       boolean doScore = rctx.wantsScores();
@@ -180,28 +111,75 @@ public class DocsStreamer implements Iterator<SolrDocument> {
 
   }
 
-  // TODO move to SolrDocumentFetcher ?  Refactor to also call docFetcher.decorateDocValueFields(...) ?
+  /**
+   * This method is less efficient then the 3 arg version because it may convert some fields that 
+   * are not needed
+   *
+   * @deprecated use the 3 arg version for better performance
+   * @see #convertLuceneDocToSolrDoc(Document,IndexSchema,ReturnFields)
+   */
+  @Deprecated
   public static SolrDocument convertLuceneDocToSolrDoc(Document doc, final IndexSchema schema) {
-    SolrDocument out = new SolrDocument();
+    return convertLuceneDocToSolrDoc(doc,schema, new SolrReturnFields());
+  }
+  
+  /**
+   * Converts the specified <code>Document</code> into a <code>SolrDocument</code>.
+   * <p>
+   * The use of {@link ReturnFields} can be important even when it was already used to retrieve the 
+   * {@link Document} from {@link SolrDocumentFetcher} because the Document may have been cached with 
+   * more fields then are desired.
+   * </p>
+   * 
+   * @param doc <code>Document</code> to be converted, must not be null
+   * @param schema <code>IndexSchema</code> containing the field/fieldType details for the index
+   *               the <code>Document</code> came from, must not be null.
+   * @param fields <code>ReturnFields</code> instance that can be use to limit the set of fields 
+   *               that will be converted, must not be null
+   */
+  public static SolrDocument convertLuceneDocToSolrDoc(Document doc,
+                                                       final IndexSchema schema,
+                                                       final ReturnFields fields) {
+    // TODO move to SolrDocumentFetcher ?  Refactor to also call docFetcher.decorateDocValueFields(...) ?
+    assert null != doc;
+    assert null != schema;
+    assert null != fields;
+    
+    // can't just use fields.wantsField(String)
+    // because that doesn't include extra fields needed by transformers
+    final Set<String> fieldNamesNeeded = fields.getLuceneFieldNames();
+
+    BinaryResponseWriter.MaskCharSeqSolrDocument masked = null;
+    final SolrDocument out = ResultContext.READASBYTES.get() == null ?
+        new SolrDocument() :
+        (masked = new BinaryResponseWriter.MaskCharSeqSolrDocument());
+
+    // NOTE: it would be tempting to try and optimize this to loop over fieldNamesNeeded
+    // when it's smaller then the IndexableField[] in the Document -- but that's actually *less* effecient
+    // since Document.getFields(String) does a full (internal) iteration over the full IndexableField[]
+    // see SOLR-11891
     for (IndexableField f : doc.getFields()) {
-      // Make sure multivalued fields are represented as lists
-      Object existing = out.get(f.name());
-      if (existing == null) {
-        SchemaField sf = schema.getFieldOrNull(f.name());
-        if (sf != null && sf.multiValued()) {
-          List<Object> vals = new ArrayList<>();
-          vals.add(f);
-          out.setField(f.name(), vals);
+      final String fname = f.name();
+      if (null == fieldNamesNeeded || fieldNamesNeeded.contains(fname) ) {
+        // Make sure multivalued fields are represented as lists
+        Object existing = masked == null ? out.get(fname) : masked.getRaw(fname);
+        if (existing == null) {
+          SchemaField sf = schema.getFieldOrNull(fname);
+          if (sf != null && sf.multiValued()) {
+            List<Object> vals = new ArrayList<>();
+            vals.add(f);
+            out.setField(fname, vals);
+          } else {
+            out.setField(fname, f);
+          }
         } else {
-          out.setField(f.name(), f);
+          out.addField(fname, f);
         }
-      } else {
-        out.addField(f.name(), f);
       }
     }
     return out;
   }
-
+  
   @Override
   public void remove() { //do nothing
   }

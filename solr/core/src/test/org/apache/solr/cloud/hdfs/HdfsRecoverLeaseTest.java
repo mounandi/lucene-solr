@@ -26,6 +26,8 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
+import org.apache.lucene.util.QuickPatchThreadsFilter;
+import org.apache.solr.SolrIgnoredThreadsFilter;
 import org.apache.solr.SolrTestCaseJ4;
 import org.apache.solr.util.BadHdfsThreadsFilter;
 import org.apache.solr.util.FSHDFSUtils;
@@ -39,6 +41,8 @@ import org.junit.Test;
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
 
 @ThreadLeakFilters(defaultFilters = true, filters = {
+    SolrIgnoredThreadsFilter.class,
+    QuickPatchThreadsFilter.class,
     BadHdfsThreadsFilter.class // hdfs currently leaks thread(s)
 })
 public class HdfsRecoverLeaseTest extends SolrTestCaseJ4 {
@@ -52,8 +56,11 @@ public class HdfsRecoverLeaseTest extends SolrTestCaseJ4 {
 
   @AfterClass
   public static void afterClass() throws Exception {
-    HdfsTestUtil.teardownClass(dfsCluster);
-    dfsCluster = null;
+    try {
+      HdfsTestUtil.teardownClass(dfsCluster);
+    } finally {
+      dfsCluster = null;
+    }
   }
   
   @Before
@@ -72,8 +79,7 @@ public class HdfsRecoverLeaseTest extends SolrTestCaseJ4 {
     
     URI uri = dfsCluster.getURI();
     Path path = new Path(uri);
-    Configuration conf = new Configuration();
-    conf.setBoolean("fs.hdfs.impl.disable.cache", true);
+    Configuration conf = HdfsTestUtil.getClientConfiguration(dfsCluster);
     FileSystem fs1 = FileSystem.get(path.toUri(), conf);
     Path testFile = new Path(uri.toString() + "/testfile");
     FSDataOutputStream out = fs1.create(testFile);
@@ -131,8 +137,7 @@ public class HdfsRecoverLeaseTest extends SolrTestCaseJ4 {
     
     final URI uri = dfsCluster.getURI();
     final Path path = new Path(uri);
-    final Configuration conf = new Configuration();
-    conf.setBoolean("fs.hdfs.impl.disable.cache", true);
+    final Configuration conf = HdfsTestUtil.getClientConfiguration(dfsCluster);
     
     // n threads create files
     class WriterThread extends Thread {

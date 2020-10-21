@@ -29,8 +29,6 @@ import java.util.Map;
 /**
  * <code>SumTotalTermFreqValueSource</code> returns the number of tokens.
  * (sum of term freqs across all documents, across all terms).
- * Returns -1 if frequencies were omitted for the field, or if 
- * the codec doesn't support this statistic.
  * @lucene.internal
  */
 public class SumTotalTermFreqValueSource extends ValueSource {
@@ -50,23 +48,19 @@ public class SumTotalTermFreqValueSource extends ValueSource {
   }
 
   @Override
-  public FunctionValues getValues(Map context, LeafReaderContext readerContext) throws IOException {
+  public FunctionValues getValues(Map<Object, Object> context, LeafReaderContext readerContext) throws IOException {
     return (FunctionValues)context.get(this);
   }
 
   @Override
-  public void createWeight(Map context, IndexSearcher searcher) throws IOException {
+  public void createWeight(Map<Object, Object> context, IndexSearcher searcher) throws IOException {
     long sumTotalTermFreq = 0;
     for (LeafReaderContext readerContext : searcher.getTopReaderContext().leaves()) {
       Terms terms = readerContext.reader().terms(indexedField);
       if (terms == null) continue;
       long v = terms.getSumTotalTermFreq();
-      if (v == -1) {
-        sumTotalTermFreq = -1;
-        break;
-      } else {
-        sumTotalTermFreq += v;
-      }
+      assert v != -1;
+      sumTotalTermFreq += v;
     }
     final long ttf = sumTotalTermFreq;
     context.put(this, new LongDocValues(this) {

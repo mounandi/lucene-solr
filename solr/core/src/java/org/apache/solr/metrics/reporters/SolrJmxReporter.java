@@ -21,7 +21,6 @@ import javax.management.MBeanServer;
 import java.lang.invoke.MethodHandles;
 import java.util.Locale;
 
-import com.codahale.metrics.JmxReporter;
 import com.codahale.metrics.MetricFilter;
 import com.codahale.metrics.MetricRegistry;
 
@@ -37,7 +36,7 @@ import org.slf4j.LoggerFactory;
 /**
  * A {@link SolrMetricReporter} that finds (or creates) a MBeanServer from
  * the given configuration and registers metrics to it with JMX.
- * <p>NOTE: {@link JmxReporter} that this class uses exports only newly added metrics (it doesn't
+ * <p>NOTE: {@link com.codahale.metrics.jmx.JmxReporter} that this class uses exports only newly added metrics (it doesn't
  * process already existing metrics in a registry)</p>
  */
 public class SolrJmxReporter extends FilteringSolrMetricReporter {
@@ -54,6 +53,7 @@ public class SolrJmxReporter extends FilteringSolrMetricReporter {
   private MetricRegistry registry;
   private MBeanServer mBeanServer;
   private JmxMetricsReporter reporter;
+  private String instanceTag;
   private boolean started;
 
   /**
@@ -70,7 +70,7 @@ public class SolrJmxReporter extends FilteringSolrMetricReporter {
   protected synchronized void doInit() {
     if (serviceUrl != null && agentId != null) {
       mBeanServer = JmxUtil.findFirstMBeanServer();
-      log.warn("No more than one of serviceUrl({}) and agentId({}) should be configured, using first MBeanServer instead of configuration.",
+      log.warn("No more than one of serviceUrl({}) and agentId({}) should be configured, using first MBeanServer {} instead of configuration.",
           serviceUrl, agentId, mBeanServer);
     } else if (serviceUrl != null) {
       // reuse existing services
@@ -79,7 +79,7 @@ public class SolrJmxReporter extends FilteringSolrMetricReporter {
       mBeanServer = JmxUtil.findMBeanServerForAgentId(agentId);
     } else {
       mBeanServer = JmxUtil.findFirstMBeanServer();
-      log.debug("No serviceUrl or agentId was configured, using first MBeanServer: " + mBeanServer);
+      log.debug("No serviceUrl or agentId was configured, using first MBeanServer: {}", mBeanServer);
     }
 
     if (mBeanServer == null) {
@@ -98,17 +98,24 @@ public class SolrJmxReporter extends FilteringSolrMetricReporter {
     registry = metricManager.registry(registryName);
 
     final MetricFilter filter = newMetricFilter();
-    String tag = Integer.toHexString(this.hashCode());
+    instanceTag = Integer.toHexString(this.hashCode());
     reporter = JmxMetricsReporter.forRegistry(registry)
                           .registerWith(mBeanServer)
                           .inDomain(fullDomain)
                           .filter(filter)
                           .createsObjectNamesWith(jmxObjectNameFactory)
-                          .withTag(tag)
+                          .withTag(instanceTag)
                           .build();
     reporter.start();
     started = true;
-    log.info("JMX monitoring for '" + fullDomain + "' (registry '" + registryName + "') enabled at server: " + mBeanServer);
+    log.info("JMX monitoring for '{}' (registry '{}') enabled at server: {}", fullDomain, registryName, mBeanServer);
+  }
+
+  /**
+   * For unit tests.
+   */
+  public String getInstanceTag() {
+    return instanceTag;
   }
 
   /**
@@ -116,7 +123,7 @@ public class SolrJmxReporter extends FilteringSolrMetricReporter {
    */
   @Override
   public synchronized void close() {
-    log.info("Closing reporter " + this + " for registry " + registryName + " / " + registry);
+    log.info("Closing reporter {} for registry {}/{}", this, registryName, registry);
     started = false;
     if (reporter != null) {
       reporter.close();

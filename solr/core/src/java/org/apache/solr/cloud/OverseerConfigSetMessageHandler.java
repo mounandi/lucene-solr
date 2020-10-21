@@ -27,7 +27,6 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.solr.client.solrj.SolrResponse;
 import org.apache.solr.common.SolrException;
 import org.apache.solr.common.SolrException.ErrorCode;
 import org.apache.solr.common.cloud.DocCollection;
@@ -41,12 +40,13 @@ import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.core.ConfigSetProperties;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
-import org.noggit.JSONUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static org.apache.solr.common.params.CommonParams.NAME;
 import static org.apache.solr.common.params.ConfigSetParams.ConfigSetAction.CREATE;
+import static org.apache.solr.common.util.Utils.toJSONString;
+import static org.apache.solr.handler.admin.ConfigSetsHandler.DEFAULT_CONFIGSET_NAME;
 
 /**
  * A {@link OverseerMessageHandler} that handles ConfigSets API related
@@ -77,28 +77,32 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
   // in this way, we prevent a Base ConfigSet from being deleted while it is being copied
   // but don't prevent different ConfigSets from being created with the same Base ConfigSet
   // at the same time.
+  @SuppressWarnings({"rawtypes"})
   final private Set configSetWriteWip;
+  @SuppressWarnings({"rawtypes"})
   final private Set configSetReadWip;
 
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
   public OverseerConfigSetMessageHandler(ZkStateReader zkStateReader) {
     this.zkStateReader = zkStateReader;
-    this.configSetWriteWip = new HashSet();
-    this.configSetReadWip = new HashSet();
+    this.configSetWriteWip = new HashSet<>();
+    this.configSetReadWip = new HashSet<>();
   }
 
   @Override
-  public SolrResponse processMessage(ZkNodeProps message, String operation) {
+  @SuppressWarnings({"unchecked"})
+  public OverseerSolrResponse processMessage(ZkNodeProps message, String operation) {
+    @SuppressWarnings({"rawtypes"})
     NamedList results = new NamedList();
     try {
       if (!operation.startsWith(CONFIGSETS_ACTION_PREFIX)) {
         throw new SolrException(ErrorCode.BAD_REQUEST,
             "Operation does not contain proper prefix: " + operation
-            + " expected: " + CONFIGSETS_ACTION_PREFIX);
+                + " expected: " + CONFIGSETS_ACTION_PREFIX);
       }
       operation = operation.substring(CONFIGSETS_ACTION_PREFIX.length());
-      log.info("OverseerConfigSetMessageHandler.processMessage : "+ operation + " , "+ message.toString());
+      log.info("OverseerConfigSetMessageHandler.processMessage : {}, {}", operation, message);
 
       ConfigSetParams.ConfigSetAction action = ConfigSetParams.ConfigSetAction.get(operation);
       if (action == null) {
@@ -120,15 +124,16 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
 
       if (configSetName == null) {
         SolrException.log(log, "Operation " + operation + " failed", e);
-      } else  {
+      } else {
         SolrException.log(log, "ConfigSet: " + configSetName + " operation: " + operation
             + " failed", e);
       }
 
       results.add("Operation " + operation + " caused exception:", e);
+      @SuppressWarnings({"rawtypes"})
       SimpleOrderedMap nl = new SimpleOrderedMap();
       nl.add("msg", e.getMessage());
-      nl.add("rspCode", e instanceof SolrException ? ((SolrException)e).code() : -1);
+      nl.add("rspCode", e instanceof SolrException ? ((SolrException) e).code() : -1);
       results.add("exception", nl);
     }
     return new OverseerSolrResponse(results);
@@ -145,7 +150,7 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
   }
 
   @Override
-  public Lock lockTask(ZkNodeProps message, OverseerTaskProcessor.TaskBatch taskBatch) {
+  public Lock lockTask(ZkNodeProps message, long ignored) {
     String configSetName = getTaskKey(message);
     if (canExecute(configSetName, message)) {
       markExclusiveTask(configSetName, message);
@@ -165,6 +170,7 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
     markExclusive(configSetName, baseConfigSet);
   }
 
+  @SuppressWarnings({"unchecked"})
   private void markExclusive(String configSetName, String baseConfigSetName) {
     synchronized (configSetWriteWip) {
       configSetWriteWip.add(configSetName);
@@ -210,16 +216,21 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
       operation = operation.substring(CONFIGSETS_ACTION_PREFIX.length());
       ConfigSetParams.ConfigSetAction action = ConfigSetParams.ConfigSetAction.get(operation);
       if (action == CREATE) {
-        return message.getStr(BASE_CONFIGSET);
+        String baseConfigSetName = message.getStr(BASE_CONFIGSET);
+        if (baseConfigSetName == null || baseConfigSetName.length() == 0) {
+          baseConfigSetName = DEFAULT_CONFIGSET_NAME;
+        }
+        return baseConfigSetName;
       }
     }
     return null;
   }
 
+  @SuppressWarnings({"rawtypes"})
   private NamedList getConfigSetProperties(String path) throws IOException {
-    byte [] oldPropsData = null;
+    byte[] oldPropsData = null;
     try {
-     oldPropsData = zkStateReader.getZkClient().getData(path, null, null, true);
+      oldPropsData = zkStateReader.getZkClient().getData(path, null, null, true);
     } catch (KeeperException.NoNodeException e) {
       log.info("no existing ConfigSet properties found");
     } catch (KeeperException | InterruptedException e) {
@@ -252,7 +263,8 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
     return properties;
   }
 
-  private void mergeOldProperties(Map<String, Object> newProps, NamedList oldProps) {
+  private void mergeOldProperties(Map<String, Object> newProps, @SuppressWarnings({"rawtypes"})NamedList oldProps) {
+    @SuppressWarnings({"unchecked"})
     Iterator<Map.Entry<String, Object>> it = oldProps.iterator();
     while (it.hasNext()) {
       Map.Entry<String, Object> oldEntry = it.next();
@@ -264,7 +276,7 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
 
   private byte[] getPropertyData(Map<String, Object> newProps) {
     if (newProps != null) {
-      String propertyDataStr = JSONUtil.toJSON(newProps);
+      String propertyDataStr = toJSONString(newProps);
       if (propertyDataStr == null) {
         throw new SolrException(ErrorCode.BAD_REQUEST, "Invalid property specification");
       }
@@ -283,10 +295,7 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
       throw new SolrException(ErrorCode.BAD_REQUEST, "ConfigSet name not specified");
     }
 
-    String baseConfigSetName = message.getStr(BASE_CONFIGSET);
-    if (baseConfigSetName == null || baseConfigSetName.length() == 0) {
-      throw new SolrException(ErrorCode.BAD_REQUEST, "Base ConfigSet name not specified");
-    }
+    String baseConfigSetName = message.getStr(BASE_CONFIGSET, DEFAULT_CONFIGSET_NAME);
 
     ZkConfigManager configManager = new ZkConfigManager(zkStateReader.getZkClient());
     if (configManager.configExists(configSetName)) {
@@ -303,7 +312,8 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
     Map<String, Object> props = getNewProperties(message);
     if (props != null) {
       // read the old config properties and do a merge, if necessary
-      NamedList oldProps = getConfigSetProperties(getPropertyPath(baseConfigSetName,propertyPath));
+      @SuppressWarnings({"rawtypes"})
+      NamedList oldProps = getConfigSetProperties(getPropertyPath(baseConfigSetName, propertyPath));
       if (oldProps != null) {
         mergeOldProperties(props, oldProps);
       }
@@ -317,7 +327,7 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
         try {
           zkStateReader.getZkClient().makePath(
               getPropertyPath(configSetName, propertyPath),
-                  propertyData, CreateMode.PERSISTENT, null, false, true);
+              propertyData, CreateMode.PERSISTENT, null, false, true);
         } catch (KeeperException | InterruptedException e) {
           throw new IOException("Error writing new properties",
               SolrZkClient.checkInterrupted(e));
@@ -356,16 +366,24 @@ public class OverseerConfigSetMessageHandler implements OverseerMessageHandler {
     }
 
     for (Map.Entry<String, DocCollection> entry : zkStateReader.getClusterState().getCollectionsMap().entrySet()) {
-      if (configSetName.equals(zkStateReader.readConfigName(entry.getKey())))
+      String configName = null;
+      try {
+        configName = zkStateReader.readConfigName(entry.getKey());
+      } catch (KeeperException ex) {
+        throw new SolrException(ErrorCode.BAD_REQUEST,
+            "Can not delete ConfigSet as it is currently being used by collection [" + entry.getKey() + "]");
+      }
+      if (configSetName.equals(configName))
         throw new SolrException(ErrorCode.BAD_REQUEST,
             "Can not delete ConfigSet as it is currently being used by collection [" + entry.getKey() + "]");
     }
 
     String propertyPath = ConfigSetProperties.DEFAULT_FILENAME;
+    @SuppressWarnings({"rawtypes"})
     NamedList properties = getConfigSetProperties(getPropertyPath(configSetName, propertyPath));
     if (properties != null) {
       Object immutable = properties.get(ConfigSetProperties.IMMUTABLE_CONFIGSET_ARG);
-      boolean isImmutableConfigSet = immutable  != null ? Boolean.parseBoolean(immutable.toString()) : false;
+      boolean isImmutableConfigSet = immutable != null ? Boolean.parseBoolean(immutable.toString()) : false;
       if (!force && isImmutableConfigSet) {
         throw new SolrException(ErrorCode.BAD_REQUEST, "Requested delete of immutable ConfigSet: " + configSetName);
       }

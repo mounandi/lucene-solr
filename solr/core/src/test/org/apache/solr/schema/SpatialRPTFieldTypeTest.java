@@ -76,16 +76,16 @@ public class SpatialRPTFieldTypeTest extends AbstractBadConfigTestBase {
     assertU(commit());
     String q;
     
-    q = "geo:{!geofilt score=distance filter=false sfield=geo pt="+QUERY_COORDINATES+" d=1000}";
+    q = "geo:{!geofilt score=distance filter=false sfield=geo pt="+QUERY_COORDINATES+" d=180}";
     assertQ(req("q", q, "fl", "*,score"), "//result/doc/float[@name='score'][.='"+DISTANCE_DEGREES+"']");
     
-    q = "geo:{!geofilt score=degrees filter=false sfield=geo pt="+QUERY_COORDINATES+" d=1000}";
+    q = "geo:{!geofilt score=degrees filter=false sfield=geo pt="+QUERY_COORDINATES+" d=180}";
     assertQ(req("q", q, "fl", "*,score"), "//result/doc/float[@name='score'][.='"+DISTANCE_DEGREES+"']");
     
-    q = "geo:{!geofilt score=kilometers filter=false sfield=geo pt="+QUERY_COORDINATES+" d=1000}";
+    q = "geo:{!geofilt score=kilometers filter=false sfield=geo pt="+QUERY_COORDINATES+" d=180}";
     assertQ(req("q", q, "fl", "*,score"), "//result/doc/float[@name='score'][.='"+DISTANCE_KILOMETERS+"']");
     
-    q = "geo:{!geofilt score=miles filter=false sfield=geo pt="+QUERY_COORDINATES+" d=1000}";
+    q = "geo:{!geofilt score=miles filter=false sfield=geo pt="+QUERY_COORDINATES+" d=180}";
     assertQ(req("q", q, "fl", "*,score"), "//result/doc/float[@name='score'][.='"+DISTANCE_MILES+"']");
   }
   
@@ -110,13 +110,8 @@ public class SpatialRPTFieldTypeTest extends AbstractBadConfigTestBase {
   }
   
   public void testJunkValuesForDistanceUnits() throws Exception {
-    try {
-      setupRPTField("rose", "true");
-      fail("Expected exception for bad value of distanceUnits.");
-    } catch (Exception ex) {
-      if(!ex.getMessage().startsWith("Must specify distanceUnits as one of"))
-        throw ex;
-    }
+    Exception ex = expectThrows(Exception.class, () -> setupRPTField("rose", "true"));
+    assertTrue(ex.getMessage().startsWith("Must specify distanceUnits as one of"));
   }
 
   public void testMaxDistErrConversion() throws Exception {
@@ -207,6 +202,7 @@ public class SpatialRPTFieldTypeTest extends AbstractBadConfigTestBase {
     setupRPTField("miles", "true", "WKT", random().nextBoolean()
         ? new SpatialRecursivePrefixTreeFieldType() : new RptWithGeometrySpatialField());
 
+    @SuppressWarnings({"rawtypes"})
     AbstractSpatialFieldType ftype = (AbstractSpatialFieldType)
         h.getCore().getLatestSchema().getField("geo").getType();
 
@@ -217,12 +213,7 @@ public class SpatialRPTFieldTypeTest extends AbstractBadConfigTestBase {
     assertEquals(wkt, out);
 
     //assert fails GeoJSON
-    try {
-      ftype.parseShape("{\"type\":\"Point\",\"coordinates\":[1,2]}");
-      fail("Should not parse GeoJSON if told format is WKT");
-    } catch (SolrException e) {// expected
-      System.out.println(e);
-    }
+    expectThrows(SolrException.class, () -> ftype.parseShape("{\"type\":\"Point\",\"coordinates\":[1,2]}"));
 
   }
 
@@ -230,6 +221,7 @@ public class SpatialRPTFieldTypeTest extends AbstractBadConfigTestBase {
     setupRPTField("miles", "true", "GeoJSON", random().nextBoolean()
         ? new SpatialRecursivePrefixTreeFieldType() : new RptWithGeometrySpatialField());
 
+    @SuppressWarnings({"rawtypes"})
     AbstractSpatialFieldType ftype = (AbstractSpatialFieldType)
         h.getCore().getLatestSchema().getField("geo").getType();
 
@@ -264,9 +256,14 @@ public class SpatialRPTFieldTypeTest extends AbstractBadConfigTestBase {
     if(format!=null) {
       rptMap.put("format", format);
     }
+    if (random().nextBoolean()) {
+      // use Geo3D sometimes
+      rptMap.put("spatialContextFactory", "Geo3D");
+    }
     fieldType.init(oldSchema, rptMap);
     fieldType.setTypeName("location_rpt");
-    SchemaField newField = new SchemaField("geo", fieldType, SchemaField.STORED | SchemaField.INDEXED, null);
+    SchemaField newField = new SchemaField("geo", fieldType, SchemaField.STORED | SchemaField.INDEXED | SchemaField.OMIT_NORMS | SchemaField.OMIT_TF_POSITIONS,
+            null);
     IndexSchema newSchema = oldSchema.addField(newField);
 
     h.getCore().setLatestSchema(newSchema);

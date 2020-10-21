@@ -18,13 +18,17 @@ package org.apache.solr.search;
 
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.solr.SolrTestCaseJ4;
+import org.apache.solr.common.SolrException;
 import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.solr.util.BaseTestHarness;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import java.util.*;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Random;
+import java.util.Set;
 
 @LuceneTestCase.SuppressCodecs({"Lucene3x", "Lucene40","Lucene41","Lucene42","Lucene45"})
 public class TestHashQParserPlugin extends SolrTestCaseJ4 {
@@ -54,15 +58,74 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
     }
   }
 
+  @Test
+  public void testManyHashPartitions() throws Exception {
+    ModifiableSolrParams params = new ModifiableSolrParams();
+    params.add("q", "*:*");
+    params.add("fq", "{!hash worker=0 workers=2 cost="+getCost(random())+"}");
+    params.add("partitionKeys", "a_i,a_s,a_i,a_s");
+    params.add("wt", "xml");
+    String response = h.query(req(params));
+    BaseTestHarness.validateXPath(response, "//*[@numFound='0']");
+
+    params = new ModifiableSolrParams();
+    params.add("q", "*:*");
+    params.add("fq", "{!hash worker=0 workers=2 cost="+getCost(random())+"}");
+    params.add("partitionKeys", "a_i,a_s,a_i,a_s,a_i");
+    params.add("wt", "xml");
+    ModifiableSolrParams finalParams = params;
+    expectThrows(SolrException.class, () -> h.query(req(finalParams)));
+  }
 
   @Test
+  public void testLessWorkers() {
+    ModifiableSolrParams params = new ModifiableSolrParams();
+    params.add("q", "*:*");
+    params.add("fq", "{!hash worker=0 workers=1 cost="+getCost(random())+"}");
+    params.add("partitionKeys", "a_i");
+    params.add("wt", "xml");
+    ModifiableSolrParams finalParams = params;
+    expectThrows(SolrException.class, () -> h.query(req(finalParams)));
+  }
+
+  @Test
+  public void testHashPartitionWithEmptyValues() throws Exception {
+
+    assertU(adoc("id", "1", "a_s", "one", "a_i" , "1"));
+    assertU(adoc("id", "2", "a_s", "one", "a_i" , "1"));
+    assertU(adoc("id", "3"));
+    assertU(adoc("id", "4"));
+    assertU(commit());
+
+    //Test with string hash
+    ModifiableSolrParams params = new ModifiableSolrParams();
+    params.add("q", "*:*");
+    params.add("fq", "{!hash worker=0 workers=2 cost="+getCost(random())+"}");
+    params.add("partitionKeys", "a_s");
+    params.add("wt", "xml");
+    String response = h.query(req(params));
+    BaseTestHarness.validateXPath(response, "//*[@numFound='4']");
+
+    //Test with int hash
+    params = new ModifiableSolrParams();
+    params.add("q", "*:*");
+    params.add("fq", "{!hash worker=0 workers=2 cost="+getCost(random())+"}");
+    params.add("partitionKeys", "a_i");
+    params.add("wt", "xml");
+    response = h.query(req(params));
+    BaseTestHarness.validateXPath(response, "//*[@numFound='4']");
+  }
+
+
+  @Test
+  @SuppressWarnings({"unchecked", "rawtypes"})
   public void testHashPartition() throws Exception {
 
 
     Random random = random();
     HashSet<String> set = new HashSet();
 
-    for(int i=0; i<50; i++) {
+    for (int i=0; i<50; i++) {
       int v = random.nextInt(1000000);
       String val = Integer.toString(v);
       if(!set.contains(val)){
@@ -92,7 +155,7 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
 
     while(it.hasNext()) {
       String s = it.next();
-      String results = h.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
+      String results = BaseTestHarness.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
       if(results == null) {
         set1.add(s);
       }
@@ -111,7 +174,7 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
 
     while(it.hasNext()) {
       String s = it.next();
-      String results = h.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
+      String results = BaseTestHarness.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
       if(results == null) {
         set2.add(s);
       }
@@ -131,7 +194,7 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
 
     while(it.hasNext()) {
       String s = it.next();
-      String results = h.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
+      String results = BaseTestHarness.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
       if(results == null) {
         set3.add(s);
       }
@@ -162,7 +225,7 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
 
     while(it.hasNext()) {
       String s = it.next();
-      String results = h.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
+      String results = BaseTestHarness.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
       if(results == null) {
         set1.add(s);
       }
@@ -181,7 +244,7 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
 
     while(it.hasNext()) {
       String s = it.next();
-      String results = h.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
+      String results = BaseTestHarness.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
       if(results == null) {
         set2.add(s);
       }
@@ -209,7 +272,7 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
 
     while(it.hasNext()) {
       String s = it.next();
-      String results = h.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
+      String results = BaseTestHarness.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
       if(results == null) {
         set1.add(s);
       }
@@ -228,7 +291,7 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
 
     while(it.hasNext()) {
       String s = it.next();
-      String results = h.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
+      String results = BaseTestHarness.validateXPath(response, "*[count(//str[@name='id'][.='"+s+"'])=1]");
       if(results == null) {
         set2.add(s);
       }
@@ -241,7 +304,9 @@ public class TestHashQParserPlugin extends SolrTestCaseJ4 {
   }
 
 
-  private void assertNoOverLap(Set setA, Set setB) throws Exception {
+  private void assertNoOverLap(@SuppressWarnings({"rawtypes"})Set setA,
+                               @SuppressWarnings({"rawtypes"})Set setB) throws Exception {
+    @SuppressWarnings({"rawtypes"})
     Iterator it =  setA.iterator();
     while(it.hasNext()) {
       Object o = it.next();

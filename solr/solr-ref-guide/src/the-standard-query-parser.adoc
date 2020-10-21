@@ -1,6 +1,4 @@
 = The Standard Query Parser
-:page-shortname: the-standard-query-parser
-:page-permalink: the-standard-query-parser.html
 // Licensed to the Apache Software Foundation (ASF) under one
 // or more contributor license agreements.  See the NOTICE file
 // distributed with this work for additional information
@@ -30,10 +28,10 @@ In addition to the <<common-query-parameters.adoc#common-query-parameters,Common
 Defines a query using standard query syntax. This parameter is mandatory.
 
 `q.op`::
-Specifies the default operator for query expressions, overriding the default operator specified in the Schema. Possible values are "AND" or "OR".
+Specifies the default operator for query expressions. Possible values are "AND" or "OR".
 
 `df`::
-Specifies a default field, overriding the definition of a default field in the Schema.
+Specifies a default searchable field.
 
 `sow`::
 Split on whitespace. If set to `true`, text analysis is invoked separately for each individual whitespace-separated term.  The default is `false`; whitespace-separated term sequences will be provided to text analysis in one shot, enabling proper function of analysis filters that operate over term sequences, e.g., multi-word synonyms and shingles.
@@ -50,7 +48,7 @@ This section presents examples of responses from the standard query parser.
 
 The URL below submits a simple query and requests the XML Response Writer to use indentation to make the XML response more readable.
 
-`\http://localhost:8983/solr/techproducts/select?q=id:SP2514N`
+`\http://localhost:8983/solr/techproducts/select?q=id:SP2514N&wt=xml`
 
 Results:
 
@@ -77,7 +75,7 @@ Results:
 
 Here's an example of a query with a limited field list.
 
-`\http://localhost:8983/solr/techproducts/select?q=id:SP2514N&fl=id+name`
+`\http://localhost:8983/solr/techproducts/select?q=id:SP2514N&fl=id+name&wt=xml`
 
 Results:
 
@@ -148,6 +146,15 @@ To perform a proximity search, add the tilde character ~ and a numeric value to 
 
 The distance referred to here is the number of term movements needed to match the specified phrase. In the example above, if "apache" and "jakarta" were 10 spaces apart in a field, but "apache" appeared before "jakarta", more than 10 term movements would be required to move the terms together and position "apache" to the right of "jakarta" with a space in between.
 
+=== Existence Searches
+
+An existence search for a field matches all documents where a value exists for that field.
+To query for a field existing, simply use a wildcard instead of a term in the search.
+
+`field:*`
+
+A field will be considered to "exist" if it has any value, even values which are often considered "not existent". (e.g., `NaN`, `""`, etc.)
+
 === Range Searches
 
 A range search specifies a range of values for a field (a range with an upper bound and a lower bound). The query matches documents whose values for the specified field or fields fall within the range. Range queries can be inclusive or exclusive of the upper and lower bounds. Sorting is done lexicographically, except on numeric fields. For example, the range query below matches all documents whose `popularity` field has a value between 52 and 10,000, inclusive.
@@ -165,6 +172,25 @@ The brackets around a query determine its inclusiveness.
 * Square brackets `[` & `]` denote an inclusive range query that matches values including the upper and lower bound.
 * Curly brackets `{` & `}` denote an exclusive range query that matches values between the upper and lower bounds, but excluding the upper and lower bounds themselves.
 * You can mix these types so one end of the range is inclusive and the other is exclusive. Here's an example: `count:{1 TO 10]`
+
+Wildcards, `*`, can also be used for either or both endpoints to specify an open-ended range query.
+This is a <<#differences-between-lucenes-classic-query-parser-and-solrs-standard-query-parser,divergence from Lucene's Classic Query Parser>>.
+
+* `field:[* TO 100]` finds all field values less than or equal to 100.
+* `field:[100 TO *]` finds all field values greater than or equal to 100.
+* `field:[* TO *]` finds any document with a value between the effective values of -Infinity and +Infinity for that field type.
+
+
+[NOTE]
+.Matching `NaN` values with wildcards
+====
+For most fields, unbounded range queries, `field:[* TO *]`, are equivalent to existence queries, `field: *` .
+However for float/double types that support `NaN` values, these two queries perform differently.
+
+* `field:*` matches all existing values, including `NaN`
+* `field:[* TO *]` matches all real values, excluding `NaN`
+====
+
 
 === Boosting a Term with "^"
 
@@ -320,22 +346,27 @@ Example:
 
 Comments may be nested.
 
-== Differences between Lucene Query Parser and the Solr Standard Query Parser
+== Differences between Lucene's Classic Query Parser and Solr's Standard Query Parser
 
-Solr's standard query parser differs from the Lucene Query Parser in the following ways:
+Solr's standard query parser originated as a variation of Lucene's "classic" QueryParser.  It diverges in the following ways:
 
-* A * may be used for either or both endpoints to specify an open-ended range query
+* A `*` may be used for either or both endpoints to specify an open-ended range query, or by itself as an existence query.
 ** `field:[* TO 100]` finds all field values less than or equal to 100
 ** `field:[100 TO *]` finds all field values greater than or equal to 100
-** `field:[* TO *]` matches all documents with the field
+** `field:[* TO *]` finds all documents where the field has a value between `-Infinity` and `Infinity`, excluding `NaN`.
+** `field:*` finds all documents where the field exists (i.e., has any value).
 * Pure negative queries (all clauses prohibited) are allowed (only as a top-level clause)
 ** `-inStock:false` finds all field values where inStock is not false
-** `-field:[* TO *]` finds all documents without a value for field
-* A hook into FunctionQuery syntax. You'll need to use quotes to encapsulate the function if it includes parentheses, as shown in the second example below:
-** `_val_:myfield`
-** `_val_:"recip(rord(myfield),1,2,3)"`
-* Support for using any type of query parser as a nested clause.
+** `-field:*` finds all documents without a value for the field.
+* Support for embedded Solr queries (sub-queries) using any type of query parser as a nested clause using the local-params syntax.
 ** `inStock:true OR {!dismax qf='name manu' v='ipod'}`
++
+Gotcha: Be careful not to start your query with `{!` at the very beginning, which changes the parsing of the entire
+query string, which may not be what you want if there are additional clauses.  So flipping the example above so the
+sub-query comes first would fail to work as expected without a leading space.
++
+Sub-queries can also be done with the magic field `\_query_` and for function queries with the magic field `\_val_` but it
+should be considered deprecated since it is less clear.  Example: `\_val_:"recip(rord(myfield),1,2,3)"`
 * Support for a special `filter(...)` syntax to indicate that some query clauses should be cached in the filter cache (as a constant score boolean query). This allows sub-queries to be cached and re-used in other queries. For example `inStock:true` will be cached and re-used in all three of the queries below:
 ** `q=features:songs OR filter(inStock:true)`
 ** `q=+manu:Apple +filter(inStock:true)`
@@ -350,11 +381,13 @@ This can even be used to cache individual clauses of complex filter queries. In 
 
 === Specifying Dates and Times
 
-Queries against fields using the `TrieDateField` type (typically range queries) should use the <<working-with-dates.adoc#working-with-dates,appropriate date syntax>>:
+Queries against date based fields must use the <<working-with-dates.adoc#working-with-dates,appropriate date formating>>.  Queries for exact date values will require quoting or escaping since `:` is the parser syntax used to denote a field query:
 
-* `timestamp:[* TO NOW]`
+* `createdate:1976-03-06T23\:59\:59.999Z`
+* `createdate:"1976-03-06T23:59:59.999Z"`
 * `createdate:[1976-03-06T23:59:59.999Z TO *]`
 * `createdate:[1995-12-31T23:59:59.999Z TO 2007-03-06T00:00:00Z]`
+* `timestamp:[* TO NOW]`
 * `pubdate:[NOW-1YEAR/DAY TO NOW/DAY+1DAY]`
 * `createdate:[1976-03-06T23:59:59.999Z TO 1976-03-06T23:59:59.999Z+1YEAR]`
 * `createdate:[1976-03-06T23:59:59.999Z/YEAR TO 1976-03-06T23:59:59.999Z]`

@@ -17,6 +17,7 @@
 package org.apache.solr.schema;
 
 import java.io.IOException;
+import java.util.Locale;
 import java.util.Map;
 
 import org.apache.lucene.analysis.Analyzer;
@@ -29,10 +30,10 @@ import org.apache.lucene.search.*;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.QueryBuilder;
 import org.apache.solr.common.SolrException;
+import org.apache.solr.parser.SolrQueryParserBase;
 import org.apache.solr.query.SolrRangeQuery;
 import org.apache.solr.response.TextResponseWriter;
 import org.apache.solr.search.QParser;
-import org.apache.solr.search.Sorting;
 import org.apache.solr.uninverting.UninvertingReader.Type;
 
 /** <code>TextField</code> is the basic type for configurable text analysis.
@@ -42,6 +43,7 @@ import org.apache.solr.uninverting.UninvertingReader.Type;
 public class TextField extends FieldType {
   protected boolean autoGeneratePhraseQueries;
   protected boolean enableGraphQueries;
+  protected SolrQueryParserBase.SynonymQueryStyle synonymQueryStyle;
 
   /**
    * Analyzer set by schema for text types to use when searching fields
@@ -73,6 +75,12 @@ public class TextField extends FieldType {
     String autoGeneratePhraseQueriesStr = args.remove(AUTO_GENERATE_PHRASE_QUERIES);
     if (autoGeneratePhraseQueriesStr != null)
       autoGeneratePhraseQueries = Boolean.parseBoolean(autoGeneratePhraseQueriesStr);
+
+    synonymQueryStyle = SolrQueryParserBase.SynonymQueryStyle.AS_SAME_TERM;
+    String synonymQueryStyle = args.remove(SYNONYM_QUERY_STYLE);
+    if (synonymQueryStyle != null) {
+      this.synonymQueryStyle = SolrQueryParserBase.SynonymQueryStyle.valueOf(synonymQueryStyle.toUpperCase(Locale.ROOT));
+    }
     
     enableGraphQueries = true;
     String enableGraphQueriesStr = args.remove(ENABLE_GRAPH_QUERIES);
@@ -105,11 +113,18 @@ public class TextField extends FieldType {
     return enableGraphQueries;
   }
 
+  public SolrQueryParserBase.SynonymQueryStyle getSynonymQueryStyle() {return synonymQueryStyle;}
+
   @Override
   public SortField getSortField(SchemaField field, boolean reverse) {
     /* :TODO: maybe warn if isTokenized(), but doesn't use LimitTokenCountFilter in its chain? */
-    field.checkSortability();
-    return Sorting.getTextSortField(field.getName(), reverse, field.sortMissingLast(), field.sortMissingFirst());
+    return getSortedSetSortField(field,
+                                 // historical behavior based on how the early versions of the FieldCache
+                                 // would deal with multiple indexed terms in a singled valued field...
+                                 //
+                                 // Always use the 'min' value from the (Uninverted) "psuedo doc values"
+                                 SortedSetSelector.Type.MIN,
+                                 reverse, SortField.STRING_FIRST, SortField.STRING_LAST);
   }
   
   @Override
@@ -124,7 +139,7 @@ public class TextField extends FieldType {
 
   @Override
   public void write(TextResponseWriter writer, String name, IndexableField f) throws IOException {
-    writer.writeStr(name, f.stringValue(), true);
+    writer.writeStr(name, toExternal(f), true);
   }
 
   @Override
@@ -143,13 +158,23 @@ public class TextField extends FieldType {
   }
 
   @Override
-  public Query getRangeQuery(QParser parser, SchemaField field, String part1, String part2, boolean minInclusive, boolean maxInclusive) {
+  protected Query getSpecializedRangeQuery(QParser parser, SchemaField field, String part1, String part2, boolean minInclusive, boolean maxInclusive) {
     Analyzer multiAnalyzer = getMultiTermAnalyzer();
     BytesRef lower = analyzeMultiTerm(field.getName(), part1, multiAnalyzer);
     BytesRef upper = analyzeMultiTerm(field.getName(), part2, multiAnalyzer);
     return new SolrRangeQuery(field.getName(), lower, upper, minInclusive, maxInclusive);
   }
 
+  /**
+   * Analyzes a text part using the provided {@link Analyzer} for a multi-term query.
+   * <p>
+   * Expects a single token to be used as multi-term term. This single token might also be filtered out
+   * so zero token is supported and null is returned in this case.
+   *
+   * @return The multi-term term bytes; or null if there is no multi-term terms.
+   * @throws SolrException If the {@link Analyzer} tokenizes more than one token;
+   * or if an underlying {@link IOException} occurs.
+   */
   public static BytesRef analyzeMultiTerm(String field, String part, Analyzer analyzerIn) {
     if (part == null || analyzerIn == null) return null;
 
@@ -158,8 +183,10 @@ public class TextField extends FieldType {
 
       TermToBytesRefAttribute termAtt = source.getAttribute(TermToBytesRefAttribute.class);
 
-      if (!source.incrementToken())
-        throw  new SolrException(SolrException.ErrorCode.BAD_REQUEST,"analyzer returned no terms for multiTerm term: " + part);
+      if (!source.incrementToken()) {
+        // Accept no tokens because it may have been filtered out by a StopFilter for example.
+        return null;
+      }
       BytesRef bytes = BytesRef.deepCopyOf(termAtt.getBytesRef());
       if (source.incrementToken())
         throw  new SolrException(SolrException.ErrorCode.BAD_REQUEST,"analyzer returned too many terms for multiTerm term: " + part);
@@ -193,5 +220,10 @@ public class TextField extends FieldType {
   @Override
   public Object unmarshalSortValue(Object value) {
     return unmarshalStringSortValue(value);
+  }
+
+  @Override
+  public boolean isUtf8Field() {
+    return true;
   }
 }

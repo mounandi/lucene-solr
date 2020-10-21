@@ -21,6 +21,8 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.IntFunction;
 
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiPostingsEnum;
@@ -30,6 +32,7 @@ import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.StringHelper;
 import org.apache.solr.common.SolrException;
@@ -37,9 +40,8 @@ import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.schema.SchemaField;
 import org.apache.solr.schema.TrieField;
 import org.apache.solr.search.DocSet;
-import org.apache.solr.search.HashDocSet;
 import org.apache.solr.search.SolrIndexSearcher;
-import org.apache.solr.search.SortedIntDocSet;
+import org.apache.solr.search.facet.SlotAcc.SlotContext;
 
 /**
  * Enumerates indexed terms in order in a streaming fashion.
@@ -54,12 +56,20 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
   boolean hasSubFacets;  // true if there are subfacets
   int minDfFilterCache;
   DocSet docs;
-  DocSet fastForRandomSet;
+  Bits fastForRandomSet;
   TermsEnum termsEnum = null;
   SolrIndexSearcher.DocsEnumState deState = null;
   PostingsEnum postingsEnum;
   BytesRef startTermBytes;
   BytesRef term;
+  AtomicBoolean shardHasMoreBuckets = new AtomicBoolean(false);  // set after streaming as finished
+
+  // at any point in processing where we need a SlotContext, all we care about is the current 'term'
+  private IntFunction<SlotContext> slotContext = (slotNum) -> {
+    assert null != term;
+    return new SlotAcc.SlotContext(new TermQuery(new Term(sf.getName(), term)));
+  };
+  
   LeafReaderContext[] leaves;
 
   FacetFieldProcessorByEnumTermsStream(FacetContext fcontext, FacetField freq, SchemaField sf) {
@@ -75,6 +85,7 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
   }
 
   @Override
+  @SuppressWarnings({"rawtypes"})
   public void process() throws IOException {
     super.process();
 
@@ -123,6 +134,9 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
         throw new UnsupportedOperationException();
       }
     });
+    if (fcontext.isShard()) {
+      response.add("more", shardHasMoreBuckets);  // lazily evaluated
+    }
   }
 
   private void setup() throws IOException {
@@ -195,7 +209,7 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
 
   private SimpleOrderedMap<Object> _nextBucket() throws IOException {
     DocSet termSet = null;
-
+    
     try {
       while (term != null) {
 
@@ -222,7 +236,7 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
           if (deState == null) {
             deState = new SolrIndexSearcher.DocsEnumState();
             deState.fieldName = sf.getName();
-            deState.liveDocs = fcontext.searcher.getSlowAtomicReader().getLiveDocs();
+            deState.liveDocs = fcontext.searcher.getLiveDocsBits();
             deState.termsEnum = termsEnum;
             deState.postingsEnum = postingsEnum;
             deState.minSetSizeCached = minDfFilterCache;
@@ -241,7 +255,7 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
             resetStats();
 
             if (!countOnly) {
-              collect(termSet, 0);
+              collect(termSet, 0, slotContext);
             }
 
         } else {
@@ -251,11 +265,7 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
 
           // lazy convert to fastForRandomSet
           if (fastForRandomSet == null) {
-            fastForRandomSet = docs;
-            if (docs instanceof SortedIntDocSet) {  // OFF-HEAP todo: also check for native version
-              SortedIntDocSet sset = (SortedIntDocSet) docs;
-              fastForRandomSet = new HashDocSet(sset.getDocs(), 0, sset.size());
-            }
+            fastForRandomSet = docs.getBits();
           }
           // iterate over TermDocs to calculate the intersection
           postingsEnum = termsEnum.postings(postingsEnum, PostingsEnum.NONE);
@@ -271,14 +281,14 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
 
               if (countOnly) {
                 while ((docid = sub.postingsEnum.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
-                  if (fastForRandomSet.exists(docid + base)) c++;
+                  if (fastForRandomSet.get(docid + base)) c++;
                 }
               } else {
                 setNextReader(leaves[sub.slice.readerIndex]);
                 while ((docid = sub.postingsEnum.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
-                  if (fastForRandomSet.exists(docid + base)) {
+                  if (fastForRandomSet.get(docid + base)) {
                     c++;
-                    collect(docid, 0);
+                    collect(docid, 0, slotContext);
                   }
                 }
               }
@@ -288,14 +298,14 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
             int docid;
             if (countOnly) {
               while ((docid = postingsEnum.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
-                if (fastForRandomSet.exists(docid)) c++;
+                if (fastForRandomSet.get(docid)) c++;
               }
             } else {
               setNextReader(leaves[0]);
               while ((docid = postingsEnum.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
-                if (fastForRandomSet.exists(docid)) {
+                if (fastForRandomSet.get(docid)) {
                   c++;
-                  collect(docid, 0);
+                  collect(docid, 0, slotContext);
                 }
               }
             }
@@ -316,6 +326,7 @@ class FacetFieldProcessorByEnumTermsStream extends FacetFieldProcessor implement
         }
 
         if (freq.limit >= 0 && ++bucketsReturned > freq.limit) {
+          shardHasMoreBuckets.set(true);
           return null;
         }
 

@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
  * The factory can be configured to return a specific HTTP response code, default is 403, and
  * optional response message, such as to warn the client application that its request was ignored.
  * </p>
+ * @since 5.0.0
  */
 public class IgnoreCommitOptimizeUpdateProcessorFactory extends UpdateRequestProcessorFactory {
   private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -48,8 +49,8 @@ public class IgnoreCommitOptimizeUpdateProcessorFactory extends UpdateRequestPro
   protected boolean ignoreOptimizeOnly = false; // default behavior is to ignore commits and optimize
 
   @Override
-  public void init(final NamedList args) {
-    SolrParams params = (args != null) ? SolrParams.toSolrParams(args) : null;
+  public void init(@SuppressWarnings({"rawtypes"})final NamedList args) {
+    SolrParams params = (args != null) ? args.toSolrParams() : null;
     if (params == null) {
       errorCode = ErrorCode.FORBIDDEN; // default is 403 error
       responseMsg = DEFAULT_RESPONSE_MSG;

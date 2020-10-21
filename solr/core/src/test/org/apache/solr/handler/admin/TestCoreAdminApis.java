@@ -35,14 +35,17 @@ import static org.mockito.Mockito.*;
 
 public class TestCoreAdminApis extends SolrTestCaseJ4 {
 
+  @SuppressWarnings({"unchecked"})
   public void testCalls() throws Exception {
     Map<String, Object[]> calls = new HashMap<>();
     CoreContainer mockCC = getCoreContainerMock(calls, new HashMap<>());
 
-    CoreAdminHandler  coreAdminHandler = new CoreAdminHandler(mockCC);
-    ApiBag apiBag = new ApiBag(false);
-    for (Api api : coreAdminHandler.getApis()) {
-      apiBag.register(api, Collections.EMPTY_MAP);
+    ApiBag apiBag;
+    try (CoreAdminHandler  coreAdminHandler = new CoreAdminHandler(mockCC)) {
+       apiBag = new ApiBag(false);
+       for (Api api : coreAdminHandler.getApis()) {
+         apiBag.register(api, Collections.EMPTY_MAP);
+       }
     }
     TestCollectionAPIs.makeCall(apiBag, "/cores", SolrRequest.METHOD.POST,
         "{create:{name: hello, instanceDir : someDir, schema: 'schema.xml'}}", mockCC);
@@ -58,7 +61,7 @@ public class TestCoreAdminApis extends SolrTestCaseJ4 {
 
     TestCollectionAPIs.makeCall(apiBag, "/cores/core1", SolrRequest.METHOD.POST,
         "{rename:{to: core2}}", mockCC);
-    params = calls.get("swap");
+    params = calls.get("rename");
     assertEquals("core1" ,params[0]);
     assertEquals("core2" ,params[1]);
 
@@ -69,7 +72,10 @@ public class TestCoreAdminApis extends SolrTestCaseJ4 {
     assertEquals(Boolean.TRUE ,params[1]);
   }
 
+  @SuppressWarnings({"unchecked"})
   public static CoreContainer getCoreContainerMock(final Map<String, Object[]> in,Map<String,Object> out ) {
+    assumeWorkingMockito();
+    
     CoreContainer mockCC = mock(CoreContainer.class);
     when(mockCC.create(any(String.class), any(Path.class) , any(Map.class), anyBoolean())).thenAnswer(invocationOnMock -> {
       in.put("create", invocationOnMock.getArguments());

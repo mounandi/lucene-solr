@@ -50,7 +50,8 @@ public class PersistenceTest extends LuceneTestCase {
   public void testTSTPersistence() throws Exception {
     runTest(TSTLookup.class, true);
   }
-  
+
+  @Deprecated
   public void testJaspellPersistence() throws Exception {
     runTest(JaspellLookup.class, true);
   }
@@ -73,7 +74,7 @@ public class PersistenceTest extends LuceneTestCase {
     } else if (lookupClass == FSTCompletionLookup.class) {
       lookup = new FSTCompletionLookup(tempDir, "suggest");
     } else {
-      lookup = lookupClass.newInstance();
+      lookup = lookupClass.getConstructor().newInstance();
     }
     Input[] keys = new Input[this.keys.length];
     for (int i = 0; i < keys.length; i++)
@@ -85,7 +86,7 @@ public class PersistenceTest extends LuceneTestCase {
     lookup.store(Files.newOutputStream(storeDir.resolve("lookup.dat")));
 
     // Re-read it from disk.
-    lookup = lookupClass.newInstance();
+    lookup = lookupClass.getConstructor().newInstance();
     lookup.load(Files.newInputStream(storeDir.resolve("lookup.dat")));
 
     // Assert validity.

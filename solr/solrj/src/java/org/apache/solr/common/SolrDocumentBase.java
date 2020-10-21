@@ -21,7 +21,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-public abstract class SolrDocumentBase<T, K> implements Map<String, T>, Serializable {
+public abstract class SolrDocumentBase<T, K> implements Map<String, T>, Serializable, MapWriter {
 
   /** Get all field names.
   */
@@ -48,16 +48,27 @@ public abstract class SolrDocumentBase<T, K> implements Map<String, T>, Serializ
   /**
    * Get a collection of values for a given field name
    */
+  @SuppressWarnings({"rawtypes"})
   public abstract Collection getFieldValues(String name);
 
   public abstract void addChildDocument(K child);
 
   public abstract void addChildDocuments(Collection<K> children);
 
+  /**
+   * Returns the list of <em>anonymous</em> child documents, or null if none.
+   * There may be other "labelled" child documents found in field values, in which the field name is the label.
+   * This may be deprecated in 8.0.
+   */
   public abstract List<K> getChildDocuments();
 
+  /** Has <em>anonymous</em> children? */
   public abstract boolean hasChildDocuments();
 
+  /**
+   * The <em>anonymous</em> child document count.
+   */
+  @Deprecated
   public abstract int getChildDocumentCount();
 
 }

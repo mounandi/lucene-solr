@@ -43,7 +43,7 @@ import org.slf4j.LoggerFactory;
 import static org.apache.solr.common.params.CommonParams.ID;
 
 public class SpellCheckCollator {
-  private static final Logger LOG = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+  private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
   private int maxCollations = 1;
   private int maxCollationTries = 0;
   private int maxCollationEvaluations = 10000;
@@ -73,7 +73,7 @@ public class SpellCheckCollator {
       verifyCandidateWithQuery = false;
     }
     if (queryComponent == null && verifyCandidateWithQuery) {
-      LOG.info("Could not find an instance of QueryComponent.  Disabling collation verification against the index.");
+      log.info("Could not find an instance of QueryComponent.  Disabling collation verification against the index.");
       maxTries = 1;
       verifyCandidateWithQuery = false;
     }
@@ -134,25 +134,15 @@ public class SpellCheckCollator {
         
         // Collate testing does not support the Collapse QParser (See SOLR-8807)
         params.remove("expand");
-        String[] filters = params.getParams(CommonParams.FQ);
-        if (filters != null) {
-          List<String> filtersToApply = new ArrayList<>(filters.length);
-          for (String fq : filters) {
-            if (!fq.startsWith("{!collapse")) {
-              filtersToApply.add(fq);
-            }
-          }
-          params.set("fq", filtersToApply.toArray(new String[filtersToApply.size()]));
-        }      
 
         // creating a request here... make sure to close it!
         ResponseBuilder checkResponse = new ResponseBuilder(
             new LocalSolrQueryRequest(ultimateResponse.req.getCore(), params),
-            new SolrQueryResponse(), Arrays.<SearchComponent> asList(queryComponent)); 
+            new SolrQueryResponse(), Arrays.asList(queryComponent));
         checkResponse.setQparser(ultimateResponse.getQparser());
         checkResponse.setFilters(ultimateResponse.getFilters());
         checkResponse.setQueryString(collationQueryStr);
-        checkResponse.components = Arrays.<SearchComponent>asList(queryComponent);
+        checkResponse.components = Arrays.asList(queryComponent);
 
         try {
           queryComponent.prepare(checkResponse);
@@ -174,7 +164,7 @@ public class SpellCheckCollator {
                            / (float)etce.getNumberScanned() );
           }
         } catch (Exception e) {
-          LOG.warn("Exception trying to re-query to check if a spell check possibility would return any hits.", e);
+          log.warn("Exception trying to re-query to check if a spell check possibility would return any hits.", e);
         } finally {
           checkResponse.req.close();  
         }
@@ -193,8 +183,8 @@ public class SpellCheckCollator {
         collation.setMisspellingsAndCorrections(misspellingsAndCorrections);
         collations.add(collation);
       }
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Collation: " + collationQueryStr + (verifyCandidateWithQuery ? (" will return " + hits + " hits.") : ""));
+      if (log.isDebugEnabled()) {
+        log.debug("Collation: {} {}", collationQueryStr, (verifyCandidateWithQuery ? (" will return " + hits + " hits.") : "")); // nowarn
       }
     }
     return collations;
@@ -221,8 +211,7 @@ public class SpellCheckCollator {
       
       //If the correction contains whitespace (because it involved breaking a word in 2+ words),
       //then be sure all of the new words have the same optional/required/prohibited status in the query.
-      while(indexOfSpace>-1 && indexOfSpace<corr.length()-1) {
-        addParenthesis = true;
+      while(indexOfSpace>-1 && indexOfSpace<corr.length()-1) {        
         char previousChar = tok.startOffset()>0 ? origQuery.charAt(tok.startOffset()-1) : ' ';
         if(previousChar=='-' || previousChar=='+') {
           corrSb.insert(indexOfSpace + bump, previousChar);
@@ -231,6 +220,7 @@ public class SpellCheckCollator {
           }
           bump++;
         } else if ((tok.getFlags() & QueryConverter.TERM_IN_BOOLEAN_QUERY_FLAG) == QueryConverter.TERM_IN_BOOLEAN_QUERY_FLAG) {
+          addParenthesis = true;
           corrSb.insert(indexOfSpace + bump, "AND ");
           bump += 4;
         }

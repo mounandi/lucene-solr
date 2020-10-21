@@ -25,6 +25,7 @@ import org.apache.solr.client.solrj.util.ClientUtils;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrInputDocument;
 import org.apache.solr.common.params.CommonParams;
+import org.apache.solr.common.util.TimeSource;
 import org.apache.solr.util.TimeOut;
 import org.junit.Test;
 
@@ -146,7 +147,7 @@ abstract public class SolrExampleTestsBase extends SolrJettyTestBase {
     Assert.assertEquals(1, rsp.getResults().getNumFound());
     
     // check if the doc has been deleted every 250 ms for 30 seconds
-    TimeOut timeout = new TimeOut(30, TimeUnit.SECONDS);
+    TimeOut timeout = new TimeOut(30, TimeUnit.SECONDS, TimeSource.NANO_TIME);
     do {
       Thread.sleep(250); // wait 250 ms
       
@@ -248,7 +249,7 @@ abstract public class SolrExampleTestsBase extends SolrJettyTestBase {
 
         // Make sure the transformer works for streaming
         Float score = (Float) doc.get("score");
-        assertEquals("should have score", new Float(1.0), score);
+        assertEquals("should have score", Float.valueOf(1.0f), score);
       }
 
     });

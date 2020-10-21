@@ -90,7 +90,18 @@ import org.apache.solr.util.SolrPluginUtils;
  */
 public class MultipleAdditiveTreesModel extends LTRScoringModel {
 
+  /**
+   * fname2index is filled from constructor arguments
+   * (that are already part of the base class hashCode)
+   * and therefore here it does not individually
+   * influence the class hashCode, equals, etc.
+   */
   private final HashMap<String,Integer> fname2index;
+  /**
+   * trees is part of the LTRScoringModel params map
+   * and therefore here it does not individually
+   * influence the class hashCode, equals, etc.
+   */
   private List<RegressionTree> trees;
 
   private RegressionTree createRegressionTree(Map<String,Object> map) {
@@ -144,10 +155,12 @@ public class MultipleAdditiveTreesModel extends LTRScoringModel {
       this.threshold = Float.parseFloat(threshold) + NODE_SPLIT_SLACK;
     }
 
+    @SuppressWarnings({"unchecked"})
     public void setLeft(Object left) {
       this.left = createRegressionTreeNode((Map<String,Object>) left);
     }
 
+    @SuppressWarnings({"unchecked"})
     public void setRight(Object right) {
       this.right = createRegressionTreeNode((Map<String,Object>) right);
     }
@@ -246,13 +259,14 @@ public class MultipleAdditiveTreesModel extends LTRScoringModel {
     private RegressionTreeNode root;
 
     public void setWeight(float weight) {
-      this.weight = new Float(weight);
+      this.weight = weight;
     }
 
     public void setWeight(String weight) {
-      this.weight = new Float(weight);
+      this.weight = Float.valueOf(weight);
     }
 
+    @SuppressWarnings({"unchecked"})
     public void setRoot(Object root) {
       this.root = createRegressionTreeNode((Map<String,Object>)root);
     }
@@ -289,6 +303,7 @@ public class MultipleAdditiveTreesModel extends LTRScoringModel {
     }
   }
 
+  @SuppressWarnings({"unchecked"})
   public void setTrees(Object trees) {
     this.trees = new ArrayList<RegressionTree>();
     for (final Object o : (List<Object>) trees) {
@@ -345,7 +360,7 @@ public class MultipleAdditiveTreesModel extends LTRScoringModel {
     final float[] fv = new float[featureExplanations.size()];
     int index = 0;
     for (final Explanation featureExplain : featureExplanations) {
-      fv[index] = featureExplain.getValue();
+      fv[index] = featureExplain.getValue().floatValue();
       index++;
     }
 

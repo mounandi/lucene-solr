@@ -16,7 +16,6 @@
  */
 package org.apache.lucene.codecs.blocktree;
 
-
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
@@ -34,6 +33,7 @@ import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 import org.apache.lucene.util.fst.ByteSequenceOutputs;
 import org.apache.lucene.util.fst.FST;
+import org.apache.lucene.util.fst.OffHeapFSTStore;
 
 /**
  * BlockTree's implementation of {@link Terms}.
@@ -52,56 +52,49 @@ public final class FieldReader extends Terms implements Accountable {
   final long sumTotalTermFreq;
   final long sumDocFreq;
   final int docCount;
-  final long indexStartFP;
   final long rootBlockFP;
   final BytesRef rootCode;
   final BytesRef minTerm;
   final BytesRef maxTerm;
-  final int longsSize;
   final BlockTreeTermsReader parent;
 
   final FST<BytesRef> index;
   //private boolean DEBUG;
 
   FieldReader(BlockTreeTermsReader parent, FieldInfo fieldInfo, long numTerms, BytesRef rootCode, long sumTotalTermFreq, long sumDocFreq, int docCount,
-              long indexStartFP, int longsSize, IndexInput indexIn, BytesRef minTerm, BytesRef maxTerm) throws IOException {
+              long indexStartFP, IndexInput metaIn, IndexInput indexIn, BytesRef minTerm, BytesRef maxTerm) throws IOException {
     assert numTerms > 0;
     this.fieldInfo = fieldInfo;
     //DEBUG = BlockTreeTermsReader.DEBUG && fieldInfo.name.equals("id");
     this.parent = parent;
     this.numTerms = numTerms;
-    this.sumTotalTermFreq = sumTotalTermFreq; 
-    this.sumDocFreq = sumDocFreq; 
+    this.sumTotalTermFreq = sumTotalTermFreq;
+    this.sumDocFreq = sumDocFreq;
     this.docCount = docCount;
-    this.indexStartFP = indexStartFP;
     this.rootCode = rootCode;
-    this.longsSize = longsSize;
     this.minTerm = minTerm;
     this.maxTerm = maxTerm;
     // if (DEBUG) {
     //   System.out.println("BTTR: seg=" + segment + " field=" + fieldInfo.name + " rootBlockCode=" + rootCode + " divisor=" + indexDivisor);
     // }
-
     rootBlockFP = (new ByteArrayDataInput(rootCode.bytes, rootCode.offset, rootCode.length)).readVLong() >>> BlockTreeTermsReader.OUTPUT_FLAGS_NUM_BITS;
-
-    if (indexIn != null) {
-      final IndexInput clone = indexIn.clone();
-      //System.out.println("start=" + indexStartFP + " field=" + fieldInfo.name);
-      clone.seek(indexStartFP);
-      index = new FST<>(clone, ByteSequenceOutputs.getSingleton());
-        
-      /*
-        if (false) {
-        final String dotFileName = segment + "_" + fieldInfo.name + ".dot";
-        Writer w = new OutputStreamWriter(new FileOutputStream(dotFileName));
-        Util.toDot(index, w, false, false);
-        System.out.println("FST INDEX: SAVED to " + dotFileName);
-        w.close();
-        }
-      */
+    // Initialize FST always off-heap.
+    final IndexInput clone = indexIn.clone();
+    clone.seek(indexStartFP);
+    if (metaIn == indexIn) { // Only true before Lucene 8.6
+      index = new FST<>(clone, clone, ByteSequenceOutputs.getSingleton(), new OffHeapFSTStore());
     } else {
-      index = null;
+      index = new FST<>(metaIn, clone, ByteSequenceOutputs.getSingleton(), new OffHeapFSTStore());
     }
+    /*
+      if (false) {
+      final String dotFileName = segment + "_" + fieldInfo.name + ".dot";
+      Writer w = new OutputStreamWriter(new FileOutputStream(dotFileName));
+      Util.toDot(index, w, false, false);
+      System.out.println("FST INDEX: SAVED to " + dotFileName);
+      w.close();
+      }
+     */
   }
 
   @Override
@@ -127,7 +120,6 @@ public final class FieldReader extends Terms implements Accountable {
   /** For debugging -- used by CheckIndex too*/
   @Override
   public Stats getStats() throws IOException {
-    // TODO: add auto-prefix terms into stats
     return new SegmentTermsEnum(this).computeBlockStats();
   }
 
@@ -185,7 +177,7 @@ public final class FieldReader extends Terms implements Accountable {
     if (compiled.type != CompiledAutomaton.AUTOMATON_TYPE.NORMAL) {
       throw new IllegalArgumentException("please use CompiledAutomaton.getTermsEnum instead");
     }
-    return new IntersectTermsEnum(this, compiled.automaton, compiled.runAutomaton, compiled.commonSuffixRef, startTerm, compiled.sinkState);
+    return new IntersectTermsEnum(this, compiled.automaton, compiled.runAutomaton, compiled.commonSuffixRef, startTerm);
   }
     
   @Override

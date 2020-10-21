@@ -45,6 +45,7 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.SELE
  *    &lt;str name="fieldRegex"&gt;.*_uniq&lt;/str&gt;
  *  &lt;/processor&gt;
  * </pre> 
+ * @since 3.4.0
  */
 public class UniqFieldsUpdateProcessorFactory extends FieldValueSubsetUpdateProcessorFactory {
 
@@ -54,8 +55,7 @@ public class UniqFieldsUpdateProcessorFactory extends FieldValueSubsetUpdateProc
   }
 
   @Override
-  @SuppressWarnings("unchecked")
-  public Collection pickSubset(Collection values) {
+  public Collection<Object> pickSubset(@SuppressWarnings({"rawtypes"})Collection values) {
     Set<Object> uniqs = new HashSet<>();
     List<Object> result = new ArrayList<>(values.size());
     for (Object o : values) {

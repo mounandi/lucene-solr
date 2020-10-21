@@ -20,6 +20,7 @@ import java.util.function.Consumer;
 import java.util.function.DoubleConsumer;
 
 import org.apache.solr.analytics.facet.compare.ExpressionComparator;
+import org.apache.solr.analytics.value.constant.ConstantDoubleValue;
 
 /**
  * A single-valued analytics value that can be represented as a date.
@@ -32,16 +33,16 @@ public interface DoubleValue extends DoubleValueStream, AnalyticsValue {
    * Get the double representation of the current value.
    * <p>
    * NOTE: The value returned is not valid unless calling {@link #exists()} afterwards returns {@code TRUE}.
-   * 
+   *
    * @return the current value
    */
   double getDouble();
 
   /**
-   * An interface that represents all of the types a {@link DoubleValue} should be able to cast to. 
+   * An interface that represents all of the types a {@link DoubleValue} should be able to cast to.
    */
   public static interface CastingDoubleValue extends DoubleValue, StringValue, ComparableValue {}
-  
+
 
   /**
    * An abstract base for {@link CastingDoubleValue} that automatically casts to all types if {@link #getDouble()} and {@link #exists()} are implemented.
@@ -77,6 +78,13 @@ public interface DoubleValue extends DoubleValueStream, AnalyticsValue {
       if (exists()) {
         cons.accept(val);
       }
+    }
+    @Override
+    public AnalyticsValue convertToConstant() {
+      if (getExpressionType().equals(ExpressionType.CONST)) {
+        return new ConstantDoubleValue(getDouble());
+      }
+      return this;
     }
     @Override
     public ExpressionComparator<Double> getObjectComparator(String expression) {

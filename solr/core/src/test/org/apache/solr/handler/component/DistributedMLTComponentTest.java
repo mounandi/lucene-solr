@@ -75,6 +75,7 @@ public class DistributedMLTComponentTest extends BaseDistributedSearchTestCase {
   
   @Test
   @ShardsFixed(num = 3)
+  @SuppressWarnings({"unchecked"})
   public void test() throws Exception {
     del("*:*");
     index(id, "1", "lowerfilt", "toyota", "lowerfilt1", "x");

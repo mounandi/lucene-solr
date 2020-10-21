@@ -48,6 +48,7 @@ import static org.apache.solr.update.processor.FieldMutatingUpdateProcessor.SELE
  * </pre>
  *
  * @see FirstFieldValueUpdateProcessorFactory
+ * @since 4.0.0
  */
 public final class LastFieldValueUpdateProcessorFactory extends FieldValueSubsetUpdateProcessorFactory {
 
@@ -58,6 +59,7 @@ public final class LastFieldValueUpdateProcessorFactory extends FieldValueSubset
 
     if (values instanceof List) {
       // optimize index lookup
+      @SuppressWarnings({"rawtypes"})
       List l = (List)values;
       result = l.get(l.size()-1);
     } else if (values instanceof SortedSet) {

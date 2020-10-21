@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 package org.apache.solr.search.function;
-import org.apache.solr.util.AbstractSolrTestCase;
+import org.apache.solr.SolrTestCaseJ4;
 import org.junit.BeforeClass;
 
 
@@ -23,7 +23,7 @@ import org.junit.BeforeClass;
  *
  * @see TestSortByMinMaxFunction
  **/
-public class SortByFunctionTest extends AbstractSolrTestCase {
+public class SortByFunctionTest extends SolrTestCaseJ4 {
 
   
   @BeforeClass
@@ -159,14 +159,14 @@ public class SortByFunctionTest extends AbstractSolrTestCase {
     // then we lose precision in sorting; so lets sanity check that our JVM isn't doing something wacky
     // in converstion that violates the principle of the test
     
-    assertEquals("WTF? small longs cast to double aren't equivilent?",
+    assertEquals("WTF? small longs cast to double aren't equivalent?",
                  (double)A, (double)B, 0.0D);
-    assertEquals("WTF? small longs cast to double aren't equivilent?",
+    assertEquals("WTF? small longs cast to double aren't equivalent?",
                  (double)A, (double)C, 0.0D);
     
-    assertEquals("WTF? big longs cast to double aren't equivilent?",
+    assertEquals("WTF? big longs cast to double aren't equivalent?",
                  (double)Z, (double)Y, 0.0D);
-    assertEquals("WTF? big longs cast to double aren't equivilent?",
+    assertEquals("WTF? big longs cast to double aren't equivalent?",
                  (double)Z, (double)X, 0.0D);
     
     int docId = 0;

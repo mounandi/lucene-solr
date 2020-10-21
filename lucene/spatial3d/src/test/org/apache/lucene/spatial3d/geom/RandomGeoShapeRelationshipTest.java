@@ -17,14 +17,12 @@
 
 package org.apache.lucene.spatial3d.geom;
 
-import com.carrotsearch.randomizedtesting.annotations.Repeat;
 import org.junit.Test;
 
 /**
  * Random test to check relationship between GeoAreaShapes and GeoShapes.
  */
-public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
-
+public class RandomGeoShapeRelationshipTest extends RandomGeo3dShapeGenerator {
 
   /**
    * Test for WITHIN points. We build a WITHIN shape with respect the geoAreaShape
@@ -33,11 +31,13 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
    *
    */
   @Test
-  @Repeat(iterations = 5)
   public void testRandomPointWithin() {
     int referenceShapeType = CONVEX_POLYGON;
     PlanetModel planetModel = randomPlanetModel();
     int shapeType = randomShapeType();
+    while (shapeType == POINT || shapeType == LINE) {
+      shapeType = randomShapeType();
+    }
     GeoAreaShape shape = null;
     GeoPoint point = null;
     while (point == null) {
@@ -51,7 +51,10 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
         point = randomGeoPoint(planetModel, constraints);
       }
     }
-    assertTrue(shape.isWithin(point));
+    StringBuilder b = new StringBuilder();
+    b.append("shape: " + shape + "\n");
+    b.append("point: " + point);
+    assertTrue(b.toString(), shape.isWithin(point));
   }
 
   /**
@@ -60,7 +63,6 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
    * the original shape.
    *
    */
-  @Repeat(iterations = 5)
   public void testRandomPointNotWithin() {
     int referenceShapeType = CONVEX_POLYGON;
     PlanetModel planetModel = randomPlanetModel();
@@ -78,7 +80,10 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
         point = randomGeoPoint(planetModel, constraints);
       }
     }
-    assertFalse(shape.isWithin(point));
+    StringBuilder b = new StringBuilder();
+    b.append("shape: " + shape + "\n");
+    b.append("point: " + point);
+    assertFalse(b.toString(), shape.isWithin(point));
   }
 
   /**
@@ -89,12 +94,11 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
    * Note that both shapes cannot be concave.
    */
   @Test
-  @Repeat(iterations = 5)
   public void testRandomDisjoint() {
     int referenceShapeType = CONVEX_SIMPLE_POLYGON;
     PlanetModel planetModel = randomPlanetModel();
     int geoAreaShapeType = randomGeoAreaShapeType();
-    int shapeType =randomConvexShapeType();
+    int shapeType = randomConvexShapeType();
 
     GeoShape shape = null;
     GeoAreaShape geoAreaShape = null;
@@ -109,11 +113,14 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
         shape = randomGeoShape(shapeType, planetModel, constraints);
       }
     }
+    StringBuilder b = new StringBuilder();
+    b.append("geoAreaShape: " + geoAreaShape + "\n");
+    b.append("shape: " + shape);
     int rel = geoAreaShape.getRelationship(shape);
-    assertEquals(GeoArea.DISJOINT, rel);
+    assertEquals(b.toString(), GeoArea.DISJOINT, rel);
     if (shape instanceof GeoArea) {
       rel = ((GeoArea)shape).getRelationship(geoAreaShape);
-      assertEquals(GeoArea.DISJOINT, rel);
+      assertEquals(b.toString(), GeoArea.DISJOINT, rel);
     }
   }
 
@@ -125,11 +132,14 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
    * Note that if the geoAreaShape is not concave the other shape must be not concave.
    */
   @Test
-  @Repeat(iterations = 5)
   public void testRandomWithIn() {
     PlanetModel planetModel = randomPlanetModel();
     int geoAreaShapeType = randomGeoAreaShapeType();
-    int shapeType =randomShapeType();
+    //shapes cannot be point or line -- no area!
+    while(geoAreaShapeType == POINT || geoAreaShapeType == LINE) {
+      geoAreaShapeType = randomGeoAreaShapeType();
+    }
+    int shapeType = LINE;//randomShapeType();
     int referenceShapeType = CONVEX_SIMPLE_POLYGON;
     if (!isConcave(geoAreaShapeType)){
       shapeType =randomConvexShapeType();
@@ -150,11 +160,14 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
         shape = randomGeoShape(shapeType, planetModel, constraints);
       }
     }
+    StringBuilder b = new StringBuilder();
+    b.append("geoAreaShape: " + geoAreaShape + "\n");
+    b.append("shape: " + shape);
     int rel = geoAreaShape.getRelationship(shape);
-    assertEquals(GeoArea.WITHIN, rel);
+    assertEquals(b.toString(), GeoArea.WITHIN, rel);
     if (shape instanceof GeoArea) {
       rel = ((GeoArea)shape).getRelationship(geoAreaShape);
-      assertEquals(GeoArea.CONTAINS, rel);
+      assertEquals(b.toString(), GeoArea.CONTAINS, rel);
     }
   }
 
@@ -168,16 +181,19 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
    * If shape is concave, the shape for reference should be concave as well.
    *
    */
-  @Test
-  @Repeat(iterations = 1)
+  // TODO: this test seems to hit pathological cases that cause it to run for many minutes?!
+  @Test @Nightly
   public void testRandomContains() {
     int referenceShapeType = CONVEX_SIMPLE_POLYGON;
     PlanetModel planetModel = randomPlanetModel();
     int geoAreaShapeType = randomGeoAreaShapeType();
-    while (geoAreaShapeType == COLLECTION){
+    while (geoAreaShapeType == COLLECTION ){
       geoAreaShapeType = randomGeoAreaShapeType();
     }
     int shapeType = randomShapeType();
+    while (shapeType == POINT || shapeType == LINE) {
+      shapeType = randomShapeType();
+    }
     if (isConcave(geoAreaShapeType)){
       shapeType = randomConcaveShapeType();
     }
@@ -197,11 +213,14 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
         shape = randomGeoShape(shapeType, planetModel, constraints);
       }
     }
+    StringBuilder b = new StringBuilder();
+    b.append("geoAreaShape: " + geoAreaShape + "\n");
+    b.append("shape: " + shape);
     int rel = geoAreaShape.getRelationship(shape);
-    assertEquals(GeoArea.CONTAINS, rel);
+    assertEquals(b.toString(), GeoArea.CONTAINS, rel);
     if (shape instanceof GeoArea) {
       rel = ((GeoArea)shape).getRelationship(geoAreaShape);
-      assertEquals(GeoArea.WITHIN, rel);
+      assertEquals(b.toString(), GeoArea.WITHIN, rel);
     }
   }
 
@@ -212,12 +231,16 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
    * the geoAreaShape.
    */
   @Test
-  @Repeat(iterations = 5)
   public void testRandomOverlaps() {
     PlanetModel planetModel = randomPlanetModel();
     int geoAreaShapeType = randomGeoAreaShapeType();
+    while (geoAreaShapeType == POINT || geoAreaShapeType == LINE) {
+      geoAreaShapeType = randomGeoAreaShapeType();
+    }
     int shapeType = randomShapeType();
-
+    while (shapeType == POINT || shapeType == LINE) {
+      shapeType = randomShapeType();
+    }
     GeoShape shape = null;
     GeoAreaShape geoAreaShape = null;
     while (shape == null) {
@@ -246,12 +269,14 @@ public class RandomGeoShapeRelationshipTest extends RandomGeoShapeGenerator {
         shape = randomGeoShape(shapeType, planetModel, constraints);
       }
     }
+    StringBuilder b = new StringBuilder();
+    b.append("geoAreaShape: " + geoAreaShape + "\n");
+    b.append("shape: " + shape);
     int rel = geoAreaShape.getRelationship(shape);
-    assertEquals(GeoArea.OVERLAPS, rel);
+    assertEquals(b.toString(), GeoArea.OVERLAPS, rel);
     if (shape instanceof GeoArea) {
       rel = ((GeoArea)shape).getRelationship(geoAreaShape);
-      assertEquals(GeoArea.OVERLAPS, rel);
+      assertEquals(b.toString(), GeoArea.OVERLAPS, rel);
     }
   }
 }
-
